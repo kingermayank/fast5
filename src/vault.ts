@@ -126,6 +126,16 @@ export class Cable {
     );
   }
 
+  /** Pay out cable to `length` (the winch reels it back in over the next second or so). */
+  payOut(length: number): void {
+    if (length <= this.length) return;
+    this.length = length;
+    this.world.removeImpulseJoint(this.joint, true);
+    this.joint = this.createJoint();
+    // Hold the slack long enough for the swing to play out.
+    this.reelTimer = 1.6;
+  }
+
   /** Winch toward `target` length, never longer than the current distance allows. */
   reel(target: number, dt: number): void {
     this.reelTimer -= dt;

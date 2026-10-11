@@ -33,6 +33,13 @@ export const ROUTE: THREE.Vector3[] = [
   [200, 300], [100, 300], [100, 500], [300, 500], [300, 600], [400, 600], [400, 700], [400, SEAWALL_Z + 150], [400, SWAP_ZONE_Z],
 ].map(([x, z]) => new THREE.Vector3(x, 0, z));
 
+/**
+ * The bank on the corner where Mia's route turns east at (100, 500): a glass
+ * lobby facing both streets, on the outside of the turn, so a wide vault swing
+ * goes straight through it.
+ */
+export const BANK = { x0: 116, x1: 160, z0: 516, z1: 556, lobbyH: 6, h: 28 };
+
 export interface Prop {
   body: RAPIER.RigidBody;
   mesh: THREE.Object3D;
@@ -59,6 +66,8 @@ export class City {
   readonly props: Prop[] = [];
   /** Intersections, for spawning police. */
   readonly intersections: THREE.Vector3[] = [];
+  /** The bank's glass panes, which shatter when hit. */
+  readonly bankGlass: Prop[] = [];
   private rand = mulberry32(5);
   private facadeSets = (['residential', 'office', 'colonial'] as FacadeStyle[]).map((style, i) => facadeTextures(style, 101 + i * 37));
   private facadeMats = FACADE_COLORS.map((c, i) => {
@@ -251,6 +260,11 @@ export class City {
         slab.receiveShadow = true;
         this.group.add(slab);
         if (bi === 1 && bj === 1) continue; // police HQ, built separately
+        if (bi === 1 && bj === 5) {
+          this.buildBank();
+          this.propsAroundBlock(x0, z0, inner, false, true);
+          continue;
+        }
         this.buildingsOnBlock(x0 + SIDEWALK, z0 + SIDEWALK, inner - SIDEWALK * 2);
         if (!outer) this.propsAroundBlock(x0, z0, inner);
       }
@@ -309,7 +323,7 @@ export class City {
   }
 
   /** Palms, light posts, bus kiosks and parked cars along each block's curbs. */
-  private propsAroundBlock(x0: number, z0: number, inner: number, isStation = false): void {
+  private propsAroundBlock(x0: number, z0: number, inner: number, isStation = false, isBank = false): void {
     const r = this.rand;
     const edge = 1.2; // from curb
     const sides: { along: 'x' | 'z'; fixed: number; out: number }[] = [
@@ -321,6 +335,8 @@ export class City {
     for (const s of sides) {
       // Keep the vault's exit path in front of the police HQ clear.
       if (isStation && !(s.along === 'z' && s.out === 1)) continue;
+      // Leave the bank's glass faces (south and west) open to the street.
+      if (isBank && s.out === -1) continue;
       const start = s.along === 'x' ? x0 : z0;
       for (let t = 10; t < inner - 6; t += 16) {
         const along = start + t + r() * 4;
@@ -434,6 +450,74 @@ export class City {
       g.add(w);
     }
     this.addProp(g, pos.clone().setY(0.78), RAPIER.ColliderDesc.cuboid(0.9, 0.75, 2.1).setMass(1300).setFriction(0.8), 15000, heading);
+  }
+
+  /** Remove a prop from the world (shattered glass). */
+  removeProp(p: Prop): void {
+    this.world.removeRigidBody(p.body);
+    p.mesh.removeFromParent();
+    const i = this.props.indexOf(p);
+    if (i >= 0) this.props.splice(i, 1);
+  }
+
+  private buildBank(): void {
+    const B = BANK;
+    const stone = new THREE.MeshStandardMaterial({ color: 0xcfc6b4, roughness: 0.7 });
+    const facade = this.facadeSets[1];
+    const upper = new THREE.MeshStandardMaterial({ map: facade.map, emissiveMap: facade.emissive, emissive: 0xffffff, emissiveIntensity: 1.2, color: 0xd6dde6, roughness: 0.4, metalness: 0.3 });
+    const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, mat?: THREE.Material) =>
+      this.fixedBox((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, (x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2, mat);
+
+    // Upper floors sit on the lobby; the lobby itself is open behind the glass.
+    box(B.x0, B.x1, B.lobbyH, B.h, B.z0, B.z1, upper);
+    box(B.x0 - 0.3, B.x1 + 0.3, B.lobbyH - 0.4, B.lobbyH + 0.6, B.z0 - 0.3, B.z1 + 0.3, stone);
+    // Back walls.
+    box(B.x1 - 0.5, B.x1, 0, B.lobbyH, B.z0, B.z1, stone);
+    box(B.x0, B.x1, 0, B.lobbyH, B.z1 - 0.5, B.z1, stone);
+    // Rest of the block.
+    this.fixedBox(173, 16, 550, 11, 16, 34, this.facadeMats[2]);
+    this.decorateBuilding(173, 550, 22, 68, 32);
+    this.fixedBox(138, 12, 571, 22, 12, 13, this.facadeMats[4]);
+
+    // Lobby floor and lights.
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(B.x1 - B.x0, B.z1 - B.z0), new THREE.MeshStandardMaterial({ color: 0xe8e0d0, roughness: 0.25, metalness: 0.1 }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set((B.x0 + B.x1) / 2, 0.22, (B.z0 + B.z1) / 2);
+    floor.receiveShadow = true;
+    this.group.add(floor);
+    const lamp = new THREE.PointLight(0xffe2b0, 30, 30, 2);
+    lamp.position.set((B.x0 + B.x1) / 2, B.lobbyH - 0.8, (B.z0 + B.z1) / 2);
+    this.group.add(lamp);
+
+    // Gold sign over the corner.
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(18, 2.6), new THREE.MeshBasicMaterial({ map: signTexture('BANCO DO RIO', '#1b1b1b', '#e8c25a') }));
+    sign.position.set((B.x0 + B.x1) / 2, B.lobbyH + 1.6, B.z0 - 0.35);
+    sign.rotation.y = Math.PI;
+    this.group.add(sign);
+
+    // Glass panes along the two street faces.
+    const glassMat = new THREE.MeshPhysicalMaterial({ color: 0x9fc8e0, metalness: 0.1, roughness: 0.05, transparent: true, opacity: 0.35, clearcoat: 1 });
+    const paneH = B.lobbyH - 0.5;
+    const pane = (x: number, z: number, alongX: boolean) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(alongX ? 2.4 : 0.12, paneH, alongX ? 0.12 : 2.4), glassMat);
+      this.addProp(mesh, new THREE.Vector3(x, paneH / 2 + 0.22, z), RAPIER.ColliderDesc.cuboid(alongX ? 1.2 : 0.06, paneH / 2, alongX ? 0.06 : 1.2).setMass(90), 12000);
+      this.bankGlass.push(this.props[this.props.length - 1]);
+    };
+    for (let z = B.z0 + 1.3; z < B.z1 - 1; z += 2.5) pane(B.x0 + 0.2, z, false);
+    for (let x = B.x0 + 1.3; x < B.x1 - 1; x += 2.5) pane(x, B.z0 + 0.2, true);
+
+    // Stone columns behind the glass, and teller counters.
+    const colGeo = new THREE.CylinderGeometry(0.35, 0.35, B.lobbyH - 0.6, 12);
+    for (let z = B.z0 + 6; z < B.z1 - 3; z += 8) {
+      this.addProp(new THREE.Mesh(colGeo, stone), new THREE.Vector3(B.x0 + 2, (B.lobbyH - 0.6) / 2 + 0.22, z), RAPIER.ColliderDesc.cylinder((B.lobbyH - 0.6) / 2, 0.35).setMass(500), 8000);
+    }
+    for (let x = B.x0 + 6; x < B.x1 - 3; x += 8) {
+      this.addProp(new THREE.Mesh(colGeo, stone), new THREE.Vector3(x, (B.lobbyH - 0.6) / 2 + 0.22, B.z0 + 2), RAPIER.ColliderDesc.cylinder((B.lobbyH - 0.6) / 2, 0.35).setMass(500), 8000);
+    }
+    const wood = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.5 });
+    for (let x = B.x0 + 10; x < B.x1 - 6; x += 7) {
+      this.addProp(new THREE.Mesh(new THREE.BoxGeometry(5, 1.2, 1), wood), new THREE.Vector3(x, 0.82, B.z1 - 8), RAPIER.ColliderDesc.cuboid(2.5, 0.6, 0.5).setMass(300), 6000);
+    }
   }
 
   private buildStation(): void {

@@ -15,10 +15,12 @@ import {
   VAULT_START_HEADING,
 } from './city';
 import { Cutscene } from './cutscene';
+import { Director } from './director';
 import { Effects } from './fx';
 import { createGraphics } from './graphics';
 import { Hud } from './hud';
 import { Input, type ControlState } from './input';
+import { BankJob, type MomentContext, SpikeStrip, ThePull } from './moments';
 import { type Obstacle, PartnerDriver } from './partner';
 import { exits, lanePath, leftOf, nextIntersection, roadHalfWidth, routeExit, snapDir, streetCenter } from './roads';
 import { FIXED_DT, initPhysics } from './physics';
@@ -73,9 +75,12 @@ async function start(): Promise<void> {
   const input = new Input();
   const hud = new Hud(ROUTE);
   const police = new Police(world, scene, city);
+  const director = new Director();
   police.onWreck = (at) => {
     fx.burst(at.clone().setY(1), 1);
     sound.crash(1);
+    nos = Math.min(1, nos + 0.15);
+    style += 100;
   };
 
   let state: State = 'select';
@@ -88,12 +93,49 @@ async function start(): Promise<void> {
   let stateTime = 0;
   let chaseTime = 0;
   let damage = 0;
+  /** Street damage only (props), which drives heat; set-piece damage counts for score, not heat. */
+  let streetDamage = 0;
   let heat = 0;
   let busted = 0;
   let waypoint = 0;
   let accumulator = 0;
   let lastCalloutWaypoint = -1;
   let lastPlayerSpeed = 0;
+  /** Nitrous meter 0..1 and style score. */
+  let nos = 0.5;
+  let style = 0;
+  let nosWasOn = false;
+  let pull: ThePull | null = null;
+  let spikes: SpikeStrip | null = null;
+  let bankJob: BankJob | null = null;
+
+  function createMoments(): void {
+    const ctx: MomentContext = {
+      world,
+      scene,
+      city,
+      fx,
+      sound,
+      hud,
+      voice,
+      director,
+      player,
+      partner,
+      vault,
+      cables,
+      waypoint: () => waypoint,
+      reward: (points, refill) => {
+        style += points;
+        nos = Math.min(1, nos + refill);
+      },
+      addDamage: (amount) => {
+        damage += amount;
+      },
+    };
+    pull = new ThePull(ctx);
+    spikes = new SpikeStrip(ctx);
+    bankJob = new BankJob(ctx);
+  }
 
   function setupCrew(id: CharacterId): void {
     character = id;
@@ -196,7 +238,10 @@ async function start(): Promise<void> {
         autoPlan = { corner, exit: exit ?? null };
       }
     }
-    const lane = CHARACTERS[character].side * 3;
+    // Follow the hints like a player would: aim for the spike-strip gap, handbrake at the bank.
+    const gap = spikes?.gapX() ?? null;
+    const lane = gap !== null && d.z > 0.9 ? gap - streetCenter(p, d).x : CHARACTERS[character].side * 3;
+    const bankSwing = autopilot === 'route' && p.distanceTo(new THREE.Vector3(100, 0, 500)) < 20;
     const path = lanePath(p, d, lane, autoPlan?.corner ?? null, autoPlan?.exit ?? null);
     const s0 = path.project(p);
     const speed = player.forwardSpeed;
@@ -209,7 +254,7 @@ async function start(): Promise<void> {
       throttle: THREE.MathUtils.clamp(err * 0.3, 0, 1),
       brake: err < -2 ? THREE.MathUtils.clamp(-err * 0.15, 0, 1) : 0,
       steer: THREE.MathUtils.clamp(angleTo(player, target) * 2.4, -1, 1),
-      handbrake: false,
+      handbrake: bankSwing,
     };
   }
   let playerStuck = 0;
@@ -241,6 +286,7 @@ async function start(): Promise<void> {
     // Everything is "soft": the partner steers around it when there's a free lane but never
     // brakes for it. It's chained to the vault, and the Chargers plow through in the film.
     for (const c of police.cops) list.push({ pos: c.v.position, radius: 2.6, soft: true });
+    if (spikes) list.push(...spikes.obstacles());
     const near = partner.position;
     for (const prop of city.props) {
       if (prop.value < 1500) continue; // bricks: drive through
@@ -273,6 +319,10 @@ async function start(): Promise<void> {
     } else {
       partner.controls = hold;
     }
+    const nosOn = driving && !!player.controls.nos && nos > 0.02;
+    player.nosActive = nosOn;
+    if (nosOn) nos = Math.max(0, nos - dt * 0.3);
+    else if (driving) nos = Math.min(1, nos + dt * 0.012);
     player.step(dt);
     partner.step(dt);
 
@@ -295,6 +345,7 @@ async function start(): Promise<void> {
     breach.shooting = true;
     hud.showHud(true);
     hud.radio('MIA', 'Floor it! Pull that vault out of there!');
+    pull?.start();
   }
 
   function updateGame(dt: number): void {
@@ -302,6 +353,12 @@ async function start(): Promise<void> {
     if (state === 'cutscene') {
       if (input.wasPressed('Enter') || input.wasPressed('Escape')) cutscene?.skip();
       return;
+    }
+
+    if (state === 'breach') pull?.update(dt);
+    if (state === 'chase') {
+      spikes?.update(dt);
+      bankJob?.update(dt);
     }
 
     if (state === 'breach' && vault.position.x > STATION_FACADE_X + 3) {
@@ -333,7 +390,8 @@ async function start(): Promise<void> {
       const newDamage = city.collectDamage();
       if (newDamage > 0) sound.crash(Math.min(1, newDamage / 15000) * 0.6);
       damage += newDamage;
-      heat = Math.min(5, 1 + Math.floor(chaseTime / 50) + Math.floor(damage / 300000) + Math.floor(police.wreckedCount / 10));
+      streetDamage += newDamage;
+      heat = Math.min(5, 1 + Math.floor(chaseTime / 50) + Math.floor(streetDamage / 300000) + Math.floor(police.wreckedCount / 10));
 
       const wp = ROUTE[waypoint];
       if (player.position.distanceTo(wp) < 30 && waypoint < ROUTE.length - 1) waypoint++;
@@ -343,7 +401,7 @@ async function start(): Promise<void> {
       busted = THREE.MathUtils.clamp(busted + (pinned ? dt / 3.5 : -dt / 2), 0, 1);
       if (busted >= 1) {
         enter('busted');
-        hud.showOverlay('BUSTED', `They boxed you in.\nCops wrecked: ${police.wreckedCount}   Damage: ${Hud.money(damage)}`, 'Press Enter to try again');
+        hud.showOverlay('BUSTED', `They boxed you in.\nCops wrecked: ${police.wreckedCount}   Damage: ${Hud.money(damage)}   Style: ${style.toLocaleString('en-US')}`, 'Press Enter to try again');
       }
 
       if (player.position.z > SWAP_ZONE_Z) {
@@ -357,7 +415,7 @@ async function start(): Promise<void> {
         'THE SWAP',
         'While every cop in Rio chased that vault, Roman and Han swapped it for an empty decoy.\n' +
           'Reyes’s money was already gone.\n\n' +
-          `Time ${Hud.time(chaseTime)}   Cops wrecked ${police.wreckedCount}   Property damage ${Hud.money(damage)}`,
+          `Time ${Hud.time(chaseTime)}   Cops wrecked ${police.wreckedCount}   Property damage ${Hud.money(damage)}   Style ${style.toLocaleString('en-US')}`,
         'Press Enter to play again',
       );
     }
@@ -410,7 +468,29 @@ async function start(): Promise<void> {
       }
       if (Math.random() < dt * 2) fx.puff(base.clone().setY(0), 1);
     }
-    if (player && (state === 'breach' || state === 'chase')) {
+    if (player && (state === 'breach' || state === 'chase' || state === 'outro')) {
+      let playerSlip = 0;
+      for (const [k, car] of [player, partner].entries()) {
+        const speed = Math.abs(car.forwardSpeed);
+        const slide = THREE.MathUtils.clamp((Math.abs(car.lateralSpeed) - 3) / 6, 0, 1);
+        const handbrake = car.controls.handbrake && speed > 6 ? 0.7 : 0;
+        const slip = Math.max(slide, handbrake, car.wheelspin * 0.9);
+        if (k === 0) playerSlip = slip;
+        car.rearWheels().forEach((w, i) => {
+          if (slip > 0.15) {
+            fx.tireSmoke(w, slip, new THREE.Vector3(car.body.linvel().x, 0, car.body.linvel().z));
+            if (speed > 2) fx.skids.mark(`${k}-${i}`, w);
+          } else {
+            fx.skids.mark(`${k}-${i}`, null);
+          }
+          // Blown tire: the rim grinds on the asphalt.
+          if (car.tireBlown > 0 && speed > 3 && i === 0 && Math.random() < 0.6) fx.scrape(w.setY(0.1), new THREE.Vector3(car.body.linvel().x, 0, car.body.linvel().z), 0.6);
+        });
+      }
+      if (player.nosActive) for (const e of player.exhausts()) fx.nosFlame(e, player.forward.negate());
+      if (player.nosActive && !nosWasOn) sound.whoosh();
+      nosWasOn = player.nosActive;
+      sound.tires(playerSlip, player.nosActive);
       const s = Math.abs(player.forwardSpeed);
       if (lastPlayerSpeed - s > 7) {
         sound.crash(Math.min(1, (lastPlayerSpeed - s) / 20));
@@ -438,7 +518,7 @@ async function start(): Promise<void> {
     let look: THREE.Vector3;
     let fov = 62;
     let k = 1 - Math.exp(-5 * dt);
-    const shot = state === 'cutscene' ? cutscene?.update(dt) : null;
+    const shot = state === 'cutscene' ? cutscene?.update(dt) : director.frame();
     if (shot) {
       pos = shot.pos;
       look = shot.look;
@@ -459,7 +539,8 @@ async function start(): Promise<void> {
       const speed = Math.min(1, Math.abs(player.forwardSpeed) / 60);
       pos = player.position.addScaledVector(f, -14 - speed * 3).setY(6 + speed);
       look = player.position.addScaledVector(f, 7).setY(1.5);
-      fov = 62 + speed * 14;
+      fov = 62 + speed * 14 + (player.nosActive ? 10 : 0);
+      pos.add(director.shakeOffset());
       // A little high-speed rumble.
       if (speed > 0.5) pos.add(new THREE.Vector3((Math.random() - 0.5) * speed * 0.08, (Math.random() - 0.5) * speed * 0.08, 0));
     } else {
@@ -487,6 +568,7 @@ async function start(): Promise<void> {
   function begin(id: CharacterId, skipIntro: boolean): void {
     hud.hideSelect();
     setupCrew(id);
+    createMoments();
     const me = CHARACTERS[id];
     const cast = {
       left: me.side === 1 ? player : partner,
@@ -554,6 +636,14 @@ async function start(): Promise<void> {
     wrecked: police.wreckedCount,
     damage,
     busted: +busted.toFixed(2),
+    strain: pull ? +pull.strain.toFixed(2) : 0,
+    hb: player?.controls.handbrake ?? false,
+    vaultSpeed: +Math.hypot(vault.body.linvel().x, vault.body.linvel().z).toFixed(1),
+    pulled: pull?.done ?? false,
+    style,
+    nos: +nos.toFixed(2),
+    timeScale: +director.timeScale.toFixed(2),
+    blown: [player?.tireBlown ?? 0, partner?.tireBlown ?? 0].map((x) => +x.toFixed(1)),
     fps: Math.round(fps),
   });
 
@@ -563,16 +653,26 @@ async function start(): Promise<void> {
     timer.update(time);
     const rawDt = timer.getDelta();
     fps = fps * 0.95 + (rawDt > 0 ? 1 / rawDt : 60) * 0.05;
-    const dt = Math.min(rawDt, 0.1) * timescale;
+    const realDt = Math.min(rawDt, 0.1) * timescale;
+    director.update(realDt);
+    const dt = realDt * director.timeScale;
     breach.update(dt);
     if (state === 'select') {
       hud.selectInput(input);
       sound.quiet();
     } else {
-      accumulator += dt;
-      while (accumulator >= FIXED_DT) {
-        physicsStep(FIXED_DT);
-        accumulator -= FIXED_DT;
+      if (director.timeScale < 0.99) {
+        // Slow motion: one smaller step per frame keeps motion smooth.
+        world.timestep = Math.max(dt, 1 / 1000);
+        physicsStep(world.timestep);
+        accumulator = 0;
+      } else {
+        world.timestep = FIXED_DT;
+        accumulator += dt;
+        while (accumulator >= FIXED_DT) {
+          physicsStep(FIXED_DT);
+          accumulator -= FIXED_DT;
+        }
       }
       updateGame(dt);
       player.render(dt);
@@ -599,6 +699,8 @@ async function start(): Promise<void> {
     if (player && state !== 'cutscene') {
       hud.update(dt, {
         speedKmh: Math.abs(player.forwardSpeed) * 3.6,
+        nos,
+        style,
         heat,
         busted,
         damage,

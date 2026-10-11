@@ -4,6 +4,8 @@ export interface ControlState {
   /** -1 (right) .. 1 (left) */
   steer: number;
   handbrake: boolean;
+  /** Nitrous (player only; AI leaves it unset). */
+  nos?: boolean;
 }
 
 export class Input {
@@ -42,6 +44,7 @@ export class Input {
       brake: this.any('KeyS', 'ArrowDown') ? 1 : 0,
       steer,
       handbrake: this.any('Space'),
+      nos: this.any('ShiftLeft', 'ShiftRight', 'KeyN'),
     };
   }
 }

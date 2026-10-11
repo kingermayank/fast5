@@ -10,6 +10,8 @@ export class Sound {
   private engine?: { osc: OscillatorNode[]; gain: GainNode; filter: BiquadFilterNode };
   private siren?: { osc: OscillatorNode; lfo: OscillatorNode; gain: GainNode };
   private scrape?: { gain: GainNode; filter: BiquadFilterNode };
+  private screech?: { gain: GainNode; filter: BiquadFilterNode };
+  private nosHiss?: GainNode;
 
   constructor() {
     const unlock = () => this.start();
@@ -95,6 +97,33 @@ export class Sound {
     src.connect(bf).connect(scg).connect(this.master);
     src.start();
     this.scrape = { gain: scg, filter: bf };
+
+    // Tire screech: narrow band-passed noise around 1 kHz, wobbling.
+    const tsrc = ctx.createBufferSource();
+    tsrc.buffer = this.noise;
+    tsrc.loop = true;
+    const tf = ctx.createBiquadFilter();
+    tf.type = 'bandpass';
+    tf.frequency.value = 1100;
+    tf.Q.value = 6;
+    const tg = ctx.createGain();
+    tg.gain.value = 0;
+    tsrc.connect(tf).connect(tg).connect(this.master);
+    tsrc.start();
+    this.screech = { gain: tg, filter: tf };
+
+    // Nitrous: a high hiss while it's firing.
+    const nsrc = ctx.createBufferSource();
+    nsrc.buffer = this.noise;
+    nsrc.loop = true;
+    const nf = ctx.createBiquadFilter();
+    nf.type = 'highpass';
+    nf.frequency.value = 3500;
+    const ng = ctx.createGain();
+    ng.gain.value = 0;
+    nsrc.connect(nf).connect(ng).connect(this.master);
+    nsrc.start();
+    this.nosHiss = ng;
   }
 
   /** Per-frame: engine pitch from speed and throttle, siren from nearest cop, scrape from vault drag. */
@@ -121,9 +150,74 @@ export class Sound {
     }
   }
 
+  /** Tire squeal (0..1) and nitrous hiss on/off. */
+  tires(slip: number, nos: boolean): void {
+    if (!this.ready) return;
+    const t = this.ctx!.currentTime;
+    if (this.screech) {
+      this.screech.gain.gain.setTargetAtTime(Math.min(0.18, slip * 0.18), t, 0.05);
+      this.screech.filter.frequency.setTargetAtTime(900 + Math.sin(t * 13) * 120 + slip * 300, t, 0.05);
+    }
+    this.nosHiss?.gain.setTargetAtTime(nos ? 0.16 : 0, t, 0.06);
+  }
+
+  /** Nitrous kick: a low thump and a rising whoosh. */
+  whoosh(): void {
+    this.burst(0.9, 1800, 0.5, 'bandpass');
+    this.burst(0.25, 200, 0.5);
+  }
+
+  /** Breaking glass: a sharp crack and a shower of high tinkles. */
+  shatter(): void {
+    this.burst(0.15, 5000, 0.7, 'highpass');
+    for (let i = 0; i < 6; i++) {
+      setTimeout(() => this.ping(2500 + Math.random() * 3000, 0.08), 40 + i * 50 + Math.random() * 60);
+    }
+  }
+
+  /** A tire letting go. */
+  bang(): void {
+    this.burst(0.18, 600, 1.0);
+    this.burst(0.5, 3000, 0.3, 'highpass');
+  }
+
+  /** Bank alarm: a two-tone bell for a few seconds. */
+  alarm(seconds = 6): void {
+    if (!this.ready) return;
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    const g = ctx.createGain();
+    const t = ctx.currentTime;
+    for (let k = 0; k < seconds * 4; k++) o.frequency.setValueAtTime(k % 2 ? 880 : 1175, t + k * 0.25);
+    g.gain.setValueAtTime(0.05, t);
+    g.gain.setValueAtTime(0.05, t + seconds - 0.3);
+    g.gain.linearRampToValueAtTime(0, t + seconds);
+    o.connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + seconds);
+  }
+
+  /** A short bright tone (UI stingers, glass tinkles). */
+  ping(freq: number, volume = 0.15, duration = 0.25): void {
+    if (!this.ready) return;
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    const g = ctx.createGain();
+    const t = ctx.currentTime;
+    g.gain.setValueAtTime(volume, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    o.connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + duration + 0.05);
+  }
+
   /** Silence the continuous layers (cutscenes, menus). */
   quiet(): void {
     this.update(0, 0, 1e9, 0);
+    this.tires(0, false);
     if (this.engine && this.ready) this.engine.gain.gain.setTargetAtTime(0.03, this.ctx!.currentTime, 0.2);
   }
 

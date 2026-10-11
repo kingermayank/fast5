@@ -15,6 +15,8 @@
         <div id="heat" class="heat">☆☆☆☆☆</div>
         <div class="label">COPS WRECKED</div>
         <div id="wrecked" class="value small">0</div>
+        <div class="label">STYLE</div>
+        <div id="style" class="value small">0</div>
         <div class="label">PROPERTY DAMAGE</div>
         <div id="damage" class="value small">$0</div>
       </div>
@@ -23,11 +25,21 @@
         <div id="arrow" class="arrow hidden">▲</div>
         <div id="distance" class="distance"></div>
       </div>
+      <div id="moment-meter" class="moment-meter hidden">
+        <div id="moment-label" class="label">STRAIN</div>
+        <div class="bar"><div id="moment-fill"></div></div>
+        <div id="moment-prompt" class="moment-prompt"></div>
+      </div>
+      <div id="hint" class="hint hidden"></div>
       <div id="busted" class="busted hidden">
         <div class="label">BUSTED</div>
         <div class="bar"><div id="busted-fill"></div></div>
       </div>
       <div class="hud-bottom-right">
+        <div class="nos">
+          <div class="label">NOS <span class="key">SHIFT</span></div>
+          <div class="bar"><div id="nos-fill"></div></div>
+        </div>
         <div id="speed" class="speed">0</div>
         <div class="label">KM/H</div>
       </div>
@@ -35,6 +47,8 @@
     </div>
 
     <div id="radio" class="hidden"></div>
+
+    <div id="banner" class="hidden"><div id="banner-title"></div><div id="banner-sub"></div></div>
 
     <div id="cutscene" class="hidden">
       <div class="letterbox top"></div>

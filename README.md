@@ -23,7 +23,9 @@ Pick **Dom Toretto** (heavy, powerful) or **Brian O'Conner** (light, sharp). You
 the other car, chained to the same vault.
 
 0. **Cutscene:** Hobbs and Elena ram the station wall in an armored truck; you back in and hook up.
-1. **Breach:** floor it and rip the vault out through the hole while the cops open fire.
+1. **The Pull:** hold the throttle to fill the STRAIN meter until the vault tears out through the wall.
+   Watch for the spike strip (take the gap Mia calls) and the bank on the corner (handbrake through the
+   turn to throw the vault into the lobby). See [`docs/MOMENTS.md`](docs/MOMENTS.md) for all set pieces.
 2. **Chase:** follow Mia's route (yellow arrow + minimap) to the bridge. Swing the vault into cop
    cars to wreck them. Heat rises with time and destruction.
 3. **Don't get boxed in:** if cops pin you at low speed, the BUSTED meter fills.
@@ -34,7 +36,8 @@ the other car, chained to the same vault.
 | W / ↑ | Accelerate |
 | S / ↓ | Brake / reverse |
 | A D / ← → | Steer |
-| Space | Handbrake |
+| Space | Handbrake (and swings the vault wide) |
+| Shift / N | Nitrous: refills from wrecks, dodges and big moments |
 | R | Reset the convoy to the middle of the street (if stuck) |
 | Enter | Start / skip cutscene / retry |
 
@@ -55,7 +58,10 @@ partner is currently thinking (`partnerThinks`).
 - `src/cutscene.ts`, `src/voice.ts`, `src/videos.ts`: cutscene player, voiceover, optional video cutscenes
 - `src/partner.ts`: the AI partner: reads the street grid and Mia's route, predicts your turns, plans its own lane, steers around cops/props/the vault, steadies the vault's swing
 - `src/roads.ts`: the street network as the AI sees it (lanes, intersections, route turns)
-- `src/fx.ts`, `src/audio.ts`: sparks, dust, muzzle flashes; synthesized engine, sirens, crashes
+- `src/moments.ts`: the set pieces (The Pull, Spike Strip, Bank Job)
+- `src/director.ts`: slow motion and cinematic camera shots for big moments
+- `src/fx.ts`, `src/audio.ts`: sparks, dust, tire smoke, skid marks, glass, banknotes, nitrous flames;
+  synthesized engine, sirens, crashes, screech, alarm
 - `src/vehicle.ts`: rigid-body car with arcade handling
 - `src/carModel.ts`: Charger-style hero cars, police cruisers, Hobbs's armored truck
 - `src/vault.ts`: the vault and the winch cables (Rapier rope joints)

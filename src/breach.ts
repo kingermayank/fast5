@@ -121,7 +121,8 @@ export class BreachScene {
     const origin = v3(190, 1.2, 150);
     this.world.forEachRigidBody((b) => {
       const p = b.translation();
-      if (!b.isDynamic() || p.x < 182 || p.x > 185.5 || Math.abs(p.z - 150) > 6.5 || p.y > 4.5) return;
+      // Only a truck-sized hole: the vault has to tear the rest of the wall out itself.
+      if (!b.isDynamic() || p.x < 182 || p.x > 185.5 || Math.abs(p.z - 150) > 1.7 || p.y > 3.2) return;
       const dir = v3(p.x, p.y, p.z).sub(origin).normalize();
       const m = b.mass();
       b.wakeUp();
@@ -139,7 +140,7 @@ export class BreachScene {
     this.placeTruck(end, Math.atan2(-t.x, -t.z), true);
     this.world.forEachRigidBody((b) => {
       const p = b.translation();
-      if (b.isDynamic() && p.x > 182 && p.x < 185 && p.z > 143 && p.z < 157 && p.y < 4.5) {
+      if (b.isDynamic() && p.x > 182 && p.x < 185 && Math.abs(p.z - 150) < 1.7 && p.y < 3.2) {
         b.setTranslation({ x: 172 + Math.random() * 3, y: 0.3 + Math.random(), z: p.z + (Math.random() < 0.5 ? -3 : 3) }, true);
       }
     });

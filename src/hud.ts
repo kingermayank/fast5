@@ -4,6 +4,9 @@ import type { Input } from './input';
 
 export interface HudState {
   speedKmh: number;
+  /** Nitrous meter 0..1. */
+  nos: number;
+  style: number;
   heat: number;
   busted: number;
   damage: number;
@@ -130,7 +133,40 @@ export class Hud {
 
   // ------------------------------------------------------------ per frame
 
+  private bannerTimer = 0;
+
+  /** Big animated callout for a moment, e.g. ("BANK JOB", "+$2,500,000"). */
+  banner(title: string, sub = '', seconds = 2.6): void {
+    const el = $('banner');
+    $('banner-title').textContent = title;
+    $('banner-sub').textContent = sub;
+    // Restart the entrance animation.
+    el.classList.add('hidden');
+    void el.offsetWidth;
+    el.classList.remove('hidden');
+    this.bannerTimer = seconds;
+  }
+
+  /** Center meter for a moment (null label hides it). */
+  meter(label: string | null, value = 0, prompt = ''): void {
+    $('moment-meter').classList.toggle('hidden', label === null);
+    if (label === null) return;
+    $('moment-label').textContent = label;
+    ($('moment-fill') as HTMLElement).style.width = `${Math.round(value * 100)}%`;
+    $('moment-prompt').textContent = prompt;
+  }
+
+  /** One-line gameplay hint under the objective ('' hides it). */
+  hint(text: string): void {
+    $('hint').textContent = text;
+    $('hint').classList.toggle('hidden', !text);
+  }
+
   update(dt: number, s: HudState | null): void {
+    if (this.bannerTimer > 0) {
+      this.bannerTimer -= dt;
+      if (this.bannerTimer <= 0) $('banner').classList.add('hidden');
+    }
     if (this.radioTimer > 0) {
       this.radioTimer -= dt;
       if (this.radioTimer <= 0) this.radioEl.classList.add('hidden');
@@ -138,6 +174,8 @@ export class Hud {
     if (!s) return;
 
     $('speed').textContent = String(Math.round(s.speedKmh));
+    ($('nos-fill') as HTMLElement).style.width = `${Math.round(s.nos * 100)}%`;
+    $('style').textContent = Math.round(s.style).toLocaleString('en-US');
     $('heat').textContent = '★'.repeat(s.heat) + '☆'.repeat(5 - s.heat);
     $('damage').textContent = Hud.money(s.damage);
     $('wrecked').textContent = String(s.wrecked);

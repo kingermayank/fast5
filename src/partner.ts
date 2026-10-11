@@ -135,15 +135,15 @@ export class PartnerDriver {
       let base = playerOffset + this.side * FORMATION_OFFSET;
       base = THREE.MathUtils.clamp(base, -half, half);
       const roomBeside = Math.abs(base - playerOffset) >= MIN_SEPARATION;
-      const { offset, blockedAt } = this.chooseLane(me, pDir, base, playerOffset, half, corner, exit, ctx);
+      const { offset, blockedAt, inLine } = this.chooseLane(me, pDir, base, playerOffset, half, corner, exit, ctx);
       this.thoughts.shift = +(offset - base).toFixed(1);
       this.thoughts.blocked = blockedAt < Infinity;
       path = lanePath(me.position, pDir, offset, corner, exit);
-      if (!roomBeside) {
+      if (!roomBeside || inLine) {
         // No room beside them (they're hugging our curb): drop in behind on their line.
         path = playerPath;
       }
-      return this.drive(dt, ctx, path, playerPath, cornerAhead, turnSign, blockedAt, roomBeside);
+      return this.drive(dt, ctx, path, playerPath, cornerAhead, turnSign, blockedAt, roomBeside && !inLine);
     }
 
     this.thoughts.mode = 'trail';
@@ -216,7 +216,7 @@ export class PartnerDriver {
     corner: THREE.Vector3 | null,
     exit: THREE.Vector3 | null,
     ctx: PartnerContext,
-  ): { offset: number; blockedAt: number } {
+  ): { offset: number; blockedAt: number; inLine?: boolean } {
     const near = ctx.obstacles.filter((o) => o.pos.distanceTo(me.position) < 45);
     /** Distance along a lane to the first obstacle in it (hard ones only, if asked). */
     const blockedAt = (offset: number, hardOnly: boolean) => {
@@ -239,8 +239,12 @@ export class PartnerDriver {
       if (Math.sign(o - playerOffset) !== this.side) continue;
       if (blockedAt(o, false) === Infinity) return { offset: o, blockedAt: Infinity };
     }
-    // No clear lane: keep ours, and brake only if something solid is in it.
-    return { offset: base, blockedAt: blockedAt(base, true) };
+    // No clear lane on our side, but something solid in it (a spike strip with one
+    // gap): drop in single file behind the player through their line.
+    const hard = blockedAt(base, true);
+    if (hard < Infinity && blockedAt(playerOffset, true) === Infinity) return { offset: playerOffset, blockedAt: Infinity, inLine: true };
+    // Otherwise keep our lane, braking only for something solid.
+    return { offset: base, blockedAt: hard };
   }
 
   /** Steering, speed and teamwork along a planned path. */

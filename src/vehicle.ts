@@ -39,6 +39,12 @@ export class Vehicle {
   enabled = true;
   /** Multiplier on drive force and top speed (AI catch-up assist). */
   assist = 1;
+  /** Nitrous firing this step (set by the game from the NOS meter). */
+  nosActive = false;
+  /** Seconds left on blown tires: less grip and speed, rims spark. */
+  tireBlown = 0;
+  /** Rear wheels spinning without traction (pulling against the vault). */
+  wheelspin = 0;
 
   constructor(
     private world: RAPIER.World,
@@ -107,17 +113,22 @@ export class Vehicle {
     const vL = v.x * lx + v.z * lz;
     const m = this.spec.mass;
 
+    const blown = this.tireBlown > 0;
+    if (blown) this.tireBlown = Math.max(0, this.tireBlown - dt);
+    const power = this.assist * (this.nosActive ? 1.9 : 1) * (blown ? 0.7 : 1);
+    const top = this.spec.topSpeed * this.assist * (blown ? 0.65 : 1) + (this.nosActive ? 18 : 0);
     let a = 0;
     if (c.throttle > 0) {
-      a = vF < -1 ? 30 : this.spec.accel * this.assist * c.throttle * Math.max(0, 1 - vF / (this.spec.topSpeed * this.assist));
+      a = vF < -1 ? 30 : this.spec.accel * power * c.throttle * Math.max(0, 1 - vF / top);
     }
+    if (this.nosActive && c.throttle === 0 && vF > -1) a = this.spec.accel * power * Math.max(0, 1 - vF / top);
     if (c.brake > 0) {
       a = vF > 1 ? -30 * c.brake : vF > -14 ? -9 : 0;
     }
     if (!c.throttle && !c.brake) a = -vF * 0.4;
     if (c.handbrake) a -= vF * 0.8;
 
-    const gripRate = c.handbrake ? 1.0 : this.spec.grip;
+    const gripRate = (c.handbrake ? 1.0 : this.spec.grip) * (blown ? 0.45 : 1);
     const dvL = -vL * Math.min(1, gripRate * dt);
     this.body.applyImpulse(
       { x: m * (f.x * a * dt + lx * dvL), y: 0, z: m * (f.z * a * dt + lz * dvL) },
@@ -138,6 +149,35 @@ export class Vehicle {
 
     this.forwardSpeed = vF;
     this.lateralSpeed = vL;
+    // Throttle on but barely moving: the rear tires are spinning against the load.
+    const straining = c.throttle > 0.5 && Math.abs(vF) < 3;
+    this.wheelspin += ((straining ? c.throttle : 0) - this.wheelspin) * Math.min(1, dt * 6);
+  }
+
+  /** World positions of the rear tire contact patches (for smoke and skid marks). */
+  rearWheels(): THREE.Vector3[] {
+    const t = this.body.translation();
+    const r = this.body.rotation();
+    const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
+    return [-0.86, 0.86].map((x) => new THREE.Vector3(x, -RIDE_HEIGHT + 0.05, -1.5).applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z)));
+  }
+
+  /** All four tire contact points. */
+  wheels(): THREE.Vector3[] {
+    const t = this.body.translation();
+    const r = this.body.rotation();
+    const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
+    return [[-0.86, 1.55], [0.86, 1.55], [-0.86, -1.5], [0.86, -1.5]].map(([x, z]) =>
+      new THREE.Vector3(x, -RIDE_HEIGHT + 0.05, z).applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z)),
+    );
+  }
+
+  /** Exhaust tips, for nitrous flames. */
+  exhausts(): THREE.Vector3[] {
+    const t = this.body.translation();
+    const r = this.body.rotation();
+    const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
+    return [-0.55, 0.55].map((x) => new THREE.Vector3(x, -RIDE_HEIGHT + 0.4, -2.65).applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z)));
   }
 
   /** Update the visual model. Call once per rendered frame. */
@@ -145,7 +185,11 @@ export class Vehicle {
     syncMesh(this.model.group, this.body, -RIDE_HEIGHT);
     const roll = THREE.MathUtils.clamp(-this.lateralSpeed * 0.012 - this.steer * this.forwardSpeed * 0.0015, -0.08, 0.08);
     this.model.body.rotation.z += (roll - this.model.body.rotation.z) * Math.min(1, 8 * dt);
-    for (const s of this.model.spinners) s.rotation.x += (this.forwardSpeed / WHEEL_RADIUS) * dt;
+    for (const [i, s] of this.model.spinners.entries()) {
+      // Rear wheels (indices 2, 3) spin freely while straining against the vault.
+      const spin = i >= 2 ? Math.max(this.forwardSpeed / WHEEL_RADIUS, this.wheelspin * 45) : this.forwardSpeed / WHEEL_RADIUS;
+      s.rotation.x += spin * dt;
+    }
     for (const p of this.model.frontPivots) p.rotation.y = this.steer * 0.45;
   }
 

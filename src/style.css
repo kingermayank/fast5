@@ -357,3 +357,132 @@ body {
     animation: none;
   }
 }
+
+/* ---------- moments ---------- */
+
+.moment-meter {
+  position: absolute;
+  top: 34%;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  width: min(360px, 80vw);
+}
+
+.moment-meter .label {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 6px;
+  opacity: 1;
+}
+
+.moment-meter .bar {
+  height: 14px;
+  margin-top: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+#moment-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #ffb13b, #ff3b3b);
+  box-shadow: 0 0 16px #ff6b3b;
+}
+
+.moment-prompt {
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 800;
+  animation: pulse 0.6s ease-in-out infinite;
+}
+
+.hint {
+  position: absolute;
+  bottom: 170px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 15px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: rgba(255, 177, 59, 0.9);
+  color: #1a1206;
+  text-shadow: none;
+  white-space: nowrap;
+}
+
+.nos {
+  margin-bottom: 10px;
+}
+
+.nos .bar {
+  width: 180px;
+  height: 8px;
+  margin: 4px 0 0 auto;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#nos-fill {
+  height: 100%;
+  width: 0;
+  margin-left: auto;
+  background: linear-gradient(90deg, #3b7bff, #7fd1ff);
+  box-shadow: 0 0 10px #3b7bff;
+}
+
+.key {
+  display: inline-block;
+  padding: 0 5px;
+  margin-left: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 4px;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+#banner {
+  position: fixed;
+  top: 22%;
+  width: 100%;
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
+  animation: banner-in 0.35s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+#banner-title {
+  font-size: clamp(34px, 7vw, 80px);
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.06em;
+  background: linear-gradient(90deg, #ffffff, #ffd27a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+#banner-sub {
+  font-size: clamp(16px, 2.6vw, 26px);
+  font-weight: 800;
+  color: #ffb13b;
+  letter-spacing: 0.1em;
+}
+
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #banner,
+  .moment-prompt {
+    animation: none;
+  }
+}

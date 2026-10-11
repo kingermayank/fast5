@@ -132,10 +132,15 @@ export class Effects {
   readonly group = new THREE.Group();
   private sparks = new ParticlePool(900, new THREE.Color(1.0, 0.55, 0.15), 14, 1.5, true, -0.1, 5);
   private dust = new ParticlePool(300, new THREE.Color(0.42, 0.38, 0.34), -0.6, 1.2, false, 2.2, 1, 0.55);
+  private smoke = new ParticlePool(500, new THREE.Color(0.78, 0.78, 0.8), -1.2, 1.8, false, 2.6, 1, 0.38);
+  private glass = new ParticlePool(700, new THREE.Color(0.75, 0.9, 1.0), 16, 0.6, true, 0, 3);
+  private cash = new ParticlePool(500, new THREE.Color(0.45, 0.75, 0.45), 1.6, 2.5, false, 0, 1, 1);
+  private nos = new ParticlePool(300, new THREE.Color(0.35, 0.55, 1.0), -0.5, 3, true, 1.5, 6);
+  readonly skids = new SkidMarks();
   private flashes: { light: THREE.PointLight; life: number }[] = [];
 
   constructor() {
-    this.group.add(this.sparks.points, this.dust.points);
+    this.group.add(this.sparks.points, this.dust.points, this.smoke.points, this.glass.points, this.cash.points, this.nos.points, this.skids.mesh);
     for (let i = 0; i < 3; i++) {
       const light = new THREE.PointLight(0xffb060, 0, 18, 2);
       this.group.add(light);
@@ -181,12 +186,93 @@ export class Effects {
     }
   }
 
+  /** White tire smoke from a spinning or sliding wheel. */
+  tireSmoke(at: THREE.Vector3, intensity: number, drift = new THREE.Vector3()): void {
+    const n = Math.random() < intensity ? 1 + Math.floor(intensity * 1.5) : 0;
+    for (let i = 0; i < n; i++) {
+      const v = drift.clone().multiplyScalar(0.2).add(new THREE.Vector3((Math.random() - 0.5) * 2, 0.6 + Math.random() * 1.2, (Math.random() - 0.5) * 2));
+      this.smoke.emit(at.clone().setY(0.35), v, 1.4 + Math.random() * 1.4, 1.2 + Math.random() * 0.8);
+    }
+  }
+
+  /** A pane of glass exploding into shards. */
+  shatter(at: THREE.Vector3, push: THREE.Vector3, count = 50): void {
+    for (let i = 0; i < count; i++) {
+      const v = push.clone().multiplyScalar(0.4 + Math.random() * 0.5).add(new THREE.Vector3((Math.random() - 0.5) * 8, Math.random() * 6, (Math.random() - 0.5) * 8));
+      const p = at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.5, Math.random() * 4, (Math.random() - 0.5) * 1.5));
+      this.glass.emit(p, v, 0.6 + Math.random() * 0.9, 0.06 + Math.random() * 0.08);
+    }
+  }
+
+  /** Banknotes thrown into the air, fluttering down slowly. */
+  money(at: THREE.Vector3, count = 120): void {
+    for (let i = 0; i < count; i++) {
+      const v = new THREE.Vector3((Math.random() - 0.5) * 10, 3 + Math.random() * 8, (Math.random() - 0.5) * 10);
+      this.cash.emit(at.clone().add(new THREE.Vector3(0, 1.5, 0)), v, 3 + Math.random() * 3, 0.12 + Math.random() * 0.06);
+    }
+  }
+
+  /** Blue nitrous flame from an exhaust, thrown backwards. */
+  nosFlame(at: THREE.Vector3, backward: THREE.Vector3): void {
+    for (let i = 0; i < 3; i++) {
+      const v = backward.clone().multiplyScalar(8 + Math.random() * 6).add(new THREE.Vector3((Math.random() - 0.5) * 1, (Math.random() - 0.5) * 1, (Math.random() - 0.5) * 1));
+      this.nos.emit(at, v, 0.08 + Math.random() * 0.08, 0.35 + Math.random() * 0.2);
+    }
+  }
+
   update(dt: number): void {
     this.sparks.update(dt);
     this.dust.update(dt);
+    this.smoke.update(dt);
+    this.glass.update(dt);
+    this.cash.update(dt);
+    this.nos.update(dt);
     for (const f of this.flashes) {
       f.life -= dt;
       f.light.intensity = f.life > 0 ? 60 : 0;
     }
+  }
+}
+
+/** Dark rubber marks laid on the road by sliding or spinning tires (ring buffer of quads). */
+export class SkidMarks {
+  readonly mesh: THREE.InstancedMesh;
+  private next = 0;
+  private last = new Map<string, THREE.Vector3>();
+  private readonly m = new THREE.Matrix4();
+  private readonly q = new THREE.Quaternion();
+  private readonly s = new THREE.Vector3();
+
+  constructor(private capacity = 1200) {
+    const geo = new THREE.PlaneGeometry(0.32, 1).rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x0b0b0b, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    this.mesh = new THREE.InstancedMesh(geo, mat, capacity);
+    this.mesh.frustumCulled = false;
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (let i = 0; i < capacity; i++) this.mesh.setMatrixAt(i, hidden);
+  }
+
+  /** Extend the mark for tire `key` to `p`. Call with null to lift the tire. */
+  mark(key: string, p: THREE.Vector3 | null): void {
+    if (!p) {
+      this.last.delete(key);
+      return;
+    }
+    const prev = this.last.get(key);
+    const at = p.clone().setY(0.03);
+    if (prev) {
+      const d = at.distanceTo(prev);
+      if (d < 0.4) return;
+      if (d < 4) {
+        const mid = prev.clone().add(at).multiplyScalar(0.5);
+        this.q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, Math.atan2(at.x - prev.x, at.z - prev.z));
+        this.s.set(1, 1, d);
+        this.m.compose(mid, this.q, this.s);
+        this.mesh.setMatrixAt(this.next, this.m);
+        this.next = (this.next + 1) % this.capacity;
+        this.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+    this.last.set(key, at);
   }
 }
