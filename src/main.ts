@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { angleTo, seek } from './ai';
+import { Sound } from './audio';
+import { BreachScene } from './breach';
 import {
   BRIDGE_X,
   CAR_STARTS,
@@ -12,6 +14,9 @@ import {
   VAULT_START,
   VAULT_START_HEADING,
 } from './city';
+import { Cutscene } from './cutscene';
+import { Effects } from './fx';
+import { createGraphics } from './graphics';
 import { Hud } from './hud';
 import { Input, type ControlState } from './input';
 import { PartnerDriver } from './partner';
@@ -19,74 +24,66 @@ import { FIXED_DT, initPhysics } from './physics';
 import { Police } from './police';
 import { Cable, Vault } from './vault';
 import { Vehicle, type VehicleSpec } from './vehicle';
+import { CUTSCENE_VIDEOS } from './videos';
+import { Voice } from './voice';
 
-type CharacterId = 'rico' | 'cole';
+type CharacterId = 'dom' | 'brian';
 
 export const CHARACTERS: Record<CharacterId, { name: string; spec: VehicleSpec; side: 1 | -1 }> = {
-  rico: {
-    name: 'Rico Santos',
+  dom: {
+    name: 'Dom Toretto',
     side: 1,
     spec: {
       mass: 2100, accel: 23, topSpeed: 62, turnRate: 2.1, grip: 7.5,
-      model: { body: 0x1a1a1c, trim: 0x0b0b0c, rim: 0x7a6440, matte: true },
+      model: { body: 0x141416, trim: 0x0b0b0c, rim: 0x3a3a3c, matte: true },
     },
   },
-  cole: {
-    name: 'Cole Mercer',
+  brian: {
+    name: 'Brian O’Conner',
     side: -1,
     spec: {
       mass: 1800, accel: 25, topSpeed: 64, turnRate: 2.5, grip: 7,
-      model: { body: 0x1d1f23, trim: 0x0b0b0c, rim: 0xc4c8ce, matte: true },
+      model: { body: 0x17181b, trim: 0x0b0b0c, rim: 0x9ea3aa, matte: true },
     },
   },
 };
 
-type State = 'select' | 'intro' | 'breach' | 'chase' | 'outro' | 'busted' | 'lost';
+type State = 'select' | 'cutscene' | 'breach' | 'chase' | 'outro' | 'busted' | 'lost';
 
 const CABLE_TOW_LENGTH = 10;
 
 async function start(): Promise<void> {
   const canvas = document.getElementById('game') as HTMLCanvasElement;
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-
-  const scene = new THREE.Scene();
-  const sky = new THREE.Color(0xf0b98a);
-  scene.background = sky;
-  scene.fog = new THREE.Fog(sky, 120, 520);
-  const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 3000);
-
-  // Late-afternoon light, low warm sun.
-  scene.add(new THREE.HemisphereLight(0xffe2c4, 0x4a4036, 1.3));
-  const sun = new THREE.DirectionalLight(0xffd6a8, 2.6);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = sun.shadow.camera.bottom = -70;
-  sun.shadow.camera.right = sun.shadow.camera.top = 70;
-  sun.shadow.camera.far = 400;
-  sun.shadow.bias = -0.0005;
-  scene.add(sun, sun.target);
+  const gfx = createGraphics(canvas);
+  const { scene, camera } = gfx;
 
   const world = await initPhysics();
   const city = new City(world);
   scene.add(city.group);
+  const fx = new Effects();
+  scene.add(fx.group);
+  const sound = new Sound();
+  const voice = new Voice();
 
   const vault = new Vault(world, VAULT_START, VAULT_START_HEADING);
   scene.add(vault.mesh);
+  const breach = new BreachScene(world, scene, city, fx, sound);
 
   const input = new Input();
   const hud = new Hud(ROUTE);
   const police = new Police(world, scene, city);
+  police.onWreck = (at) => {
+    fx.burst(at.clone().setY(1), 1);
+    sound.crash(1);
+  };
 
   let state: State = 'select';
-  let character: CharacterId = 'rico';
+  let character: CharacterId = 'dom';
   let player!: Vehicle;
   let partner!: Vehicle;
   let partnerAi!: PartnerDriver;
-  let cables: Cable[] = [];
+  let cutscene: Cutscene | null = null;
+  const cables: Cable[] = [];
   let stateTime = 0;
   let chaseTime = 0;
   let damage = 0;
@@ -95,19 +92,25 @@ async function start(): Promise<void> {
   let waypoint = 0;
   let accumulator = 0;
   let lastCalloutWaypoint = -1;
+  let lastPlayerSpeed = 0;
 
   function setupCrew(id: CharacterId): void {
     character = id;
     const me = CHARACTERS[id];
-    const other = CHARACTERS[id === 'rico' ? 'cole' : 'rico'];
-    // Left car (+x when facing north) is the one with side = 1.
+    const other = CHARACTERS[id === 'dom' ? 'brian' : 'dom'];
+    // The car on the left (+x when facing north) has side = 1.
     const startFor = (side: number) => CAR_STARTS[side === 1 ? 1 : 0];
     player = new Vehicle(world, me.spec, startFor(me.side), 0);
     partner = new Vehicle(world, other.spec, startFor(other.side), 0);
     scene.add(player.model.group, partner.model.group);
     partnerAi = new PartnerDriver(world, city, -me.side);
     partnerAi.reset(player);
-    for (const [car, side] of [[player, me.side], [partner, other.side]] as const) {
+  }
+
+  /** Winch cables from both cars to the vault door. */
+  function hookCables(): void {
+    const me = CHARACTERS[character];
+    for (const [car, side] of [[player, me.side], [partner, -me.side]] as const) {
       const len = car.towPoint().distanceTo(vault.anchorWorld(side)) + 0.6;
       cables.push(new Cable(world, scene, car, vault, side, len));
     }
@@ -118,7 +121,7 @@ async function start(): Promise<void> {
     stateTime = 0;
   }
 
-  // ----------------------------------------------------------- partner AI
+  // ----------------------------------------------------------- recovery
 
   /** R: line the crew back up in the middle of the nearest street, facing the next waypoint. */
   function resetConvoy(): void {
@@ -172,43 +175,49 @@ async function start(): Promise<void> {
     const driving = state === 'breach' || state === 'chase';
     const hold: ControlState = { throttle: 0, brake: 0, steer: 0, handbrake: true };
     player.controls = driving ? (autopilot ? seek(world, player, ROUTE[waypoint], 0.9) : input.controls()) : hold;
-    partner.controls = driving ? partnerAi.controls(dt, player, partner, vault.position) : player.controls;
+    partner.controls = driving ? partnerAi.controls(dt, player, partner, vault.position) : hold;
     player.step(dt);
     partner.step(dt);
 
     if (state === 'chase' && !noCops) {
-      const onBridge = player.position.z > SEAWALL_Z;
-      police.step(dt, player, vault, heat, onBridge);
+      police.step(dt, player, vault, heat, player.position.z > SEAWALL_Z);
     } else if (state === 'outro' || state === 'busted' || state === 'lost') {
       police.step(dt, player, vault, heat, player.position.z > SEAWALL_Z);
     }
 
-    if (state !== 'breach' && state !== 'intro') for (const c of cables) c.reel(CABLE_TOW_LENGTH, dt);
+    if (state === 'chase' || state === 'outro') for (const c of cables) c.reel(CABLE_TOW_LENGTH, dt);
     world.step();
+  }
+
+  // ----------------------------------------------------------- game flow
+
+  function startGameplay(): void {
+    cutscene = null;
+    enter('breach');
+    breach.shooting = true;
+    hud.showHud(true);
+    hud.radio('MIA', 'Floor it! Pull that vault out of there!');
   }
 
   function updateGame(dt: number): void {
     stateTime += dt;
-    if (state === 'intro') {
-      if (input.wasPressed('Enter') || stateTime > 11) {
-        enter('breach');
-        hud.showHud(true);
-        hud.radio('LENA', 'Wall’s down. Floor it — pull that vault out of there!');
-      }
+    if (state === 'cutscene') {
+      if (input.wasPressed('Enter') || input.wasPressed('Escape')) cutscene?.skip();
       return;
     }
 
     if (state === 'breach' && vault.position.x > STATION_FACADE_X + 3) {
       enter('chase');
+      breach.shooting = false;
       heat = 1;
-      hud.radio('LENA', 'It’s out! Every cop in Porto Sol is coming. Follow my route.');
+      hud.radio('MIA', 'It’s out! Every cop in Rio is coming. Follow my route.');
     }
 
     if ((state === 'breach' || state === 'chase') && inWater()) {
       enter('lost');
       hud.showOverlay(
         'VAULT LOST',
-        `The vault went over the side and into the lagoon.\nSalazar’s money is at the bottom of the bay.\n\nCops wrecked: ${police.wreckedCount}   Damage: ${Hud.money(damage)}`,
+        `The vault went over the side and into the bay.\nReyes’s money is at the bottom of Guanabara Bay.\n\nCops wrecked: ${police.wreckedCount}   Damage: ${Hud.money(damage)}`,
         'Press Enter to try again',
       );
     }
@@ -224,15 +233,15 @@ async function start(): Promise<void> {
           resetConvoy();
         }
       }
-      damage += city.collectDamage();
+      const newDamage = city.collectDamage();
+      if (newDamage > 0) sound.crash(Math.min(1, newDamage / 15000) * 0.6);
+      damage += newDamage;
       heat = Math.min(5, 1 + Math.floor(chaseTime / 50) + Math.floor(damage / 300000) + Math.floor(police.wreckedCount / 10));
 
-      // Route progress.
       const wp = ROUTE[waypoint];
       if (player.position.distanceTo(wp) < 30 && waypoint < ROUTE.length - 1) waypoint++;
       calloutTurn();
 
-      // Busted: boxed in by cops and stopped.
       const pinned = police.closeTo(player.position, 9) >= 2 && Math.abs(player.forwardSpeed) < 4;
       busted = THREE.MathUtils.clamp(busted + (pinned ? dt / 3.5 : -dt / 2), 0, 1);
       if (busted >= 1) {
@@ -242,15 +251,15 @@ async function start(): Promise<void> {
 
       if (player.position.z > SWAP_ZONE_Z) {
         enter('outro');
-        hud.radio('LENA', 'You made it. Kill the engines.');
+        hud.radio('MIA', 'You made it. Kill the engines.');
       }
     }
 
     if (state === 'outro' && stateTime > 4 && stateTime - dt <= 4) {
       hud.showOverlay(
         'THE SWAP',
-        'While every cop in Porto Sol chased that vault, Deuce and Kong swapped it for an empty decoy.\n' +
-          'Salazar’s money was already gone.\n\n' +
+        'While every cop in Rio chased that vault, Roman and Han swapped it for an empty decoy.\n' +
+          'Reyes’s money was already gone.\n\n' +
           `Time ${Hud.time(chaseTime)}   Cops wrecked ${police.wreckedCount}   Property damage ${Hud.money(damage)}`,
         'Press Enter to play again',
       );
@@ -275,12 +284,51 @@ async function start(): Promise<void> {
     const a = wp.clone().sub(ROUTE[waypoint - 1]);
     const b = ROUTE[waypoint + 1].clone().sub(wp);
     const cross = a.x * b.z - a.z * b.x;
-    if (waypoint === ROUTE.length - 2) {
-      hud.radio('LENA', 'Bridge ahead. Get to the yellow gantry at the far end.');
-    } else if (Math.abs(cross) > 1) {
-      // Left of travel is +x when facing +z, which makes a left turn a negative cross product.
-      hud.radio('LENA', cross < 0 ? 'Next intersection — hang a left!' : 'Next intersection — go right!');
+    let line: string | null = null;
+    if (waypoint === ROUTE.length - 2) line = 'Bridge ahead. Get to the yellow gantry at the far end.';
+    // Left of travel is +x when facing +z, which makes a left turn a negative cross product.
+    else if (Math.abs(cross) > 1) line = cross < 0 ? 'Next intersection, hang a left!' : 'Next intersection, go right!';
+    if (line) {
+      hud.radio('MIA', line);
+      voice.speak('MIA', line);
     }
+  }
+
+  // ----------------------------------------------------------- per-frame effects
+
+  /** Sparks and screech while the vault drags on the asphalt; crunch on hard player impacts. */
+  function updateEffects(dt: number): number {
+    const v = vault.body.linvel();
+    const speed = Math.hypot(v.x, v.z);
+    const grounded = vault.body.translation().y < 1.6;
+    const drag = grounded && cables.length ? speed : 0;
+    if (drag > 2) {
+      const q = vault.body.rotation();
+      const rot = new THREE.Quaternion(q.x, q.y, q.z, q.w);
+      const base = vault.position;
+      for (const corner of [[-1.4, -1.4], [1.4, -1.4], [-1.4, 1.4], [1.4, 1.4]]) {
+        if (Math.random() > Math.min(1, drag / 20)) continue;
+        const p = new THREE.Vector3(corner[0], -1.2, corner[1]).applyQuaternion(rot).add(base);
+        fx.scrape(p.setY(0.08), new THREE.Vector3(v.x, 0, v.z), drag / 15);
+      }
+      if (Math.random() < dt * 2) fx.puff(base.clone().setY(0), 1);
+    }
+    if (player && (state === 'breach' || state === 'chase')) {
+      const s = Math.abs(player.forwardSpeed);
+      if (lastPlayerSpeed - s > 7) {
+        sound.crash(Math.min(1, (lastPlayerSpeed - s) / 20));
+        fx.burst(player.position.addScaledVector(player.forward, 2.5).setY(0.8), 0.5);
+      }
+      lastPlayerSpeed = s;
+    }
+    return drag;
+  }
+
+  function nearestCopDistance(): number {
+    if (!player) return Infinity;
+    let best = Infinity;
+    for (const c of police.cops) if (!c.wrecked) best = Math.min(best, c.v.position.distanceTo(player.position));
+    return best;
   }
 
   // ----------------------------------------------------------- camera
@@ -291,76 +339,87 @@ async function start(): Promise<void> {
   function updateCamera(dt: number): void {
     let pos: THREE.Vector3;
     let look: THREE.Vector3;
+    let fov = 62;
     let k = 1 - Math.exp(-5 * dt);
-    if (state === 'select') {
-      const t = performance.now() / 1000;
-      pos = new THREE.Vector3(180 + Math.cos(t * 0.15) * 70, 30, 150 + Math.sin(t * 0.15) * 70);
-      look = new THREE.Vector3(185, 4, 150);
+    const shot = state === 'cutscene' ? cutscene?.update(dt) : null;
+    if (shot) {
+      pos = shot.pos;
+      look = shot.look;
+      fov = shot.fov ?? 50;
       k = 1;
-    } else if (state === 'intro') {
-      // Sweep down from above the city to the crew at the station.
-      const t = Math.min(1, stateTime / 10);
-      const e = t * t * (3 - 2 * t);
-      pos = new THREE.Vector3().lerpVectors(new THREE.Vector3(320, 140, -60), new THREE.Vector3(214, 9, 132), e);
-      look = new THREE.Vector3().lerpVectors(new THREE.Vector3(200, 0, 200), new THREE.Vector3(186, 2, 152), e);
+    } else if (state === 'select') {
+      const t = performance.now() / 1000;
+      pos = new THREE.Vector3(186 + Math.cos(t * 0.12) * 60, 26, 150 + Math.sin(t * 0.12) * 60);
+      look = new THREE.Vector3(190, 4, 150);
       k = 1;
     } else if (state === 'outro') {
       const t = stateTime * 0.25;
       const c = player.position;
       pos = new THREE.Vector3(c.x + Math.cos(t) * 26, 10, c.z + Math.sin(t) * 26);
       look = c.clone().setY(1.5);
-    } else {
+    } else if (player) {
       const f = player.forward;
       const speed = Math.min(1, Math.abs(player.forwardSpeed) / 60);
-      pos = player.position.addScaledVector(f, -15 - speed * 3).setY(7 + speed);
-      look = player.position.addScaledVector(f, 6).setY(1.5);
+      pos = player.position.addScaledVector(f, -14 - speed * 3).setY(6 + speed);
+      look = player.position.addScaledVector(f, 7).setY(1.5);
+      fov = 62 + speed * 14;
+      // A little high-speed rumble.
+      if (speed > 0.5) pos.add(new THREE.Vector3((Math.random() - 0.5) * speed * 0.08, (Math.random() - 0.5) * speed * 0.08, 0));
+    } else {
+      pos = camPos.clone();
+      look = camLook.clone();
     }
     camPos.lerp(pos, k);
     camLook.lerp(look, k);
     camera.position.copy(camPos);
     camera.lookAt(camLook);
-
-    const focus = player ? player.position : camLook;
-    sun.position.copy(focus).add(new THREE.Vector3(-80, 110, -50));
-    sun.target.position.copy(focus);
+    if (Math.abs(camera.fov - fov) > 0.05) {
+      camera.fov += (fov - camera.fov) * Math.min(1, dt * 4);
+      camera.updateProjectionMatrix();
+    }
+    gfx.follow(state === 'cutscene' || !player ? camLook.clone().setY(0) : player.position);
   }
 
-  function resize(): void {
-    renderer.setSize(window.innerWidth, window.innerHeight, false);
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-  }
-  window.addEventListener('resize', resize);
-  resize();
+  window.addEventListener('resize', gfx.resize);
+  gfx.resize();
 
   // ----------------------------------------------------------- start
 
-  function begin(id: CharacterId): void {
+  function begin(id: CharacterId, skipIntro: boolean): void {
     hud.hideSelect();
     setupCrew(id);
-    enter('intro');
-    hud.cutscene([
-      [0, 'PORTO SOL — 6:42 PM'],
-      [2.5, 'Victor Salazar keeps $100 million in a vault inside police headquarters.'],
-      [5.5, 'Half the cops in this city are on his payroll, guarding it.'],
-      [8.5, 'Agent Holloway’s truck just opened the wall. Now pull.'],
-    ]);
+    const me = CHARACTERS[id];
+    const cast = {
+      left: me.side === 1 ? player : partner,
+      right: me.side === 1 ? partner : player,
+      hook: hookCables,
+    };
+    enter('cutscene');
+    cutscene = new Cutscene(
+      breach.shots(cast, (amount) => {
+        if (cutscene) cutscene.shake = amount;
+      }),
+      hud,
+      voice,
+      () => {
+        breach.finishInstantly(cast);
+        startGameplay();
+      },
+      CUTSCENE_VIDEOS.breach,
+    );
+    if (skipIntro) cutscene.skip();
   }
 
   const params = new URL(location.href).searchParams;
-  // Debug: ?autopilot=1 drives the player along Lena's route (used by play-tests).
+  // Debug: ?autopilot=1 drives the player along Mia's route (used by play-tests).
   const autopilot = params.has('autopilot');
   // Debug: ?nocops=1 disables police (for testing the route and ending).
   const noCops = params.has('nocops');
   const preset = params.get('crew');
-  if (preset === 'rico' || preset === 'cole') {
-    begin(preset);
-    enter('breach');
-    hud.cutscene([]);
-    hud.showHud(true);
-    hud.radio('LENA', 'Wall’s down. Floor it — pull that vault out of there!');
+  if (preset === 'dom' || preset === 'brian') {
+    begin(preset, !params.has('intro'));
   } else {
-    hud.showSelect((id) => begin(id as CharacterId));
+    hud.showSelect((id) => begin(id as CharacterId, false));
   }
 
   // Read-only snapshot for debugging and automated play-tests.
@@ -372,6 +431,7 @@ async function start(): Promise<void> {
     partnerGap: player ? +player.position.distanceTo(partner.position).toFixed(1) : 0,
     partnerTeleports,
     vault: vault.position.toArray().map(Math.round),
+    truck: breach.truckPosition.toArray().map(Math.round),
     cables: cables.map((c) => +c.length.toFixed(1)),
     heat,
     waypoint,
@@ -379,14 +439,20 @@ async function start(): Promise<void> {
     wrecked: police.wreckedCount,
     damage,
     busted: +busted.toFixed(2),
+    fps: Math.round(fps),
   });
 
+  let fps = 60;
   const timer = new THREE.Timer();
   function frame(time: number): void {
     timer.update(time);
-    const dt = Math.min(timer.getDelta(), 0.1);
+    const rawDt = timer.getDelta();
+    fps = fps * 0.95 + (rawDt > 0 ? 1 / rawDt : 60) * 0.05;
+    const dt = Math.min(rawDt, 0.1);
+    breach.update(dt);
     if (state === 'select') {
       hud.selectInput(input);
+      sound.quiet();
     } else {
       accumulator += dt;
       while (accumulator >= FIXED_DT) {
@@ -396,14 +462,26 @@ async function start(): Promise<void> {
       updateGame(dt);
       player.render(dt);
       partner.render(dt);
+      for (const car of [player, partner]) car.model.brake.emissiveIntensity = car.controls.brake > 0 ? 4 : 1.2;
       for (const c of cables) c.render();
       police.render(dt);
     }
+    const drag = updateEffects(dt);
+    fx.update(dt);
     vault.render();
     city.render();
+    city.update(dt);
     updateCamera(dt);
 
-    if (player && state !== 'intro') {
+    if (state === 'breach' || state === 'chase') {
+      sound.update(player.forwardSpeed, player.controls.throttle, nearestCopDistance(), drag);
+    } else if (state === 'cutscene') {
+      sound.update(0, 0, Infinity, drag);
+    } else {
+      sound.quiet();
+    }
+
+    if (player && state !== 'cutscene') {
       hud.update(dt, {
         speedKmh: Math.abs(player.forwardSpeed) * 3.6,
         heat,
@@ -415,7 +493,7 @@ async function start(): Promise<void> {
             ? 'Rip the vault out of the station'
             : waypoint >= ROUTE.length - 1
               ? 'Reach the swap point'
-              : 'Follow Lena’s route to the bridge',
+              : 'Follow Mia’s route to the bridge',
         distance: player.position.distanceTo(ROUTE[waypoint]),
         arrow: state === 'chase' ? angleTo(player, ROUTE[waypoint]) : null,
         player: player.position,
@@ -429,7 +507,7 @@ async function start(): Promise<void> {
       hud.update(dt, null);
     }
 
-    renderer.render(scene, camera);
+    gfx.render();
     input.endFrame();
     requestAnimationFrame(frame);
   }

@@ -1,12 +1,12 @@
 # Fast5 — Game Design
 
-A browser game that recreates the *feel* of the vault-heist finale from the 2011 film *Fast Five*:
-two muscle cars chained to a multi-ton bank vault, ripping it out of a police station and
-dragging it through a city with the whole police force in pursuit.
+A browser game that recreates the vault-heist finale of the 2011 film *Fast Five*: two muscle
+cars chained to a multi-ton bank vault, ripping it out of a police station and dragging it through
+Rio with the whole police force in pursuit.
 
-The game is **"inspired by"**, not a licensed adaptation. It's meant to be shared publicly, so it
-uses original names, unbranded cars and original/royalty-free audio. Everything the player sees
-comes from our own code and assets.
+This is a fan game. It uses the film's character names and recreates its sequence of events in
+our own engine, with original 3D models, original dialogue, synthesized sound and AI-generated or
+in-engine cutscenes. It does **not** include footage, music, logos or likenesses from the film.
 
 ## 1. Reference: the film sequence (research notes)
 
@@ -44,28 +44,28 @@ PowerNation, Garrett On The Road). Not yet checked against the footage. Revisit 
   Bridge, a long, low causeway bridge over a lagoon. Our city should feel like that: dense
   colonial-and-modern downtown, palm trees, wide avenues, then a long flat bridge over water.
 
-## 2. Our version (names are placeholders, easy to change)
+## 2. Cast and setting
 
-| Film role | In-game | Notes |
-| --- | --- | --- |
-| Rio de Janeiro | **Porto Sol** | Coastal city, downtown grid, bridge over the lagoon |
-| The bald, muscular crew leader | **Rico "The Wall" Santos** | Heavier car, stronger pull, wider swing |
-| The ex-cop driver | **Cole Mercer** | Lighter car, quicker steering, better acceleration |
-| Navigator on the radio | **Lena** | Radio callouts + nav arrow |
-| Federal agent | **Agent Holloway** | Breaches the wall in the intro cutscene |
-| Drug lord | **Victor Salazar** | Final-bridge enemies |
-| Crew members in stolen police cruisers | **"Deuce" & "Kong"** | Mid-chase assist event |
+| Character | Role in the game |
+| --- | --- |
+| **Dom Toretto** | Playable. Heavier Charger, strongest pull, widest vault swing |
+| **Brian O'Conner** | Playable. Lighter Charger, sharper steering, quicker acceleration |
+| **Mia Toretto** | Navigator on the radio: route callouts and the nav arrow |
+| **Luke Hobbs** and **Elena Neves** | Ram the station wall with the armored truck in the opening cutscene |
+| **Hernan Reyes** | The drug lord whose money is in the vault; his men join on the bridge (planned) |
+| **Roman Pearce** and **Han** | Stolen-cruiser assist mid-chase (planned); pull the vault swap |
 
-The player picks **Rico** or **Cole**. The other one is the **AI partner** chained to the same vault.
+Setting: Rio de Janeiro, with a police headquarters downtown, a long bridge over the bay and the
+mountains around the city on the horizon.
 
 ## 3. Mission: "The Vault"
 
 | Phase | What happens | Win / fail |
 | --- | --- | --- |
-| 0. Intro cutscene | Camera fly-through of Porto Sol → police HQ; title cards set up the job | — |
-| 1. Breach | The armored truck has already breached the wall. Player floors it; both cars strain on the cables; the vault rips through a brick wall and out into the street | Vault leaves the building |
-| 2. City chase | Follow Lena's route through downtown. Cops spawn ahead, behind and from side streets. The vault wrecks anything it hits. Heat rises over time and with destruction | Reach the bridge. **BUSTED** if the player car is boxed in and stopped for too long |
-| 3. Bridge | Long straight bridge, Salazar's armed SUVs, cops everywhere. Use the vault as a wrecking ball | Reach the swap point |
+| 0. Breach cutscene | Aerial of Rio → Hobbs's armored truck charges the station under fire, rams the vault-room wall, backs out; Dom and Brian reverse up and hook the cables | — |
+| 1. Breach | Cops keep firing. Player floors it; both cars strain on the cables; the vault drags out over the rubble into the street | Vault leaves the building |
+| 2. City chase | Follow Mia's route through downtown. Cops spawn ahead, behind and from side streets. The vault wrecks anything it hits. Heat rises over time and with destruction | Reach the bridge. **BUSTED** if the player car is boxed in and stopped for too long |
+| 3. Bridge | Long straight bridge, Reyes's armed SUVs, cops everywhere. Use the vault as a wrecking ball | Reach the swap point |
 | 4. Outro | Text/cutscene: the decoy vault swap is revealed. Score screen | — |
 
 ## 4. Core mechanics
@@ -93,7 +93,7 @@ The player picks **Rico** or **Cole**. The other one is the **AI partner** chain
 3. Breach set piece (breakable wall, station interior, intro/outro cutscenes)
 4. Character select with distinct handling; AI partner improvements
 5. Spike strips, motorcycle cops, the stolen-cruiser assist event, roadblocks, bank set piece
-6. Bridge finale with Salazar's men
+6. Bridge finale with Reyes's men
 7. Audio: engine, sirens, crashes, radio voice lines (TTS), original soundtrack
 8. Better art: GLB car models (licensed), textures, particles (sparks under the vault, dust, glass)
 9. Mobile/touch controls, gamepad

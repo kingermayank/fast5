@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RAPIER, syncMesh } from './physics';
-import { asphaltTexture, facadeTexture, sidewalkTexture, signTexture, waterTexture } from './textures';
+import { asphaltTexture, type FacadeStyle, facadeTextures, sidewalkTexture, signTexture, storefrontTexture, waterNormalTexture } from './textures';
 
 /** Distance between street center lines. */
 export const PITCH = 100;
@@ -28,7 +28,7 @@ export const CAR_STARTS = [new THREE.Vector3(196.5, 0, 158), new THREE.Vector3(2
 /** x of the station facade; the vault is "out" once it crosses this. */
 export const STATION_FACADE_X = STATION.x1;
 
-/** Lena's route: intersections to the bridge, then the swap point. */
+/** Mia's route: intersections to the bridge, then the swap point. */
 export const ROUTE: THREE.Vector3[] = [
   [200, 300], [100, 300], [100, 500], [300, 500], [300, 600], [400, 600], [400, 700], [400, SEAWALL_Z + 150], [400, SWAP_ZONE_Z],
 ].map(([x, z]) => new THREE.Vector3(x, 0, z));
@@ -60,8 +60,17 @@ export class City {
   /** Intersections, for spawning police. */
   readonly intersections: THREE.Vector3[] = [];
   private rand = mulberry32(5);
-  private facade = facadeTexture();
-  private facadeMats = FACADE_COLORS.map((c) => new THREE.MeshStandardMaterial({ map: this.facade, color: c, roughness: 0.9 }));
+  private facadeSets = (['residential', 'office', 'colonial'] as FacadeStyle[]).map((style, i) => facadeTextures(style, 101 + i * 37));
+  private facadeMats = FACADE_COLORS.map((c, i) => {
+    const t = this.facadeSets[i % this.facadeSets.length];
+    return new THREE.MeshStandardMaterial({ map: t.map, emissiveMap: t.emissive, emissive: 0xffffff, emissiveIntensity: 1.4, color: c, roughness: 0.85 });
+  });
+  private storefrontMat = new THREE.MeshStandardMaterial({ map: storefrontTexture(), roughness: 0.5, metalness: 0.2 });
+  private trimMat = new THREE.MeshStandardMaterial({ color: 0xd8d2c6, roughness: 0.8 });
+  private roofMat = new THREE.MeshStandardMaterial({ color: 0x8d8f93, roughness: 0.8, metalness: 0.3 });
+  /** Static geometry collected per material and merged into one mesh each at the end. */
+  private batches = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  private water!: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshPhysicalMaterial>;
 
   constructor(private world: RAPIER.World) {
     for (let i = 0; i <= NX; i++) for (let j = 0; j <= NZ; j++) this.intersections.push(new THREE.Vector3(i * PITCH, 0, j * PITCH));
@@ -70,6 +79,32 @@ export class City {
     this.buildStation();
     this.buildBridge();
     this.buildBounds();
+    this.flushBatches();
+  }
+
+  /** Animate water ripples. */
+  update(dt: number): void {
+    const n = this.water.material.normalMap!;
+    n.offset.x += dt * 0.004;
+    n.offset.y += dt * 0.0025;
+  }
+
+  private batch(geo: THREE.BufferGeometry, mat: THREE.Material): void {
+    const list = this.batches.get(mat) ?? [];
+    list.push(geo);
+    this.batches.set(mat, list);
+  }
+
+  private flushBatches(): void {
+    for (const [mat, geos] of this.batches) {
+      const merged = mergeGeometries(geos.map((g) => (g.index ? g.toNonIndexed() : g)));
+      if (!merged) continue;
+      const mesh = new THREE.Mesh(merged, mat);
+      mesh.castShadow = mesh.receiveShadow = true;
+      this.group.add(mesh);
+      geos.forEach((g) => g.dispose());
+    }
+    this.batches.clear();
   }
 
   /** True if (x, z) is on a drivable street (or the bridge). */
@@ -104,15 +139,10 @@ export class City {
   private fixedBox(cx: number, cy: number, cz: number, hx: number, hy: number, hz: number, mat?: THREE.Material | THREE.Material[]): void {
     const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(cx, cy, cz));
     this.world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setFriction(0.6), body);
-    if (mat) {
-      const mesh = new THREE.Mesh(this.buildingGeometry(hx * 2, hy * 2, hz * 2), mat);
-      mesh.position.set(cx, cy, cz);
-      mesh.castShadow = mesh.receiveShadow = true;
-      this.group.add(mesh);
-    }
+    if (mat) this.batch(this.buildingGeometry(hx * 2, hy * 2, hz * 2).translate(cx, cy, cz), mat as THREE.Material);
   }
 
-  /** Box with UVs scaled so the facade texture tiles in 6 m x 4 m bays. */
+  /** Box with UVs scaled so one facade repeat covers 24 m x 16 m (4 x 4 bays of 6 m x 4 m). */
   private buildingGeometry(w: number, h: number, d: number): THREE.BoxGeometry {
     const geo = new THREE.BoxGeometry(w, h, d);
     const uv = geo.attributes.uv as THREE.BufferAttribute;
@@ -121,7 +151,7 @@ export class City {
       for (let k = 0; k < 4; k++) {
         const i = f * 4 + k;
         if (faceWidths[f] === 0) uv.setXY(i, 0, 0);
-        else uv.setXY(i, uv.getX(i) * Math.max(1, Math.round(faceWidths[f] / 6)), uv.getY(i) * Math.max(1, Math.round(h / 4)));
+        else uv.setXY(i, (uv.getX(i) * Math.max(1, Math.round(faceWidths[f] / 6))) / 4, (uv.getY(i) * Math.max(1, Math.round(h / 4))) / 4);
       }
     }
     return geo;
@@ -140,12 +170,15 @@ export class City {
     const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(CITY_MAX_X / 2, -0.5, SEAWALL_Z - d / 2));
     this.world.createCollider(RAPIER.ColliderDesc.cuboid(w / 2, 0.5, d / 2).setFriction(0.6), body);
 
-    const waterTex = waterTexture();
-    waterTex.repeat.set(200, 200);
-    const water = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.25, metalness: 0.3 }));
-    water.rotation.x = -Math.PI / 2;
-    water.position.set(CITY_MAX_X / 2, -4, SEAWALL_Z + 1000);
-    this.group.add(water);
+    const ripples = waterNormalTexture();
+    ripples.repeat.set(120, 120);
+    this.water = new THREE.Mesh(
+      new THREE.PlaneGeometry(8000, 8000),
+      new THREE.MeshPhysicalMaterial({ color: 0x1d4a5a, roughness: 0.12, metalness: 0.1, normalMap: ripples, normalScale: new THREE.Vector2(0.35, 0.35), clearcoat: 0.6 }),
+    );
+    this.water.rotation.x = -Math.PI / 2;
+    this.water.position.set(CITY_MAX_X / 2, -4, SEAWALL_Z + 1000);
+    this.group.add(this.water);
 
     // Dashed center lines.
     const dashGeo = new THREE.PlaneGeometry(0.3, 4).rotateX(-Math.PI / 2);
@@ -169,6 +202,36 @@ export class City {
     const m = new THREE.Matrix4();
     dashes.forEach((p, k) => dashMesh.setMatrixAt(k, m.makeRotationY(dashRot[k]).setPosition(p)));
     this.group.add(dashMesh);
+
+    // Solid white edge lines along each block, and zebra crossings at every intersection.
+    const white = new THREE.MeshStandardMaterial({ color: 0xe9e9e4, roughness: 0.7 });
+    const inner = PITCH - STREET_HALF * 2;
+    const lineGeo = new THREE.PlaneGeometry(0.2, inner).rotateX(-Math.PI / 2);
+    const stripeGeo = new THREE.PlaneGeometry(0.6, 4.5).rotateX(-Math.PI / 2);
+    const lines: THREE.Matrix4[] = [];
+    const stripes: THREE.Matrix4[] = [];
+    for (let i = 0; i <= NX; i++) {
+      for (let j = 0; j <= NZ; j++) {
+        const cx = i * PITCH;
+        const cz = j * PITCH;
+        for (const off of [-STREET_HALF + 1, STREET_HALF - 1]) {
+          if (j < NZ) lines.push(new THREE.Matrix4().makeTranslation(cx + off, 0.02, cz + PITCH / 2));
+          if (i < NX) lines.push(new THREE.Matrix4().makeRotationY(Math.PI / 2).setPosition(cx + PITCH / 2, 0.02, cz + off));
+        }
+        for (let k = -STREET_HALF + 1.5; k <= STREET_HALF - 1.5; k += 1.3) {
+          for (const side of [-1, 1]) {
+            stripes.push(new THREE.Matrix4().makeTranslation(cx + k, 0.025, cz + side * (STREET_HALF + 2.5)));
+            stripes.push(new THREE.Matrix4().makeRotationY(Math.PI / 2).setPosition(cx + side * (STREET_HALF + 2.5), 0.025, cz + k));
+          }
+        }
+      }
+    }
+    for (const [geo, mats] of [[lineGeo, lines], [stripeGeo, stripes]] as const) {
+      const inst = new THREE.InstancedMesh(geo, white, mats.length);
+      mats.forEach((mm, k) => inst.setMatrixAt(k, mm));
+      inst.receiveShadow = true;
+      this.group.add(inst);
+    }
   }
 
   private buildBlocks(): void {
@@ -209,8 +272,39 @@ export class City {
         const w = lw - gap;
         const d = ld - gap;
         const mat = this.facadeMats[Math.floor(r() * this.facadeMats.length)];
-        this.fixedBox(x0 + a * lw + lw / 2, h / 2, z0 + b * ld + ld / 2, w / 2, h / 2, d / 2, mat);
+        const cx = x0 + a * lw + lw / 2;
+        const cz = z0 + b * ld + ld / 2;
+        this.fixedBox(cx, h / 2, cz, w / 2, h / 2, d / 2, mat);
+        this.decorateBuilding(cx, cz, w, d, h);
       }
+    }
+  }
+
+  /** Visual-only details: shop fronts, cornice, rooftop AC units and water tanks. */
+  private decorateBuilding(cx: number, cz: number, w: number, d: number, h: number): void {
+    const r = this.rand;
+    const shop = new THREE.BoxGeometry(w + 0.3, 4.2, d + 0.3);
+    // Shop texture repeats every 24 m along each face.
+    const uv = shop.attributes.uv as THREE.BufferAttribute;
+    const widths = [d, d, 0, 0, w, w];
+    for (let i = 0; i < uv.count; i++) {
+      const f = Math.floor(i / 4);
+      uv.setX(i, widths[f] === 0 ? 0 : (uv.getX(i) * widths[f]) / 24);
+    }
+    this.batch(shop.translate(cx, 2.1, cz), this.storefrontMat);
+    this.batch(new THREE.BoxGeometry(w + 0.8, 0.7, d + 0.8).translate(cx, h + 0.1, cz), this.trimMat);
+    this.batch(new THREE.BoxGeometry(w + 0.5, 0.35, d + 0.5).translate(cx, 4.4, cz), this.trimMat);
+    const units = 1 + Math.floor(r() * 3);
+    for (let k = 0; k < units; k++) {
+      const ux = cx + (r() - 0.5) * (w - 4);
+      const uz = cz + (r() - 0.5) * (d - 4);
+      this.batch(new THREE.BoxGeometry(2.2, 1.4, 1.6).translate(ux, h + 1.15, uz), this.roofMat);
+    }
+    if (r() < 0.5) {
+      const tx = cx + (r() - 0.5) * (w - 5);
+      const tz = cz + (r() - 0.5) * (d - 5);
+      this.batch(new THREE.CylinderGeometry(1.3, 1.3, 2.4, 14).translate(tx, h + 2.6, tz), this.roofMat);
+      this.batch(new THREE.BoxGeometry(2.2, 1.2, 2.2).translate(tx, h + 0.9, tz), this.roofMat);
     }
   }
 
@@ -246,7 +340,7 @@ export class City {
     }
   }
 
-  private addDynamic(
+  addProp(
     mesh: THREE.Object3D,
     pos: THREE.Vector3,
     collider: RAPIER.ColliderDesc,
@@ -284,7 +378,7 @@ export class City {
       City.palmGeo = mergeGeometries([trunk, mergeGeometries(fronds)], true)!;
     }
     const mesh = new THREE.Mesh(City.palmGeo, City.palmMats);
-    this.addDynamic(mesh, pos.clone().setY(4.2), RAPIER.ColliderDesc.cylinder(4, 0.3).setMass(250).setFriction(0.6), 2500);
+    this.addProp(mesh, pos.clone().setY(4.2), RAPIER.ColliderDesc.cylinder(4, 0.3).setMass(250).setFriction(0.6), 2500);
   }
 
   private static postGeo?: THREE.BufferGeometry;
@@ -301,7 +395,7 @@ export class City {
     }
     // Arm points over the street.
     const heading = s.along === 'x' ? (s.out > 0 ? 0 : Math.PI) : s.out > 0 ? Math.PI / 2 : -Math.PI / 2;
-    this.addDynamic(new THREE.Mesh(City.postGeo, City.postMats), pos.clone().setY(3.7), RAPIER.ColliderDesc.cuboid(0.15, 3.5, 0.15).setMass(150), 1800, heading);
+    this.addProp(new THREE.Mesh(City.postGeo, City.postMats), pos.clone().setY(3.7), RAPIER.ColliderDesc.cuboid(0.15, 3.5, 0.15).setMass(150), 1800, heading);
   }
 
   private addKiosk(pos: THREE.Vector3, s: { along: 'x' | 'z'; out: number }): void {
@@ -318,7 +412,7 @@ export class City {
     bench.position.set(-0.3, -0.6, -0.5);
     g.add(roof, back, ad, bench);
     const heading = s.along === 'x' ? (s.out > 0 ? 0 : Math.PI) : s.out > 0 ? Math.PI / 2 : -Math.PI / 2;
-    this.addDynamic(g, pos.clone().setY(1.15), RAPIER.ColliderDesc.cuboid(2, 1.15, 0.9).setMass(400), 6000, heading);
+    this.addProp(g, pos.clone().setY(1.15), RAPIER.ColliderDesc.cuboid(2, 1.15, 0.9).setMass(400), 6000, heading);
   }
 
   private static parkedColors = [0xc0392b, 0x2e86de, 0xf1c40f, 0xecf0f1, 0x16a085, 0x7f8c8d, 0x8e44ad];
@@ -339,12 +433,13 @@ export class City {
       w.position.set(x, -0.4, z);
       g.add(w);
     }
-    this.addDynamic(g, pos.clone().setY(0.78), RAPIER.ColliderDesc.cuboid(0.9, 0.75, 2.1).setMass(1300).setFriction(0.8), 15000, heading);
+    this.addProp(g, pos.clone().setY(0.78), RAPIER.ColliderDesc.cuboid(0.9, 0.75, 2.1).setMass(1300).setFriction(0.8), 15000, heading);
   }
 
   private buildStation(): void {
     const S = STATION;
-    const wall = new THREE.MeshStandardMaterial({ map: this.facade, color: 0xe6edf5, roughness: 0.85 });
+    const office = this.facadeSets[1];
+    const wall = new THREE.MeshStandardMaterial({ map: office.map, emissiveMap: office.emissive, emissive: 0xffffff, emissiveIntensity: 1.2, color: 0xe6edf5, roughness: 0.85 });
     const stripe = new THREE.MeshStandardMaterial({ color: 0x1d3f8f, roughness: 0.6 });
     const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, mat: THREE.Material = wall) =>
       this.fixedBox((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, (x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2, mat);
@@ -380,7 +475,7 @@ export class City {
       for (let col = 0; col < cols; col++) {
         const mesh = new THREE.Mesh(brickGeo, brickMat);
         const pos = new THREE.Vector3(S.x1 - 0.25, bh / 2 + row * bh, S.roomZ0 + bw / 2 + col * bw);
-        this.addDynamic(mesh, pos, RAPIER.ColliderDesc.cuboid(0.25, bh / 2 - 0.01, bw / 2 - 0.01).setMass(60).setFriction(0.8), 300);
+        this.addProp(mesh, pos, RAPIER.ColliderDesc.cuboid(0.25, bh / 2 - 0.01, bw / 2 - 0.01).setMass(60).setFriction(0.8), 300);
       }
     }
   }

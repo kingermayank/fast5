@@ -316,3 +316,44 @@ body {
     opacity: 0.4;
   }
 }
+
+#title-card {
+  position: absolute;
+  top: 42%;
+  width: 100%;
+  text-align: center;
+  font-size: clamp(32px, 7vw, 84px);
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.12em;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.7);
+  animation: title-in 1.2s ease-out both;
+}
+
+@keyframes title-in {
+  from {
+    opacity: 0;
+    letter-spacing: 0.4em;
+  }
+}
+
+#cutscene-text b {
+  color: #ffb13b;
+  letter-spacing: 1px;
+}
+
+.cutscene-video {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
+  background: #000;
+  z-index: 5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #title-card {
+    animation: none;
+  }
+}

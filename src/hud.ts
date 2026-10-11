@@ -33,8 +33,6 @@ export class Hud {
   private selected = 0;
   private onSelect?: (id: string) => void;
   private cutsceneEl = $('cutscene');
-  private cutsceneLines: [number, string][] = [];
-  private cutsceneTime = 0;
   private radioEl = $('radio');
   private radioTimer = 0;
   private map = $('minimap') as HTMLCanvasElement;
@@ -97,12 +95,28 @@ export class Hud {
     this.radioEl.classList.add('hidden');
   }
 
-  /** Timed title cards: [secondsFromStart, text]. Empty list hides it. */
-  cutscene(lines: [number, string][]): void {
-    this.cutsceneLines = lines;
-    this.cutsceneTime = 0;
-    this.cutsceneEl.classList.toggle('hidden', lines.length === 0);
-    $('cutscene-text').textContent = '';
+  /** Letterbox bars for cutscenes; hides the gameplay HUD while on. */
+  cinematic(on: boolean): void {
+    this.cutsceneEl.classList.toggle('hidden', !on);
+    if (on) this.showHud(false);
+  }
+
+  subtitle(who: string, text: string): void {
+    const el = $('cutscene-text');
+    el.innerHTML = '';
+    if (!text) return;
+    if (who) {
+      const b = document.createElement('b');
+      b.textContent = who + ': ';
+      el.append(b);
+    }
+    el.append(text);
+  }
+
+  titleCard(text: string): void {
+    const el = $('title-card');
+    el.textContent = text;
+    el.classList.toggle('hidden', !text);
   }
 
   radio(who: string, text: string): void {
@@ -117,12 +131,6 @@ export class Hud {
   // ------------------------------------------------------------ per frame
 
   update(dt: number, s: HudState | null): void {
-    if (this.cutsceneLines.length) {
-      this.cutsceneTime += dt;
-      const current = this.cutsceneLines.filter(([t]) => t <= this.cutsceneTime).pop();
-      $('cutscene-text').textContent = current ? current[1] : '';
-      if (this.cutsceneTime > 11) this.cutscene([]);
-    }
     if (this.radioTimer > 0) {
       this.radioTimer -= dt;
       if (this.radioTimer <= 0) this.radioEl.classList.add('hidden');

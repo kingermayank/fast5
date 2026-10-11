@@ -27,6 +27,8 @@ interface Cop {
 export class Police {
   readonly cops: Cop[] = [];
   wreckedCount = 0;
+  /** Called when a cruiser is wrecked, with where it happened. */
+  onWreck?: (at: THREE.Vector3) => void;
   private spawnTimer = 2;
   private time = 0;
 
@@ -97,6 +99,7 @@ export class Police {
     const flash = Math.floor(this.time * 6) % 2 === 0;
     for (const c of this.cops) {
       c.v.render(dt);
+      c.v.model.brake.emissiveIntensity = c.wrecked ? 0 : c.v.controls.brake > 0 ? 4 : 1.2;
       const bar = c.v.model.lightBar;
       if (bar && !c.wrecked) {
         bar.red.emissiveIntensity = flash ? 3 : 0.2;
@@ -116,6 +119,7 @@ export class Police {
     c.wrecked = true;
     c.v.enabled = false;
     this.wreckedCount++;
+    this.onWreck?.(c.v.position);
     const b = c.v.body;
     b.setEnabledRotations(true, true, true, true);
     if (from) {

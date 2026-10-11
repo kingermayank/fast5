@@ -25,10 +25,39 @@ function noise(ctx: CanvasRenderingContext2D, w: number, h: number, count: numbe
 }
 
 export function asphaltTexture(): THREE.CanvasTexture {
-  return canvasTexture(256, 256, (ctx) => {
-    ctx.fillStyle = '#3b3d41';
-    ctx.fillRect(0, 0, 256, 256);
-    noise(ctx, 256, 256, 7000, 0.07);
+  return canvasTexture(512, 512, (ctx) => {
+    ctx.fillStyle = '#34363a';
+    ctx.fillRect(0, 0, 512, 512);
+    noise(ctx, 512, 512, 30000, 0.08);
+    // Patches, cracks and oil stains.
+    for (let i = 0; i < 10; i++) {
+      ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '20,20,22' : '70,72,76'},0.25)`;
+      ctx.fillRect(Math.random() * 512, Math.random() * 512, 30 + Math.random() * 90, 20 + Math.random() * 60);
+    }
+    ctx.strokeStyle = 'rgba(15,15,15,0.5)';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 14; i++) {
+      let x = Math.random() * 512;
+      let y = Math.random() * 512;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      for (let k = 0; k < 6; k++) {
+        x += (Math.random() - 0.5) * 40;
+        y += (Math.random() - 0.5) * 40;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    for (let i = 0; i < 8; i++) {
+      const g = ctx.createRadialGradient(256, 256, 0, 256, 256, 20);
+      g.addColorStop(0, 'rgba(10,10,12,0.35)');
+      g.addColorStop(1, 'rgba(10,10,12,0)');
+      ctx.save();
+      ctx.translate(Math.random() * 512 - 256, Math.random() * 512 - 256);
+      ctx.fillStyle = g;
+      ctx.fillRect(226, 226, 60, 60);
+      ctx.restore();
+    }
   });
 }
 
@@ -50,23 +79,153 @@ export function sidewalkTexture(): THREE.CanvasTexture {
   });
 }
 
+export type FacadeStyle = 'residential' | 'office' | 'colonial';
+
 /**
- * One window bay of a facade: white wall (tinted by material color) with a
- * dark window. One texture repeat = 6 m wide x 4 m tall. Texel (0,0) is wall,
- * so roofs (uv 0) sample plain wall.
+ * A 4 x 4 block of window bays (24 m wide x 16 m tall per repeat) so the
+ * pattern doesn't repeat every bay. Returns the color map (white wall, tinted
+ * by the material) and an emissive map where some windows are lit for dusk.
+ * Texel (0,0) is plain wall, so roofs (uv 0) sample wall.
  */
-export function facadeTexture(): THREE.CanvasTexture {
-  return canvasTexture(64, 64, (ctx) => {
-    ctx.fillStyle = '#f2f2f2';
-    ctx.fillRect(0, 0, 64, 64);
-    noise(ctx, 64, 64, 300, 0.05);
-    ctx.fillStyle = '#26323d';
-    ctx.fillRect(14, 14, 36, 30);
-    ctx.fillStyle = 'rgba(160,200,230,0.35)';
-    ctx.fillRect(14, 14, 18, 30);
-    ctx.fillStyle = '#d8d8d8';
-    ctx.fillRect(10, 44, 44, 4);
+export function facadeTextures(style: FacadeStyle, seed: number): { map: THREE.CanvasTexture; emissive: THREE.CanvasTexture } {
+  let s = seed;
+  const rand = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const W = 512;
+  const bay = W / 4;
+  const color = document.createElement('canvas');
+  color.width = color.height = W;
+  const glow = document.createElement('canvas');
+  glow.width = glow.height = W;
+  const c = color.getContext('2d')!;
+  const g = glow.getContext('2d')!;
+  c.fillStyle = '#efefef';
+  c.fillRect(0, 0, W, W);
+  noise(c, W, W, 6000, 0.05);
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, W, W);
+  // Floor slab lines.
+  c.fillStyle = 'rgba(0,0,0,0.10)';
+  for (let row = 0; row < 4; row++) c.fillRect(0, row * bay + bay - 6, W, 6);
+
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 4; col++) {
+      const x = col * bay;
+      const y = row * bay;
+      const lit = rand() < 0.28;
+      const warm = rand() < 0.75 ? 'rgba(255,196,120,' : 'rgba(190,220,255,';
+      if (style === 'office') {
+        c.fillStyle = '#1d2a35';
+        c.fillRect(x + 4, y + 20, bay - 8, bay - 44);
+        c.fillStyle = 'rgba(150,190,220,0.35)';
+        c.fillRect(x + 4, y + 20, (bay - 8) * 0.45, bay - 44);
+        c.fillStyle = 'rgba(255,255,255,0.5)';
+        c.fillRect(x + bay / 2 - 1, y + 20, 2, bay - 44);
+        if (lit) {
+          g.fillStyle = warm + '0.9)';
+          g.fillRect(x + 4, y + 20, bay - 8, bay - 44);
+        }
+      } else {
+        const ww = style === 'colonial' ? 40 : 56;
+        const wh = style === 'colonial' ? 70 : 60;
+        const wx = x + (bay - ww) / 2;
+        const wy = y + 22;
+        c.fillStyle = '#26323d';
+        c.fillRect(wx, wy, ww, wh);
+        c.fillStyle = 'rgba(160,200,230,0.3)';
+        c.fillRect(wx, wy, ww / 2, wh);
+        // Frame and sill.
+        c.strokeStyle = 'rgba(255,255,255,0.85)';
+        c.lineWidth = 4;
+        c.strokeRect(wx, wy, ww, wh);
+        c.fillStyle = 'rgba(0,0,0,0.18)';
+        c.fillRect(wx - 6, wy + wh, ww + 12, 6);
+        if (style === 'colonial') {
+          // Wooden shutters, some closed.
+          const shut = rand() < 0.3;
+          c.fillStyle = ['#2f6b4f', '#6b3a2f', '#2f4f6b'][Math.floor(rand() * 3)];
+          if (shut) c.fillRect(wx, wy, ww, wh);
+          else {
+            c.fillRect(wx - 16, wy, 14, wh);
+            c.fillRect(wx + ww + 2, wy, 14, wh);
+          }
+          if (lit && !shut) {
+            g.fillStyle = warm + '0.95)';
+            g.fillRect(wx, wy, ww, wh);
+          }
+        } else {
+          // Balcony rail on some floors.
+          if (rand() < 0.5) {
+            c.fillStyle = 'rgba(40,40,40,0.75)';
+            c.fillRect(x + 10, wy + wh - 18, bay - 20, 3);
+            for (let k = x + 12; k < x + bay - 10; k += 7) c.fillRect(k, wy + wh - 18, 2, 18);
+          }
+          if (lit) {
+            g.fillStyle = warm + '0.9)';
+            g.fillRect(wx + 2, wy + 2, ww - 4, wh - 4);
+          }
+        }
+      }
+    }
+  }
+  // Keep the (0,0) corner plain wall for roofs.
+  c.fillStyle = '#e6e6e6';
+  c.fillRect(0, W - 6, 6, 6);
+  g.fillStyle = '#000';
+  g.fillRect(0, W - 6, 6, 6);
+  const wrap = (cv: HTMLCanvasElement, srgb: boolean) => {
+    const t = new THREE.CanvasTexture(cv);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  };
+  return { map: wrap(color, true), emissive: wrap(glow, true) };
+}
+
+/** Shop fronts for the ground floor: glass, frames and colored awnings. */
+export function storefrontTexture(): THREE.CanvasTexture {
+  return canvasTexture(512, 64, (ctx) => {
+    ctx.fillStyle = '#2b2b2e';
+    ctx.fillRect(0, 0, 512, 64);
+    const awnings = ['#b8322a', '#2a6fb8', '#2f8a4f', '#d9a52b', '#7a3fa0', '#e0e0e0'];
+    for (let i = 0; i < 4; i++) {
+      const x = i * 128;
+      ctx.fillStyle = '#16232c';
+      ctx.fillRect(x + 8, 22, 112, 40);
+      ctx.fillStyle = 'rgba(255,220,170,0.35)';
+      ctx.fillRect(x + 8, 22, 112, 40);
+      ctx.fillStyle = awnings[(i * 7 + 3) % awnings.length];
+      ctx.fillRect(x + 4, 6, 120, 14);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      for (let k = x + 4; k < x + 124; k += 12) ctx.fillRect(k, 6, 6, 14);
+      ctx.fillStyle = '#888';
+      ctx.fillRect(x + 60, 22, 4, 40);
+    }
   });
+}
+
+/** Procedural ripple normal map for water. */
+export function waterNormalTexture(): THREE.CanvasTexture {
+  const size = 256;
+  const tex = canvasTexture(size, size, (ctx) => {
+    const img = ctx.createImageData(size, size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const a = (x / size) * Math.PI * 2;
+        const b = (y / size) * Math.PI * 2;
+        const nx = Math.sin(a * 3 + Math.cos(b * 2) * 2) * 0.5 + Math.sin(a * 7 + b * 5) * 0.25;
+        const ny = Math.cos(b * 4 + Math.sin(a * 3) * 2) * 0.5 + Math.cos(b * 9 - a * 4) * 0.25;
+        const i = (y * size + x) * 4;
+        img.data[i] = 128 + nx * 90;
+        img.data[i + 1] = 128 + ny * 90;
+        img.data[i + 2] = 255;
+        img.data[i + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  });
+  tex.colorSpace = THREE.NoColorSpace;
+  return tex;
 }
 
 export function signTexture(text: string, bg: string, fg: string): THREE.CanvasTexture {
