@@ -94,6 +94,7 @@ export class Hud {
     $('overlay-prompt').textContent = prompt;
     this.overlay.classList.remove('hidden');
     this.showHud(false);
+    this.radioEl.classList.add('hidden');
   }
 
   /** Timed title cards: [secondsFromStart, text]. Empty list hides it. */

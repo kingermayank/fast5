@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { angleTo, avoidance, seek } from './ai';
+import { angleTo, seek } from './ai';
 import {
   BRIDGE_X,
   CAR_STARTS,
@@ -14,6 +14,7 @@ import {
 } from './city';
 import { Hud } from './hud';
 import { Input, type ControlState } from './input';
+import { PartnerDriver } from './partner';
 import { FIXED_DT, initPhysics } from './physics';
 import { Police } from './police';
 import { Cable, Vault } from './vault';
@@ -40,7 +41,7 @@ export const CHARACTERS: Record<CharacterId, { name: string; spec: VehicleSpec; 
   },
 };
 
-type State = 'select' | 'intro' | 'breach' | 'chase' | 'outro' | 'busted';
+type State = 'select' | 'intro' | 'breach' | 'chase' | 'outro' | 'busted' | 'lost';
 
 const CABLE_TOW_LENGTH = 10;
 
@@ -84,6 +85,7 @@ async function start(): Promise<void> {
   let character: CharacterId = 'rico';
   let player!: Vehicle;
   let partner!: Vehicle;
+  let partnerAi!: PartnerDriver;
   let cables: Cable[] = [];
   let stateTime = 0;
   let chaseTime = 0;
@@ -103,6 +105,8 @@ async function start(): Promise<void> {
     player = new Vehicle(world, me.spec, startFor(me.side), 0);
     partner = new Vehicle(world, other.spec, startFor(other.side), 0);
     scene.add(player.model.group, partner.model.group);
+    partnerAi = new PartnerDriver(world, city, -me.side);
+    partnerAi.reset(player);
     for (const [car, side] of [[player, me.side], [partner, other.side]] as const) {
       const len = car.towPoint().distanceTo(vault.anchorWorld(side)) + 0.6;
       cables.push(new Cable(world, scene, car, vault, side, len));
@@ -115,30 +119,6 @@ async function start(): Promise<void> {
   }
 
   // ----------------------------------------------------------- partner AI
-
-  function partnerControls(): ControlState {
-    const me = CHARACTERS[character];
-    const f = player.forward;
-    const left = new THREE.Vector3(f.z, 0, -f.x);
-    // Hold formation beside the player, on the partner's side.
-    const slot = player.position.addScaledVector(left, -me.side * 5.5);
-    const aim = slot.clone().addScaledVector(f, 12);
-    const pc = player.controls;
-    const behind = partner.position.sub(slot).dot(f);
-    let throttle = THREE.MathUtils.clamp(pc.throttle - behind * 0.25, 0, 1);
-    let brake = pc.brake;
-    if (behind > 4 && pc.brake === 0) brake = 0.3;
-    if (player.forwardSpeed < -1) {
-      // Player reversing: mirror it.
-      throttle = 0;
-      brake = 1;
-    }
-    const steer =
-      player.forwardSpeed < -1
-        ? pc.steer
-        : THREE.MathUtils.clamp(angleTo(partner, aim) * 2.2 + avoidance(world, partner, 12) * 0.6, -1, 1);
-    return { throttle, brake, steer, handbrake: pc.handbrake };
-  }
 
   /** R: line the crew back up in the middle of the nearest street, facing the next waypoint. */
   function resetConvoy(): void {
@@ -164,20 +144,26 @@ async function start(): Promise<void> {
     player.place(center.clone().addScaledVector(left, side * 2.75), heading);
     partner.place(center.clone().addScaledVector(left, -side * 2.75), heading);
     vault.place(center.clone().addScaledVector(f, -CABLE_TOW_LENGTH - 2.5), heading);
+    partnerAi.reset(player);
   }
 
   let partnerStuck = 0;
+  let partnerTeleports = 0;
   let playerStuck = 0;
 
   /** Teleport the partner back into formation if it's been wedged for a while. */
   function unstickPartner(dt: number): void {
     const pinned = Math.abs(player.forwardSpeed) > 5 && Math.abs(partner.forwardSpeed) < 1.5;
     partnerStuck = pinned ? partnerStuck + dt : 0;
-    if (partnerStuck < 2.5) return;
+    if (partnerStuck < 4) return;
     partnerStuck = 0;
     const f = player.forward;
     const slot = player.position.addScaledVector(new THREE.Vector3(f.z, 0, -f.x), -CHARACTERS[character].side * 5.5);
-    if (city.isStreet(slot.x, slot.z)) partner.place(slot, player.heading);
+    if (city.isStreet(slot.x, slot.z)) {
+      partner.place(slot, player.heading);
+      partnerAi.reset(player);
+      partnerTeleports++;
+    }
   }
 
   // ----------------------------------------------------------- physics
@@ -186,14 +172,14 @@ async function start(): Promise<void> {
     const driving = state === 'breach' || state === 'chase';
     const hold: ControlState = { throttle: 0, brake: 0, steer: 0, handbrake: true };
     player.controls = driving ? (autopilot ? seek(world, player, ROUTE[waypoint], 0.9) : input.controls()) : hold;
-    partner.controls = driving ? partnerControls() : player.controls;
+    partner.controls = driving ? partnerAi.controls(dt, player, partner, vault.position) : player.controls;
     player.step(dt);
     partner.step(dt);
 
     if (state === 'chase' && !noCops) {
       const onBridge = player.position.z > SEAWALL_Z;
       police.step(dt, player, vault, heat, onBridge);
-    } else if (state === 'outro' || state === 'busted') {
+    } else if (state === 'outro' || state === 'busted' || state === 'lost') {
       police.step(dt, player, vault, heat, player.position.z > SEAWALL_Z);
     }
 
@@ -216,6 +202,15 @@ async function start(): Promise<void> {
       enter('chase');
       heat = 1;
       hud.radio('LENA', 'It’s out! Every cop in Porto Sol is coming. Follow my route.');
+    }
+
+    if ((state === 'breach' || state === 'chase') && inWater()) {
+      enter('lost');
+      hud.showOverlay(
+        'VAULT LOST',
+        `The vault went over the side and into the lagoon.\nSalazar’s money is at the bottom of the bay.\n\nCops wrecked: ${police.wreckedCount}   Damage: ${Hud.money(damage)}`,
+        'Press Enter to try again',
+      );
     }
 
     if (state === 'chase') {
@@ -260,11 +255,16 @@ async function start(): Promise<void> {
         'Press Enter to play again',
       );
     }
-    if ((state === 'busted' || (state === 'outro' && stateTime > 4)) && input.wasPressed('Enter')) {
+    if ((state === 'busted' || state === 'lost' || (state === 'outro' && stateTime > 4)) && input.wasPressed('Enter')) {
       const url = new URL(location.href);
       url.searchParams.set('crew', character);
       location.href = url.toString();
     }
+  }
+
+  /** The vault or either car has fallen off the bridge or the seawall. */
+  function inWater(): boolean {
+    return [vault.body, player.body, partner.body].some((b) => b.translation().y < -1.5);
   }
 
   function calloutTurn(): void {
@@ -369,6 +369,8 @@ async function start(): Promise<void> {
     player: player?.position.toArray().map(Math.round),
     speedKmh: player ? Math.round(player.forwardSpeed * 3.6) : 0,
     partner: partner?.position.toArray().map(Math.round),
+    partnerGap: player ? +player.position.distanceTo(partner.position).toFixed(1) : 0,
+    partnerTeleports,
     vault: vault.position.toArray().map(Math.round),
     cables: cables.map((c) => +c.length.toFixed(1)),
     heat,
