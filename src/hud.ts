@@ -12,15 +12,19 @@ export interface HudState {
   damage: number;
   wrecked: number;
   objective: string;
-  distance: number;
-  /** Angle to the next waypoint (radians, positive = left), or null to hide. */
+  /** Guidance under the arrow, e.g. "LEFT IN 80 m". */
+  distance: string;
+  /** Angle to the route ahead (radians, positive = left), or null to hide. */
   arrow: number | null;
   player: THREE.Vector3;
   heading: number;
   vault: THREE.Vector3;
   partner: THREE.Vector3;
   cops: THREE.Vector3[];
-  waypoint: number;
+  /** The GPS route, next intersection first. */
+  route: THREE.Vector3[];
+  /** Points of interest on the minimap. */
+  blips: { pos: THREE.Vector3; color: string; label: string }[];
 }
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -40,8 +44,6 @@ export class Hud {
   private radioTimer = 0;
   private map = $('minimap') as HTMLCanvasElement;
   private ctx = this.map.getContext('2d')!;
-
-  constructor(private route: THREE.Vector3[]) {}
 
   static money(n: number): string {
     return '$' + Math.round(n).toLocaleString('en-US');
@@ -180,7 +182,7 @@ export class Hud {
     $('damage').textContent = Hud.money(s.damage);
     $('wrecked').textContent = String(s.wrecked);
     $('objective').textContent = s.objective;
-    $('distance').textContent = s.arrow === null ? '' : `${Math.round(s.distance)} m`;
+    $('distance').textContent = s.arrow === null ? '' : s.distance;
     const arrow = $('arrow');
     arrow.classList.toggle('hidden', s.arrow === null);
     if (s.arrow !== null) arrow.style.transform = `rotate(${(-s.arrow * 180) / Math.PI}deg)`;
@@ -190,11 +192,23 @@ export class Hud {
     this.drawMap(s);
   }
 
-  /** North-up map centered on the player. World +x is drawn to the left (top-down view). */
+  /**
+   * Heading-up map centered on the player (like GTA's radar): the way you're
+   * facing is always up, so a turn on the map is the same turn on the road.
+   */
   private drawMap(s: HudState): void {
     const ctx = this.ctx;
     const c = MAP_SIZE / 2;
-    const toMap = (p: THREE.Vector3): [number, number] => [c - (p.x - s.player.x) * MAP_SCALE, c - (p.z - s.player.z) * MAP_SCALE];
+    const sin = Math.sin(s.heading);
+    const cos = Math.cos(s.heading);
+    const toMap = (p: THREE.Vector3): [number, number] => {
+      const dx = p.x - s.player.x;
+      const dz = p.z - s.player.z;
+      const ahead = dx * sin + dz * cos;
+      // Left of the car (+x when facing +z) is drawn to the left.
+      const left = dx * cos - dz * sin;
+      return [c - left * MAP_SCALE, c - ahead * MAP_SCALE];
+    };
     ctx.clearRect(0, 0, MAP_SIZE, MAP_SIZE);
     ctx.save();
     ctx.beginPath();
@@ -207,31 +221,41 @@ export class Hud {
     ctx.strokeStyle = 'rgba(200,205,215,0.45)';
     ctx.lineWidth = STREET_HALF * 2 * MAP_SCALE;
     ctx.beginPath();
-    for (let i = 0; i <= 5; i++) {
-      const [x0, y0] = toMap(new THREE.Vector3(i * PITCH, 0, -STREET_HALF));
-      const [x1, y1] = toMap(new THREE.Vector3(i * PITCH, 0, 7 * PITCH + STREET_HALF));
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-    }
-    for (let j = 0; j <= 7; j++) {
-      const [x0, y0] = toMap(new THREE.Vector3(-STREET_HALF, 0, j * PITCH));
-      const [x1, y1] = toMap(new THREE.Vector3(5 * PITCH + STREET_HALF, 0, j * PITCH));
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-    }
-    const [bx0, by0] = toMap(new THREE.Vector3(BRIDGE_X, 0, SEAWALL_Z));
-    const [bx1, by1] = toMap(new THREE.Vector3(BRIDGE_X, 0, SEAWALL_Z + 1000));
-    ctx.moveTo(bx0, by0);
-    ctx.lineTo(bx1, by1);
+    const line = (a: THREE.Vector3, b: THREE.Vector3) => {
+      ctx.moveTo(...toMap(a));
+      ctx.lineTo(...toMap(b));
+    };
+    for (let i = 0; i <= 5; i++) line(new THREE.Vector3(i * PITCH, 0, -STREET_HALF), new THREE.Vector3(i * PITCH, 0, 7 * PITCH + STREET_HALF));
+    for (let j = 0; j <= 7; j++) line(new THREE.Vector3(-STREET_HALF, 0, j * PITCH), new THREE.Vector3(5 * PITCH + STREET_HALF, 0, j * PITCH));
+    line(new THREE.Vector3(BRIDGE_X, 0, SEAWALL_Z), new THREE.Vector3(BRIDGE_X, 0, SEAWALL_Z + 1000));
     ctx.stroke();
 
-    // Remaining route.
-    ctx.strokeStyle = '#ffcc33';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(c, c);
-    for (let i = s.waypoint; i < this.route.length; i++) ctx.lineTo(...toMap(this.route[i]));
-    ctx.stroke();
+    // The GPS route.
+    if (s.route.length) {
+      ctx.strokeStyle = '#ffcc33';
+      ctx.lineWidth = 4;
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(c, c);
+      for (const n of s.route) ctx.lineTo(...toMap(n));
+      ctx.stroke();
+      const [gx, gy] = toMap(s.route[s.route.length - 1]);
+      ctx.fillStyle = '#ffcc33';
+      ctx.fillRect(gx - 5, gy - 5, 10, 10);
+    }
+
+    for (const b of s.blips) {
+      const [x, y] = toMap(b.pos);
+      ctx.fillStyle = b.color;
+      ctx.beginPath();
+      ctx.arc(x, y, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#0b0d12';
+      ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(b.label, x, y + 0.5);
+    }
 
     const dot = (p: THREE.Vector3, color: string, r: number) => {
       const [x, y] = toMap(p);
@@ -246,7 +270,6 @@ export class Hud {
     dot(s.partner, '#7fd1ff', 3.5);
 
     ctx.translate(c, c);
-    ctx.rotate(-s.heading);
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.moveTo(0, -7);

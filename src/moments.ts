@@ -25,8 +25,8 @@ export interface MomentContext {
   partner: Vehicle;
   vault: Vault;
   cables: Cable[];
-  /** Mia's current waypoint index. */
-  waypoint(): number;
+  /** The GPS route: intersections still to drive through, next first. */
+  route(): THREE.Vector3[];
   /** Award style points and nitrous (0..1). */
   reward(style: number, nos: number): void;
   addDamage(amount: number): void;
@@ -281,6 +281,38 @@ export class BankJob {
 
   constructor(private ctx: MomentContext) {}
 
+  /**
+   * Per physics step: for a moment after the swing, steer the flying vault onto the
+   * lobby (set-piece magnetism, as arcade racers do for takedowns), so its spin and
+   * the cables can't drag it off line.
+   */
+  step(dt: number): void {
+    if (this.state !== 'hinted' || this.time - this.swungAt > 1.4) return;
+    const { vault } = this.ctx;
+    const vv = vault.body.linvel();
+    const to = v3(BANK.x0 + 6, 0, BANK.z0 + 6).sub(vault.position.setY(0));
+    const want = to.normalize().multiplyScalar(Math.max(Math.hypot(vv.x, vv.z), 16));
+    const k = Math.min(1, dt * 8);
+    vault.body.setLinvel({ x: vv.x + (want.x - vv.x) * k, y: vv.y, z: vv.z + (want.z - vv.z) * k }, true);
+    const w = vault.body.angvel();
+    vault.body.setAngvel({ x: w.x, y: w.y * (1 - k), z: w.z }, true);
+  }
+
+  /** Not pulled off yet (the bank shows on the minimap until then). */
+  get pending(): boolean {
+    return this.state !== 'done';
+  }
+
+  /** Heading north up the bank's street, with the GPS turning east at its corner. */
+  private approaching(): boolean {
+    const { player } = this.ctx;
+    const p = player.position;
+    if (Math.abs(p.x - BANK_CORNER.x) > 14 || p.z > BANK_CORNER.z || player.forward.z < 0.5) return false;
+    const route = this.ctx.route();
+    const k = route.findIndex((n) => n.distanceTo(BANK_CORNER) < 5);
+    return k >= 0 && !!route[k + 1] && route[k + 1].x > BANK_CORNER.x + 50;
+  }
+
   update(dt: number): void {
     const { player, vault, city, fx, sound, hud } = this.ctx;
     this.time += dt;
@@ -305,7 +337,7 @@ export class BankJob {
     const p = player.position;
     const toCorner = p.distanceTo(BANK_CORNER);
     // Wait until the spike strip is behind us so the two callouts don't overlap.
-    if (this.state === 'idle' && this.ctx.waypoint() === 2 && p.z > STRIP_Z + 12 && toCorner < 90 && player.forward.z > 0.5) {
+    if (this.state === 'idle' && p.z > STRIP_Z + 12 && toCorner < 90 && this.approaching()) {
       this.state = 'hinted';
       say(this.ctx, 'MIA', 'There’s a bank on the next corner. Swing that vault right through it!');
     }
@@ -321,22 +353,29 @@ export class BankJob {
     const inCorner = toCorner < 40 && vp.distanceTo(BANK_CORNER) < 35 && vp.x < BANK.x0 + 4;
     if (player.controls.handbrake && this.time - this.swungAt > 1.5 && inCorner && vSpeed > 4) {
       this.swungAt = this.time;
-      // The winches pay out cable so the vault can fly wide; they reel back in afterwards.
-      for (const c of this.ctx.cables) c.payOut(22);
-      // Fling it at the lobby with a little hop, so it flies instead of grinding to a stop.
+      // Fling it at the lobby with a little hop, fast enough to slide all the way in from
+      // wherever the swing started (friction takes about 4.5 m/s² off it on the ground).
       const target = v3(BANK.x0 + 6, 0, BANK.z0 + 6);
-      const dir = target.sub(vp.clone().setY(0)).normalize();
-      const m = vault.body.mass();
-      vault.body.applyImpulse({ x: dir.x * m * 16, y: m * 3.5, z: dir.z * m * 16 }, true);
+      const toLobby = target.sub(vp.clone().setY(0));
+      const dist = toLobby.length();
+      const dir = toLobby.normalize();
+      const speed = THREE.MathUtils.clamp(Math.sqrt(2 * 5 * dist) + 3, 14, 27);
+      vault.body.setLinvel({ x: dir.x * speed, y: 4, z: dir.z * speed }, true);
+      // The winches pay out enough cable for it to get there; they reel back in afterwards.
+      for (const c of this.ctx.cables) c.payOut(THREE.MathUtils.clamp(c.car.towPoint().distanceTo(target) + 8, 22, 34));
+      vault.ghostHeroes(true);
       this.ctx.fx.burst(vp.clone().setY(0.3), 0.8);
       this.ctx.sound.clank();
       this.ctx.director.shake = Math.max(this.ctx.director.shake, 0.6);
     }
 
+    if (this.time - this.swungAt > 1.4) vault.ghostHeroes(false);
+
     const inside = vp.x > BANK.x0 + 0.3 && vp.x < BANK.x1 && vp.z > BANK.z0 + 0.3 && vp.z < BANK.z1;
     if (inside && vSpeed > 3) this.smash();
     else if (p.x > 230 || p.z > 620) {
       this.state = 'done';
+      vault.ghostHeroes(false);
       hud.hint('');
       hud.banner('MISSED THE BANK', '', 1.4);
     }
@@ -345,6 +384,7 @@ export class BankJob {
   private smash(): void {
     const { vault, director, fx, sound, hud } = this.ctx;
     this.state = 'done';
+    vault.ghostHeroes(false);
     hud.hint('');
     const vp = vault.position;
     const vv = vault.body.linvel();

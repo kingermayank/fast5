@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RAPIER, syncMesh, yawQuat } from './physics';
 import type { Vehicle } from './vehicle';
-import { TOW_POINT } from './vehicle';
+import { DOMINANT, HERO_BIT, TOW_POINT } from './vehicle';
 
 const HALF = { x: 1.5, y: 1.25, z: 1.5 };
 export const VAULT_MASS = 4000;
@@ -9,6 +9,7 @@ export const VAULT_MASS = 4000;
 /** Steel vault: a heavy sliding box. Its local +z face is the door, where the cables attach. */
 export class Vault {
   readonly body: RAPIER.RigidBody;
+  readonly collider: RAPIER.Collider;
   readonly mesh = new THREE.Group();
 
   constructor(world: RAPIER.World, position: THREE.Vector3, heading: number) {
@@ -18,9 +19,10 @@ export class Vault {
         .setRotation(yawQuat(heading))
         .setCcdEnabled(true)
         .setAngularDamping(0.6)
-        .setLinearDamping(0.05),
+        .setLinearDamping(0.05)
+        .setDominanceGroup(DOMINANT),
     );
-    world.createCollider(
+    this.collider = world.createCollider(
       RAPIER.ColliderDesc.cuboid(HALF.x, HALF.y, HALF.z).setMass(VAULT_MASS).setFriction(0.45).setRestitution(0.05),
       this.body,
     );
@@ -47,6 +49,11 @@ export class Vault {
     const r = this.body.rotation();
     const t = this.body.translation();
     return new THREE.Vector3(a.x, a.y, a.z).applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w)).add(new THREE.Vector3(t.x, t.y, t.z));
+  }
+
+  /** Pass through the hero cars (while it's flung at the bank, so it can't clip the partner). */
+  ghostHeroes(on: boolean): void {
+    this.collider.setCollisionGroups(on ? (0xffff << 16) | (0xffff & ~HERO_BIT) : 0xffffffff);
   }
 
   place(position: THREE.Vector3, heading: number): void {
@@ -89,15 +96,39 @@ export class Vault {
   }
 }
 
+/** Cable stiffness (N/m) and damping (N·s/m): steel with a little give, so a yank is firm but not instant. */
+const STIFFNESS = 60_000;
+const DAMPING = 12_000;
+/** Most force one cable transmits through the spring (N); beyond that the hard stop takes over. */
+const MAX_PULL = 220_000;
+/** The hard stop (a rope joint) sits this far beyond the cable's length. */
+const STRETCH_LIMIT = 1.6;
+/** Winch speed (m/s). */
+const REEL_SPEED = 4;
+
+/** Velocity of a body at a world point. */
+function pointVelocity(body: RAPIER.RigidBody, p: THREE.Vector3): THREE.Vector3 {
+  const v = body.linvel();
+  const w = body.angvel();
+  const c = body.translation();
+  const r = p.clone().sub(new THREE.Vector3(c.x, c.y, c.z));
+  return new THREE.Vector3(v.x, v.y, v.z).add(new THREE.Vector3(w.x, w.y, w.z).cross(r));
+}
+
 /**
- * Steel cable from a car's winch to the vault. A rope joint: slack below its
- * length, rigid at it. The length can be reeled in (the joint is recreated).
+ * Steel cable from a car's winch to the vault: a stiff, damped spring that only
+ * pulls (slack when shorter than its length), with a rope joint a little beyond
+ * as a hard stop. The spring takes the edge off yanks that a rigid rope would
+ * deliver in a single step. The winch can pay out and reel in cable.
  */
 export class Cable {
   private joint: RAPIER.ImpulseJoint;
+  private jointLength: number;
   private mesh: THREE.Mesh;
   private reelTimer = 0;
   length: number;
+  /** Current tension (N), for effects. */
+  tension = 0;
 
   constructor(
     private world: RAPIER.World,
@@ -108,6 +139,7 @@ export class Cable {
     length: number,
   ) {
     this.length = length;
+    this.jointLength = length + STRETCH_LIMIT;
     this.joint = this.createJoint();
     this.mesh = new THREE.Mesh(
       new THREE.BufferGeometry(),
@@ -119,34 +151,67 @@ export class Cable {
 
   private createJoint(): RAPIER.ImpulseJoint {
     return this.world.createImpulseJoint(
-      RAPIER.JointData.rope(this.length, TOW_POINT, this.vault.anchorLocal(this.side)),
+      RAPIER.JointData.rope(this.jointLength, TOW_POINT, this.vault.anchorLocal(this.side)),
       this.car.body,
       this.vault.body,
       true,
     );
   }
 
-  /** Pay out cable to `length` (the winch reels it back in over the next second or so). */
+  /** Move the hard stop to match the cable length (joints can't be resized, so it's recreated). */
+  private syncJoint(): void {
+    const want = this.length + STRETCH_LIMIT;
+    if (Math.abs(want - this.jointLength) < 0.3) return;
+    this.jointLength = want;
+    this.world.removeImpulseJoint(this.joint, true);
+    this.joint = this.createJoint();
+  }
+
+  /** Spring force for this physics step. Call before world.step(). */
+  step(dt: number): void {
+    const a = this.car.towPoint();
+    const b = this.vault.anchorWorld(this.side);
+    const d = b.clone().sub(a);
+    const dist = d.length();
+    const stretch = dist - this.length;
+    this.tension = 0;
+    if (stretch <= 0 || dist < 1e-3) return;
+    const n = d.divideScalar(dist);
+    // Positive when the ends are moving apart.
+    const opening = pointVelocity(this.vault.body, b).sub(pointVelocity(this.car.body, a)).dot(n);
+    const f = Math.min(MAX_PULL, STIFFNESS * stretch + DAMPING * opening);
+    if (f <= 0) return; // a cable can only pull
+    this.tension = f;
+    const j = f * dt;
+    this.car.body.applyImpulseAtPoint({ x: n.x * j, y: n.y * j, z: n.z * j }, a, true);
+    if (this.vault.body.isDynamic()) this.vault.body.applyImpulseAtPoint({ x: -n.x * j, y: -n.y * j, z: -n.z * j }, b, true);
+  }
+
+  /** Pay out cable to `length` (the winch reels it back in after a moment). */
   payOut(length: number): void {
     if (length <= this.length) return;
     this.length = length;
-    this.world.removeImpulseJoint(this.joint, true);
-    this.joint = this.createJoint();
+    this.syncJoint();
     // Hold the slack long enough for the swing to play out.
     this.reelTimer = 1.6;
   }
 
-  /** Winch toward `target` length, never longer than the current distance allows. */
+  /** Winch toward `target` length, without ever loading the spring with a sudden jerk. */
   reel(target: number, dt: number): void {
     this.reelTimer -= dt;
-    if (this.reelTimer > 0 || this.length <= target) return;
-    this.reelTimer = 0.2;
     const dist = this.car.towPoint().distanceTo(this.vault.anchorWorld(this.side));
-    const next = Math.max(target, Math.min(this.length, dist + 0.2) - 1);
-    if (next >= this.length - 0.05) return;
-    this.length = next;
-    this.world.removeImpulseJoint(this.joint, true);
-    this.joint = this.createJoint();
+    if (this.reelTimer > 0) {
+      // Just paid out: the drum free-spools while the vault flies, so nothing yanks it back.
+      if (dist > this.length) {
+        this.length = dist;
+        this.syncJoint();
+      }
+      return;
+    }
+    if (this.length <= target) return;
+    // Never wind in more than a little past the current distance: the winch stalls under load.
+    this.length = Math.max(target, this.length - REEL_SPEED * dt, Math.min(this.length, dist - 0.8));
+    this.syncJoint();
   }
 
   render(): void {

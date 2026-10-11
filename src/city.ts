@@ -362,13 +362,16 @@ export class City {
     collider: RAPIER.ColliderDesc,
     value: number,
     heading = 0,
+    /** Heavy enough to stop a cruiser dead (parked cars); see DOMINANT in vehicle.ts. */
+    dominant = false,
   ): void {
     const body = this.world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(pos.x, pos.y, pos.z)
         .setRotation({ x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) })
         .setSleeping(true)
-        .setAngularDamping(0.3),
+        .setAngularDamping(0.3)
+        .setDominanceGroup(dominant ? 1 : 0),
     );
     this.world.createCollider(collider, body);
     syncMesh(mesh, body);
@@ -449,7 +452,7 @@ export class City {
       w.position.set(x, -0.4, z);
       g.add(w);
     }
-    this.addProp(g, pos.clone().setY(0.78), RAPIER.ColliderDesc.cuboid(0.9, 0.75, 2.1).setMass(1300).setFriction(0.8), 15000, heading);
+    this.addProp(g, pos.clone().setY(0.78), RAPIER.ColliderDesc.cuboid(0.9, 0.75, 2.1).setMass(1300).setFriction(0.8), 15000, heading, true);
   }
 
   /** Remove a prop from the world (shattered glass). */

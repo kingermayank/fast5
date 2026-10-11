@@ -25,7 +25,7 @@ export interface PartnerContext {
   me: Vehicle;
   vault: THREE.Vector3;
   vaultVel: THREE.Vector3;
-  /** Mia's remaining route waypoints (intersections), next one first. */
+  /** The GPS route: intersections the player is expected to drive through, next first. */
   route: THREE.Vector3[];
   /** Cops, parked cars, kiosks... anything that moves or can be knocked over. */
   obstacles: Obstacle[];
@@ -43,7 +43,7 @@ export interface PartnerThoughts {
 
 /**
  * The AI partner. It reads the street grid like a driver would:
- *  - route knowledge: it knows the streets and Mia's route, so it plans its own
+ *  - route knowledge: it knows the streets and the live GPS route, so it plans its own
  *    lane through the next intersection instead of chasing the player;
  *  - prediction: it guesses the player's turn from their heading, steering and
  *    the route, before the player commits;

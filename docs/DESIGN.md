@@ -64,22 +64,28 @@ mountains around the city on the horizon.
 | --- | --- | --- |
 | 0. Breach cutscene | Aerial of Rio → Hobbs's armored truck charges the station under fire, rams the vault-room wall, backs out; Dom and Brian reverse up and hook the cables | — |
 | 1. Breach | Cops keep firing. Player floors it; both cars strain on the cables; the vault drags out over the rubble into the street | Vault leaves the building |
-| 2. City chase | Follow Mia's route through downtown. Cops spawn ahead, behind and from side streets. The vault wrecks anything it hits. Heat rises over time and with destruction | Reach the bridge. **BUSTED** if the player car is boxed in and stopped for too long |
+| 2. City chase | Get to the bridge by any road: the GPS draws Mia's route by default and reroutes the moment you take another street. Cops come from behind and from side streets. The vault wrecks anything it hits. Heat rises over time and with destruction | Reach the bridge. **BUSTED** if the player car is boxed in and stopped for too long |
 | 3. Bridge | Long straight bridge, Reyes's armed SUVs, cops everywhere. Use the vault as a wrecking ball | Reach the swap point |
 | 4. Outro | Text/cutscene: the decoy vault swap is revealed. Score screen | — |
 
 ## 4. Core mechanics
 
 - **Real physics (Rapier):** cars and the vault are rigid bodies. Each car connects to the vault
-  with a **rope joint** (slack under the max length, rigid at it), so the vault really swings
-  through corners and drags behind you.
+  with a **cable**: a stiff, damped spring that only pulls, with a rope joint just beyond as a hard
+  stop. The vault really swings through corners and drags behind you, without one-frame yanks.
 - **Two-car coordination:** the vault goes where the combined pull sends it. Turning hard swings it
   wide like a wrecking ball, which is useful for hitting cop cars. Both cars pull, so if the AI partner
   falls behind, the vault slows you down.
 - **Arcade car handling on top of physics:** drive force, lateral grip and yaw control are applied
-  as impulses, so collisions, ropes and pushes from cops all interact naturally.
-- **Police AI:** pursue and ram the player cars. Cruisers hit hard by the vault, or flipped,
-  are wrecked.
+  as impulses, so collisions, ropes and pushes from cops all interact naturally. Cornering is
+  limited to about 1.9 g (more with the handbrake); asking for more scrubs speed (understeer).
+- **Fair collisions:** the partner is ghosted to the player; hero cars, the vault and parked cars
+  outrank cruisers in contacts (Rapier dominance groups), so a ramming cop shoves you instead of
+  spinning you out.
+- **GPS:** Dijkstra over the street graph from wherever you are, recomputed when you leave the
+  route. Mia's planned streets (with the set pieces) are preferred but never required.
+- **Police AI:** pursue and ram the player cars, spawning behind and in side streets, out of
+  sight. Cruisers hit hard by the vault, or flipped, are wrecked.
 - **Destruction:** light posts, palm trees, kiosks and parked cars are dynamic bodies that go flying.
   Destruction feeds into the score ("property damage") and into heat.
 - **Heat:** 1–5 stars. More cops, faster spawns, roadblocks at high heat.
@@ -87,6 +93,9 @@ mountains around the city on the horizon.
   when you get free.
 
 ## 5. Roadmap
+
+See [`FIDELITY.md`](FIDELITY.md) for the research on GTA and the best racing games, the gap analysis
+and the phased plan toward that level of fidelity. The original prototype roadmap:
 
 1. ✅ Racing prototype: rendering, car, HUD
 2. 🚧 **Vault physics prototype**: two cars + rope joints + vault, city blocks, police pursuit, route to the bridge

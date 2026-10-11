@@ -22,6 +22,9 @@ interface Cop {
   stuck: number;
   reversing: number;
   wreckedFor: number;
+  /** Closing speed on the player last step (m/s), and whether they were touching. */
+  closing: number;
+  touching: boolean;
 }
 
 export class Police {
@@ -29,6 +32,10 @@ export class Police {
   wreckedCount = 0;
   /** Called when a cruiser is wrecked, with where it happened. */
   onWreck?: (at: THREE.Vector3) => void;
+  /** Called when a cruiser rams the player, with where and how hard (0..1). */
+  onBump?: (at: THREE.Vector3, strength: number) => void;
+  /** Set by the game: true if a point is on screen. Cops never appear where you can see them. */
+  visible: (p: THREE.Vector3) => boolean = () => false;
   private spawnTimer = 2;
   private time = 0;
 
@@ -62,6 +69,7 @@ export class Police {
         const rel = Math.hypot(vaultVel.x - cv.x, vaultVel.z - cv.z);
         const vaultHit = pos.distanceTo(vaultPos.clone().setY(0)) < 4.3 && rel > 6;
         if (vaultHit || c.lastSpeed - speed > 24) this.wreck(c, vaultHit ? vaultPos : null);
+        this.bump(c, target);
       }
       c.lastSpeed = speed;
       if (c.wrecked) {
@@ -115,6 +123,29 @@ export class Police {
     this.spawnTimer = 2;
   }
 
+  /**
+   * A cruiser ramming the player. Hero cars outrank cruisers in the physics (see
+   * DOMINANT in vehicle.ts) so a hit can't spin you out; instead you get a shove
+   * you can feel and drive through, with a crunch and a camera kick.
+   */
+  private bump(c: Cop, target: Vehicle): void {
+    let touching = false;
+    this.world.contactPair(c.v.collider, target.collider, (m) => {
+      if (m.numContacts() > 0 && m.contactDist(0) < 0.1) touching = true;
+    });
+    if (touching && !c.touching && c.closing > 3) {
+      const away = target.position.sub(c.v.position).normalize();
+      const push = Math.min(3, c.closing * 0.25) * target.spec.mass;
+      target.body.applyImpulse({ x: away.x * push, y: 0, z: away.z * push }, true);
+      this.onBump?.(target.position.add(c.v.position).multiplyScalar(0.5), Math.min(1, c.closing / 20));
+    }
+    c.touching = touching;
+    const toTarget = target.position.sub(c.v.position).normalize();
+    const cv = c.v.body.linvel();
+    const tv = target.body.linvel();
+    c.closing = (cv.x - tv.x) * toTarget.x + (cv.z - tv.z) * toTarget.z;
+  }
+
   private wreck(c: Cop, from: THREE.Vector3 | null): void {
     c.wrecked = true;
     c.v.enabled = false;
@@ -139,16 +170,18 @@ export class Police {
     if (this.spawnTimer > 0 || active >= 2 + heat || this.cops.length >= 10) return;
     this.spawnTimer = Math.max(1.2, 4.5 - heat * 0.6);
 
+    // Cops come from behind and the side streets, out of sight, never head-on from a street
+    // you're about to drive down. (Head-on surprises read as unfair crashes.)
     const tp = target.position;
+    const fwd = target.forward;
     let spot: THREE.Vector3 | undefined;
     if (onBridge) {
-      // Behind the player on the bridge, or ahead coming the other way.
-      const ahead = Math.random() < 0.4;
-      spot = new THREE.Vector3(BRIDGE_X + (Math.random() - 0.5) * 16, 0, tp.z + (ahead ? 220 : -130));
+      spot = new THREE.Vector3(BRIDGE_X + (Math.random() - 0.5) * 16, 0, tp.z - 130);
     } else {
       const options = this.city.intersections.filter((p) => {
         const d = p.distanceTo(tp);
-        return d > 110 && d < 260;
+        if (d < 110 || d > 260 || this.visible(p)) return false;
+        return p.clone().sub(tp).normalize().dot(fwd) < 0.2;
       });
       spot = options[Math.floor(Math.random() * options.length)];
     }
@@ -157,6 +190,6 @@ export class Police {
     const heading = Math.atan2(tp.x - spot.x, tp.z - spot.z);
     const v = new Vehicle(this.world, { ...COP_SPEC, topSpeed: COP_SPEC.topSpeed + heat * 3 }, spot, heading);
     this.scene.add(v.model.group);
-    this.cops.push({ v, wrecked: false, lastSpeed: 0, stuck: 0, reversing: 0, wreckedFor: 0 });
+    this.cops.push({ v, wrecked: false, lastSpeed: 0, stuck: 0, reversing: 0, wreckedFor: 0, closing: 0, touching: false });
   }
 }

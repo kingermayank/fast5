@@ -22,6 +22,21 @@ export const TOW_POINT = { x: 0, y: -0.25, z: -HALF.z - 0.1 };
 
 const NO_INPUT: ControlState = { throttle: 0, brake: 0, steer: 0, handbrake: false };
 
+/** Most sideways acceleration the tires can hold (m/s², about 1.9 g, arcade-generous). */
+const LATERAL_GRIP = 19;
+/** With the handbrake on, the tail steps out and the car can rotate faster (a drift). */
+const DRIFT_GRIP = 30;
+
+/** Collision group bits: the hero cars ghost through each other, but hit everything else. */
+export const HERO_BIT = 0x0002;
+export const HERO_GROUPS = (HERO_BIT << 16) | (0xffff & ~HERO_BIT);
+/**
+ * Dominance groups: in a contact, the higher group acts as if infinitely heavy.
+ * Hero cars, the vault and parked cars outrank cruisers and street furniture,
+ * so a cop can bump you but can't spin you out.
+ */
+export const DOMINANT = 1;
+
 /**
  * Rigid-body car with arcade handling: drive, grip and yaw are applied as
  * impulses/velocity corrections each step, so collisions and tow cables still
@@ -45,6 +60,13 @@ export class Vehicle {
   tireBlown = 0;
   /** Rear wheels spinning without traction (pulling against the vault). */
   wheelspin = 0;
+  /**
+   * How fast steering moves toward the input (1/s): toward full lock, and back
+   * to center. The player's keyboard steering eases in so taps aren't twitchy.
+   */
+  steerRate = { in: 10, out: 10 };
+  private lastSpeed = 0;
+  private accel = 0;
 
   constructor(
     private world: RAPIER.World,
@@ -102,6 +124,12 @@ export class Vehicle {
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }
 
+  /** Hero car: ghosts through the other hero car and outranks cops and props in collisions. */
+  makeHero(): void {
+    this.collider.setCollisionGroups(HERO_GROUPS);
+    this.body.setDominanceGroup(DOMINANT);
+  }
+
   /** Apply handling forces. Call before world.step(). */
   step(dt: number): void {
     const c = this.enabled ? this.controls : NO_INPUT;
@@ -128,6 +156,17 @@ export class Vehicle {
     if (!c.throttle && !c.brake) a = -vF * 0.4;
     if (c.handbrake) a -= vF * 0.8;
 
+    const easing = Math.abs(c.steer) > Math.abs(this.steer) && c.steer * this.steer >= 0 ? this.steerRate.in : this.steerRate.out;
+    this.steer += (c.steer - this.steer) * Math.min(1, easing * dt);
+    const speed = Math.abs(vF);
+    // Yaw rate the driver asks for (tight at low speed, gentler as speed rises)...
+    const demand =
+      Math.abs(this.steer) * this.spec.turnRate * Math.min(1, speed / 5) * (1 / (1 + speed / 40)) * (c.handbrake ? 1.5 : 1);
+    // ...but the tires can only hold so much sideways force. Asking for more scrubs
+    // speed instead (understeer), which tightens the line, as in most racing games.
+    const limit = ((c.handbrake ? DRIFT_GRIP : LATERAL_GRIP) * (blown ? 0.6 : 1)) / Math.max(speed, 1);
+    if (demand > limit && speed > 8 && !c.handbrake) a -= Math.sign(vF) * Math.min(1, (demand - limit) / limit) * 7;
+
     const gripRate = (c.handbrake ? 1.0 : this.spec.grip) * (blown ? 0.45 : 1);
     const dvL = -vL * Math.min(1, gripRate * dt);
     this.body.applyImpulse(
@@ -135,15 +174,7 @@ export class Vehicle {
       true,
     );
 
-    this.steer += (c.steer - this.steer) * Math.min(1, 10 * dt);
-    const speed = Math.abs(vF);
-    const yaw =
-      this.steer *
-      this.spec.turnRate *
-      Math.min(1, speed / 5) *
-      (1 / (1 + speed / 40)) *
-      Math.sign(vF) *
-      (c.handbrake ? 1.5 : 1);
+    const yaw = Math.sign(this.steer) * Math.min(demand, limit) * Math.sign(vF);
     const w = this.body.angvel();
     this.body.setAngvel({ x: w.x, y: w.y + (yaw - w.y) * Math.min(1, 12 * dt), z: w.z }, true);
 
@@ -185,6 +216,13 @@ export class Vehicle {
     syncMesh(this.model.group, this.body, -RIDE_HEIGHT);
     const roll = THREE.MathUtils.clamp(-this.lateralSpeed * 0.012 - this.steer * this.forwardSpeed * 0.0015, -0.08, 0.08);
     this.model.body.rotation.z += (roll - this.model.body.rotation.z) * Math.min(1, 8 * dt);
+    // Squat under power, dive under braking.
+    if (dt > 0) {
+      this.accel += ((this.forwardSpeed - this.lastSpeed) / dt - this.accel) * Math.min(1, dt * 6);
+      this.lastSpeed = this.forwardSpeed;
+    }
+    const pitch = THREE.MathUtils.clamp(-this.accel * 0.004, -0.045, 0.045);
+    this.model.body.rotation.x += (pitch - this.model.body.rotation.x) * Math.min(1, 8 * dt);
     for (const [i, s] of this.model.spinners.entries()) {
       // Rear wheels (indices 2, 3) spin freely while straining against the vault.
       const spin = i >= 2 ? Math.max(this.forwardSpeed / WHEEL_RADIUS, this.wheelspin * 45) : this.forwardSpeed / WHEEL_RADIUS;

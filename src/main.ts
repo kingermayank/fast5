@@ -4,10 +4,10 @@ import { Sound } from './audio';
 import { BreachScene } from './breach';
 import {
   BRIDGE_X,
+  BANK,
   CAR_STARTS,
   PITCH,
   City,
-  ROUTE,
   SEAWALL_Z,
   STATION_FACADE_X,
   SWAP_ZONE_Z,
@@ -17,13 +17,14 @@ import {
 import { Cutscene } from './cutscene';
 import { Director } from './director';
 import { Effects } from './fx';
+import { BRIDGE_FOOT_POS, Gps, type Turn } from './gps';
 import { createGraphics } from './graphics';
 import { Hud } from './hud';
 import { Input, type ControlState } from './input';
 import { BankJob, type MomentContext, SpikeStrip, ThePull } from './moments';
 import { type Obstacle, PartnerDriver } from './partner';
 import { exits, lanePath, leftOf, nextIntersection, roadHalfWidth, routeExit, snapDir, streetCenter } from './roads';
-import { FIXED_DT, initPhysics } from './physics';
+import { FIXED_DT, initPhysics, RAPIER } from './physics';
 import { Police } from './police';
 import { Cable, Vault } from './vault';
 import { Vehicle, type VehicleSpec } from './vehicle';
@@ -73,14 +74,23 @@ async function start(): Promise<void> {
   const breach = new BreachScene(world, scene, city, fx, sound);
 
   const input = new Input();
-  const hud = new Hud(ROUTE);
+  const hud = new Hud();
+  const gps = new Gps();
   const police = new Police(world, scene, city);
   const director = new Director();
+  police.visible = (p) => isVisible(p);
+  police.onBump = (at, k) => {
+    sound.crash(0.25 + k * 0.5);
+    input.rumble(0.3 + k * 0.6);
+    fx.burst(at.setY(0.9), 0.25 + k * 0.4);
+    director.shake = Math.max(director.shake, 0.25 + k * 0.6);
+  };
   police.onWreck = (at) => {
     fx.burst(at.clone().setY(1), 1);
     sound.crash(1);
     nos = Math.min(1, nos + 0.15);
     style += 100;
+    input.rumble(0.25, 120);
   };
 
   let state: State = 'select';
@@ -97,9 +107,11 @@ async function start(): Promise<void> {
   let streetDamage = 0;
   let heat = 0;
   let busted = 0;
-  let waypoint = 0;
   let accumulator = 0;
-  let lastCalloutWaypoint = -1;
+  /** Turn Mia last called out ("x,z" of its intersection), when she last rerouted, and the bridge call. */
+  let calledTurn = '';
+  let lastReroute = -10;
+  let bridgeCalled = false;
   let lastPlayerSpeed = 0;
   /** Nitrous meter 0..1 and style score. */
   let nos = 0.5;
@@ -123,7 +135,7 @@ async function start(): Promise<void> {
       partner,
       vault,
       cables,
-      waypoint: () => waypoint,
+      route: () => gps.nodes,
       reward: (points, refill) => {
         style += points;
         nos = Math.min(1, nos + refill);
@@ -145,6 +157,8 @@ async function start(): Promise<void> {
     const startFor = (side: number) => CAR_STARTS[side === 1 ? 1 : 0];
     player = new Vehicle(world, me.spec, startFor(me.side), 0);
     partner = new Vehicle(world, other.spec, startFor(other.side), 0);
+    player.makeHero();
+    partner.makeHero();
     scene.add(player.model.group, partner.model.group);
     partnerAi = new PartnerDriver(world, city, -me.side);
     partnerAi.reset(player);
@@ -166,10 +180,10 @@ async function start(): Promise<void> {
 
   // ----------------------------------------------------------- recovery
 
-  /** R: line the crew back up in the middle of the nearest street, facing the next waypoint. */
+  /** R: line the crew back up in the middle of the nearest street, facing along the GPS route. */
   function resetConvoy(): void {
     const p = player.position;
-    const target = ROUTE[waypoint];
+    const target = gps.nodes.find((n) => n.distanceTo(p) > 15) ?? gps.nodes[gps.nodes.length - 1] ?? p.clone().setZ(p.z + 50);
     let center: THREE.Vector3;
     let heading: number;
     const gx = Math.round(p.x / PITCH) * PITCH;
@@ -197,6 +211,35 @@ async function start(): Promise<void> {
   /** Partner quality, accumulated over the chase (seconds). */
   const pq = { time: 0, formation: 0, wrongWay: 0, stuck: 0, gapSum: 0, behindSum: 0, sideSum: 0, behind8: 0, tooWide: 0 };
 
+  /**
+   * Hard hits on the player's car for play-tests: a velocity jolt over 4 m/s in one
+   * physics step (~25 g), blamed on whatever was closest.
+   */
+  const impacts = { total: 0, cop: 0, partner: 0, vault: 0, other: 0, perMin: 0 };
+  let impactVel = new THREE.Vector3();
+  let impactCooldown = 0;
+  function measureImpacts(dt: number): void {
+    const v = player.body.linvel();
+    const now = new THREE.Vector3(v.x, 0, v.z);
+    const jolt = now.distanceTo(impactVel);
+    impactVel = now;
+    impactCooldown -= dt;
+    if (jolt < 4 || impactCooldown > 0) return;
+    impactCooldown = 0.3;
+    const p = player.position;
+    const near = (q: THREE.Vector3, r: number) => q.distanceTo(p) < r;
+    const cause = police.cops.some((c) => near(c.v.position, 6.5))
+      ? 'cop'
+      : near(partner.position, 5.5)
+        ? 'partner'
+        : near(vault.position.setY(0), 7)
+          ? 'vault'
+          : 'other';
+    impacts[cause]++;
+    impacts.total++;
+    impacts.perMin = +(impacts.total / Math.max(1, chaseTime / 60)).toFixed(1);
+  }
+
   function measurePartner(dt: number): void {
     const pf = player.forward;
     const v = partner.body.linvel();
@@ -218,15 +261,17 @@ async function start(): Promise<void> {
 
   /**
    * Debug autopilot used by play-tests: drives its lane like a person would,
-   * slowing for corners. 'route' follows Mia's route, 'wander' turns at random.
+   * slowing for corners. 'route' follows the GPS, 'detour' ignores it at
+   * random intersections (to test rerouting), 'wander' turns at random.
    */
   let autoPlan: { corner: THREE.Vector3; exit: THREE.Vector3 | null } | null = null;
   function autopilotControls(): ControlState {
     const p = player.position;
-    // Spun round or overshot: turn back toward the route.
-    if (autopilot === 'route' && ROUTE[waypoint].clone().sub(p).normalize().dot(player.forward) < -0.3) {
+    // Spun round: turn back toward the route.
+    const next = gps.nodes.find((n) => n.distanceTo(p) > 15);
+    if (autopilot !== 'wander' && next && next.clone().sub(p).normalize().dot(player.forward) < -0.3) {
       autoPlan = null;
-      return seek(world, player, ROUTE[waypoint], 0.6);
+      return seek(world, player, next, 0.6);
     }
     const d = snapDir(player.forward);
     if (autoPlan && (!autoPlan.exit || p.clone().sub(autoPlan.corner).dot(autoPlan.exit) > 14)) autoPlan = null;
@@ -234,14 +279,22 @@ async function start(): Promise<void> {
       const corner = nextIntersection(p, d);
       if (corner) {
         const options = exits(corner, d);
-        const exit = autopilot === 'wander' ? options[Math.floor(Math.random() * options.length)] : routeExit(corner, d, ROUTE.slice(waypoint));
+        const gpsExit = routeExit(corner, d, gps.nodes);
+        // 'detour' deliberately disobeys the GPS at about a third of the intersections.
+        const others = options.filter((o) => !gpsExit || o.dot(gpsExit) < 0.9);
+        const exit =
+          autopilot === 'wander'
+            ? options[Math.floor(Math.random() * options.length)]
+            : autopilot === 'detour' && others.length && Math.random() < 0.35
+              ? others[Math.floor(Math.random() * others.length)]
+              : gpsExit;
         autoPlan = { corner, exit: exit ?? null };
       }
     }
     // Follow the hints like a player would: aim for the spike-strip gap, handbrake at the bank.
     const gap = spikes?.gapX() ?? null;
     const lane = gap !== null && d.z > 0.9 ? gap - streetCenter(p, d).x : CHARACTERS[character].side * 3;
-    const bankSwing = autopilot === 'route' && p.distanceTo(new THREE.Vector3(100, 0, 500)) < 20;
+    const bankSwing = autopilot !== 'wander' && p.distanceTo(new THREE.Vector3(100, 0, 500)) < 20 && player.forward.z > 0.3;
     const path = lanePath(p, d, lane, autoPlan?.corner ?? null, autoPlan?.exit ?? null);
     const s0 = path.project(p);
     const speed = player.forwardSpeed;
@@ -302,8 +355,10 @@ async function start(): Promise<void> {
   function physicsStep(dt: number): void {
     const driving = state === 'breach' || state === 'chase';
     const hold: ControlState = { throttle: 0, brake: 0, steer: 0, handbrake: true };
-    const auto = autopilot ? (state === 'chase' ? autopilotControls() : seek(world, player, ROUTE[0], 0.9)) : null;
+    const auto = autopilot ? (state === 'chase' ? autopilotControls() : seek(world, player, new THREE.Vector3(200, 0, 300), 0.9)) : null;
     player.controls = driving ? (auto ?? input.controls()) : hold;
+    // Keyboard steering eases in; an analog stick is already smooth, so it gets a quick response.
+    player.steerRate = input.analog && !auto ? { in: 14, out: 14 } : { in: 5, out: 12 };
     if (driving) {
       const vv = vault.body.linvel();
       partner.controls = partnerAi.controls(dt, {
@@ -311,7 +366,7 @@ async function start(): Promise<void> {
         me: partner,
         vault: vault.position,
         vaultVel: new THREE.Vector3(vv.x, 0, vv.z),
-        route: state === 'chase' ? ROUTE.slice(waypoint) : [],
+        route: state === 'chase' ? gps.nodes : [],
         obstacles: partnerObstacles(),
         visible: isVisible,
       });
@@ -333,8 +388,13 @@ async function start(): Promise<void> {
     }
 
     if (state === 'chase' || state === 'outro') for (const c of cables) c.reel(CABLE_TOW_LENGTH, dt);
-    if (state === 'chase') measurePartner(dt);
+    for (const c of cables) c.step(dt);
+    if (state === 'chase') bankJob?.step(dt);
     world.step();
+    if (state === 'chase') {
+      measurePartner(dt);
+      measureImpacts(dt);
+    }
   }
 
   // ----------------------------------------------------------- game flow
@@ -365,7 +425,7 @@ async function start(): Promise<void> {
       enter('chase');
       breach.shooting = false;
       heat = 1;
-      hud.radio('MIA', 'It’s out! Every cop in Rio is coming. Follow my route.');
+      say('MIA', 'It’s out! Every cop in Rio is coming. Follow my route, or find your own. I’ll guide you.');
     }
 
     if ((state === 'breach' || state === 'chase') && inWater()) {
@@ -377,6 +437,7 @@ async function start(): Promise<void> {
       );
     }
 
+    if (input.wasPressed('KeyC')) camFar = !camFar;
     if (state === 'chase') {
       chaseTime += dt;
       if (input.wasPressed('KeyR')) resetConvoy();
@@ -393,8 +454,7 @@ async function start(): Promise<void> {
       streetDamage += newDamage;
       heat = Math.min(5, 1 + Math.floor(chaseTime / 50) + Math.floor(streetDamage / 300000) + Math.floor(police.wreckedCount / 10));
 
-      const wp = ROUTE[waypoint];
-      if (player.position.distanceTo(wp) < 30 && waypoint < ROUTE.length - 1) waypoint++;
+      gps.update(dt, player.position, travelDir());
       calloutTurn();
 
       const pinned = police.closeTo(player.position, 9) >= 2 && Math.abs(player.forwardSpeed) < 4;
@@ -431,22 +491,47 @@ async function start(): Promise<void> {
     return [vault.body, player.body, partner.body].some((b) => b.translation().y < -1.5);
   }
 
+  function say(who: string, line: string): void {
+    hud.radio(who, line);
+    voice.speak(who, line);
+  }
+
+  /** Direction the player is really going: their velocity when driving forward, else where they point. */
+  function travelDir(): THREE.Vector3 {
+    const v = player.body.linvel();
+    const speed = Math.hypot(v.x, v.z);
+    return speed > 4 && player.forwardSpeed > 2 ? new THREE.Vector3(v.x / speed, 0, v.z / speed) : player.forward;
+  }
+
+  const turnKey = (t: Turn) => `${t.at.x},${t.at.z}`;
+  function turnLine(turn: Turn | null): string {
+    if (!turn) return 'Straight on to the bridge.';
+    if (turn.distance > 130) return 'Stay on this street for now.';
+    return turn.side === 'left' ? 'Hang a left at the next corner!' : 'Go right at the next corner!';
+  }
+
+  const REROUTE_LINES = ['Okay, new route.', 'That works too. Rerouting.', 'Not my way, but fine. Rerouting.', 'Change of plan. Recalculating.'];
+  gps.onReroute = () => {
+    if (state !== 'chase' || chaseTime - lastReroute < 8) return;
+    lastReroute = chaseTime;
+    const turn = gps.nextTurn(player.position, travelDir());
+    if (turn && turn.distance <= 130) calledTurn = turnKey(turn);
+    say('MIA', `${REROUTE_LINES[gps.reroutes % REROUTE_LINES.length]} ${turnLine(turn)}`);
+  };
+
+  /** Mia calls the next turn on the GPS route as the player approaches it. */
   function calloutTurn(): void {
-    if (waypoint === lastCalloutWaypoint || waypoint === 0 || waypoint >= ROUTE.length - 1) return;
-    const wp = ROUTE[waypoint];
-    if (player.position.distanceTo(wp) > 90) return;
-    lastCalloutWaypoint = waypoint;
-    const a = wp.clone().sub(ROUTE[waypoint - 1]);
-    const b = ROUTE[waypoint + 1].clone().sub(wp);
-    const cross = a.x * b.z - a.z * b.x;
-    let line: string | null = null;
-    if (waypoint === ROUTE.length - 2) line = 'Bridge ahead. Get to the yellow gantry at the far end.';
-    // Left of travel is +x when facing +z, which makes a left turn a negative cross product.
-    else if (Math.abs(cross) > 1) line = cross < 0 ? 'Next intersection, hang a left!' : 'Next intersection, go right!';
-    if (line) {
-      hud.radio('MIA', line);
-      voice.speak('MIA', line);
+    const p = player.position;
+    if (!bridgeCalled && gps.nodes[0] === BRIDGE_FOOT_POS && p.distanceTo(BRIDGE_FOOT_POS) < 110) {
+      bridgeCalled = true;
+      say('MIA', 'Bridge ahead. Get to the yellow gantry at the far end.');
+      return;
     }
+    const turn = gps.nextTurn(p, travelDir());
+    if (!turn || turn.at !== gps.nodes[0] || turn.distance > 100 || turn.distance < 25) return;
+    if (turnKey(turn) === calledTurn) return;
+    calledTurn = turnKey(turn);
+    say('MIA', turn.side === 'left' ? 'Next intersection, hang a left!' : 'Next intersection, go right!');
   }
 
   // ----------------------------------------------------------- per-frame effects
@@ -494,6 +579,7 @@ async function start(): Promise<void> {
       const s = Math.abs(player.forwardSpeed);
       if (lastPlayerSpeed - s > 7) {
         sound.crash(Math.min(1, (lastPlayerSpeed - s) / 20));
+        input.rumble(Math.min(1, (lastPlayerSpeed - s) / 20));
         fx.burst(player.position.addScaledVector(player.forward, 2.5).setY(0.8), 0.5);
       }
       lastPlayerSpeed = s;
@@ -512,6 +598,22 @@ async function start(): Promise<void> {
 
   const camPos = new THREE.Vector3(260, 120, 40);
   const camLook = new THREE.Vector3(180, 0, 150);
+  /** Chase camera state: smoothed yaw, how far out it may sit (walls pull it in), and far/near framing (C). */
+  let camYaw = 0;
+  let camPull = 1;
+  let camFar = true;
+  const camRay = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
+  const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+
+  /** Fraction of the way from `from` to `to` that's clear of buildings and walls. */
+  function clearance(from: THREE.Vector3, to: THREE.Vector3): number {
+    const d = to.clone().sub(from);
+    const len = d.length();
+    camRay.origin = from;
+    camRay.dir = d.divideScalar(len);
+    const hit = world.castRay(camRay, len, true, RAPIER.QueryFilterFlags.ONLY_FIXED);
+    return hit ? THREE.MathUtils.clamp((hit.timeOfImpact - 1.2) / len, 0.15, 1) : 1;
+  }
 
   function updateCamera(dt: number): void {
     let pos: THREE.Vector3;
@@ -519,6 +621,7 @@ async function start(): Promise<void> {
     let fov = 62;
     let k = 1 - Math.exp(-5 * dt);
     const shot = state === 'cutscene' ? cutscene?.update(dt) : director.frame();
+    if (player && (shot || state !== 'chase' && state !== 'breach')) camYaw = player.heading;
     if (shot) {
       pos = shot.pos;
       look = shot.look;
@@ -535,14 +638,31 @@ async function start(): Promise<void> {
       pos = new THREE.Vector3(c.x + Math.cos(t) * 26, 10, c.z + Math.sin(t) * 26);
       look = c.clone().setY(1.5);
     } else if (player) {
-      const f = player.forward;
-      const speed = Math.min(1, Math.abs(player.forwardSpeed) / 60);
-      pos = player.position.addScaledVector(f, -14 - speed * 3).setY(6 + speed);
-      look = player.position.addScaledVector(f, 7).setY(1.5);
-      fov = 62 + speed * 14 + (player.nosActive ? 10 : 0);
+      // Swing round toward where the car is going (its velocity) as much as where it points,
+      // smoothed, so slides and vault yanks don't whip the view around.
+      const v = player.body.linvel();
+      let target = player.heading;
+      if (Math.hypot(v.x, v.z) > 6 && player.forwardSpeed > 3) target += angleDiff(target, Math.atan2(v.x, v.z)) * 0.5;
+      camYaw += angleDiff(camYaw, target) * Math.min(1, dt * 3.5);
+      const dir = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw));
+      const speed = Math.min(1, Math.abs(player.forwardSpeed) / 50);
+      // Far (default): high and behind the vault, like a truck-and-trailer cam, so you can see
+      // the vault swing and the cops around it. Near: tight on the car.
+      const back = (camFar ? 24 : 12) + speed * 4;
+      const height = (camFar ? 8.5 : 4.8) + speed * 1.5;
+      const pivot = player.position.setY(2.2);
+      const ideal = pivot.clone().addScaledVector(dir, -back).setY(height);
+      // Keep a clear view: pull in at once when a building gets in the way, ease back out.
+      const clear = clearance(pivot, ideal);
+      camPull = clear < camPull ? clear : Math.min(clear, camPull + dt * 0.8);
+      pos = pivot.clone().lerp(ideal, camPull);
+      pos.y += (1 - camPull) * 3;
+      look = player.position.addScaledVector(dir, camFar ? 12 : 8).setY(1.2);
+      fov = (camFar ? 58 : 62) + speed * 12 + (player.nosActive ? 8 : 0);
       pos.add(director.shakeOffset());
       // A little high-speed rumble.
       if (speed > 0.5) pos.add(new THREE.Vector3((Math.random() - 0.5) * speed * 0.08, (Math.random() - 0.5) * speed * 0.08, 0));
+      k = 1 - Math.exp(-12 * dt);
     } else {
       pos = camPos.clone();
       look = camLook.clone();
@@ -615,6 +735,7 @@ async function start(): Promise<void> {
     partner: partner?.position.toArray().map(Math.round),
     partnerGap: player ? +player.position.distanceTo(partner.position).toFixed(1) : 0,
     partnerTeleports,
+    impacts,
     partnerThinks: partnerAi?.thoughts,
     partnerQuality: {
       seconds: Math.round(pq.time),
@@ -631,7 +752,9 @@ async function start(): Promise<void> {
     truck: breach.truckPosition.toArray().map(Math.round),
     cables: cables.map((c) => +c.length.toFixed(1)),
     heat,
-    waypoint,
+    gpsNext: gps.nodes[0]?.toArray().filter((_, i) => i !== 1),
+    reroutes: gps.reroutes,
+    rerouteLog: gps.log,
     cops: police.cops.length,
     wrecked: police.wreckedCount,
     damage,
@@ -647,10 +770,25 @@ async function start(): Promise<void> {
     fps: Math.round(fps),
   });
 
+  const BANK_BLIP = new THREE.Vector3((BANK.x0 + BANK.x1) / 2, 0, (BANK.z0 + BANK.z1) / 2);
+
+  /** HUD guidance: an arrow toward the route 40 m ahead, and the next turn or the distance left. */
+  function navigation(): { arrow: number | null; distance: string } {
+    if (state !== 'chase' || !gps.nodes.length) return { arrow: null, distance: '' };
+    const p = player.position;
+    const path = gps.path(p);
+    const turn = gps.nextTurn(p, travelDir());
+    return {
+      arrow: angleTo(player, path.at(Math.min(path.length, 40))),
+      distance: turn ? `${turn.side === 'left' ? 'LEFT' : 'RIGHT'} IN ${Math.round(turn.distance)} m` : `${Math.round(path.length)} m TO GO`,
+    };
+  }
+
   let fps = 60;
   const timer = new THREE.Timer();
   function frame(time: number): void {
     timer.update(time);
+    input.poll();
     const rawDt = timer.getDelta();
     fps = fps * 0.95 + (rawDt > 0 ? 1 / rawDt : 60) * 0.05;
     const realDt = Math.min(rawDt, 0.1) * timescale;
@@ -705,20 +843,15 @@ async function start(): Promise<void> {
         busted,
         damage,
         wrecked: police.wreckedCount,
-        objective:
-          state === 'breach'
-            ? 'Rip the vault out of the station'
-            : waypoint >= ROUTE.length - 1
-              ? 'Reach the swap point'
-              : 'Follow Mia’s route to the bridge',
-        distance: player.position.distanceTo(ROUTE[waypoint]),
-        arrow: state === 'chase' ? angleTo(player, ROUTE[waypoint]) : null,
+        objective: state === 'breach' ? 'Rip the vault out of the station' : player.position.z > SEAWALL_Z ? 'Reach the swap point' : 'Drag the vault to the bridge',
+        ...navigation(),
         player: player.position,
         heading: player.heading,
         vault: vault.position,
         partner: partner.position,
         cops: police.cops.filter((c) => !c.wrecked).map((c) => c.v.position),
-        waypoint,
+        route: state === 'chase' ? gps.nodes : [],
+        blips: bankJob?.pending ? [{ pos: BANK_BLIP, color: '#3ddc84', label: '$' }] : [],
       });
     } else {
       hud.update(dt, null);

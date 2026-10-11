@@ -164,23 +164,19 @@ export function lanePath(p: THREE.Vector3, d: THREE.Vector3, offset: number, cor
 }
 
 /**
- * Which way Mia's route leaves `corner` for a car arriving along `dir`, or
- * straight on if the route doesn't turn here. `route` is the remaining
- * waypoints, next first.
+ * Which way the route leaves `corner` for a car arriving along `dir`: toward
+ * the route's next intersection if the corner is on the route, else straight
+ * on. `route` is the remaining intersections, next first.
  */
 export function routeExit(corner: THREE.Vector3, dir: THREE.Vector3, route: THREE.Vector3[]): THREE.Vector3 | null {
   const options = exits(corner, dir);
-  let exit = options.find((e) => e.dot(dir) > 0.9) ?? null;
-  const next = route.find((w) => w.distanceTo(corner) > 5);
-  const routeHere = !!route[0] && route[0].distanceTo(corner) < 5;
+  const straight = options.find((e) => e.dot(dir) > 0.9) ?? null;
+  const k = route.findIndex((w) => w.distanceTo(corner) < 5);
+  const next = k >= 0 ? route[k + 1] : undefined;
   if (next) {
     const leg = next.clone().sub(corner);
-    const lateral = Math.abs(leg.dot(leftOf(dir)));
-    // Turn here if this corner is a waypoint, or the waypoint is level with it on a cross street.
-    if (routeHere || (lateral > 5 && leg.dot(dir) < 5)) {
-      const best = options.reduce((a, e) => (e.dot(leg) > a.dot(leg) ? e : a), options[0]);
-      if (best && best.dot(leg) > 0) exit = best;
-    }
+    const best = options.reduce((a, e) => (e.dot(leg) > a.dot(leg) ? e : a), options[0]);
+    if (best && best.dot(leg) > 0) return best;
   }
-  return exit ?? options[0] ?? null;
+  return straight ?? options[0] ?? null;
 }
