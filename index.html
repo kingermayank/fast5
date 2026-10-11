@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Fast5</title>
+    <title>Fast5 — The Vault</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -11,33 +11,71 @@
 
     <div id="hud" class="hidden">
       <div class="hud-top-left">
-        <div class="label">LAP</div>
-        <div id="lap" class="value">1/3</div>
+        <div class="label">HEAT</div>
+        <div id="heat" class="heat">☆☆☆☆☆</div>
+        <div class="label">COPS WRECKED</div>
+        <div id="wrecked" class="value small">0</div>
+        <div class="label">PROPERTY DAMAGE</div>
+        <div id="damage" class="value small">$0</div>
       </div>
-      <div class="hud-top-right">
-        <div class="label">TIME</div>
-        <div id="time" class="value">0:00.000</div>
-        <div class="label">BEST LAP</div>
-        <div id="best" class="value small">--</div>
+      <div class="hud-top-center">
+        <div id="objective" class="objective"></div>
+        <div id="arrow" class="arrow hidden">▲</div>
+        <div id="distance" class="distance"></div>
+      </div>
+      <div id="busted" class="busted hidden">
+        <div class="label">BUSTED</div>
+        <div class="bar"><div id="busted-fill"></div></div>
       </div>
       <div class="hud-bottom-right">
         <div id="speed" class="speed">0</div>
         <div class="label">KM/H</div>
       </div>
-      <canvas id="minimap" width="180" height="180"></canvas>
-      <div id="wrong-way" class="hidden">WRONG WAY</div>
+      <canvas id="minimap" width="200" height="200"></canvas>
     </div>
 
-    <div id="center-message" class="hidden"></div>
+    <div id="radio" class="hidden"></div>
 
-    <div id="overlay">
+    <div id="cutscene" class="hidden">
+      <div class="letterbox top"></div>
+      <div class="letterbox bottom"><div id="cutscene-text"></div><div class="skip">Enter to skip</div></div>
+    </div>
+
+    <div id="select" class="hidden">
       <h1>FAST5</h1>
-      <p id="overlay-sub">3 laps. Set the fastest time.</p>
+      <p class="tagline">THE VAULT</p>
+      <div class="cards">
+        <div class="card" data-id="rico">
+          <div class="card-name">Rico Santos</div>
+          <div class="card-role">The muscle</div>
+          <p>Runs the crew. Heavy car, brute pulling power, swings the vault wide.</p>
+          <div class="stats">
+            <span>Power</span><i style="--v: 90%"></i>
+            <span>Handling</span><i style="--v: 60%"></i>
+            <span>Weight</span><i style="--v: 95%"></i>
+          </div>
+        </div>
+        <div class="card" data-id="cole">
+          <div class="card-name">Cole Mercer</div>
+          <div class="card-role">The driver</div>
+          <p>Ex-cop turned wheelman. Lighter car, sharper steering, quicker off the line.</p>
+          <div class="stats">
+            <span>Power</span><i style="--v: 75%"></i>
+            <span>Handling</span><i style="--v: 90%"></i>
+            <span>Weight</span><i style="--v: 70%"></i>
+          </div>
+        </div>
+      </div>
       <p class="controls">
-        <b>W / ↑</b> accelerate &nbsp; <b>S / ↓</b> brake / reverse &nbsp; <b>A D / ← →</b> steer<br />
-        <b>Space</b> handbrake &nbsp; <b>R</b> reset to track &nbsp; <b>C</b> change camera
+        <b>W / ↑</b> accelerate &nbsp; <b>S / ↓</b> brake / reverse &nbsp; <b>A D / ← →</b> steer &nbsp; <b>Space</b> handbrake
       </p>
-      <p class="start">Press <b>Enter</b> to start</p>
+      <p class="start">← → to choose · <b>Enter</b> to start</p>
+    </div>
+
+    <div id="overlay" class="hidden">
+      <h1 id="overlay-title"></h1>
+      <p id="overlay-body"></p>
+      <p id="overlay-prompt" class="start"></p>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

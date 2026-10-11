@@ -24,56 +24,70 @@ function noise(ctx: CanvasRenderingContext2D, w: number, h: number, count: numbe
   }
 }
 
-/** Asphalt with edge lines and a dashed center line. U spans road width, V runs along it. */
-export function roadTexture(): THREE.CanvasTexture {
-  return canvasTexture(256, 512, (ctx) => {
-    ctx.fillStyle = '#3a3c40';
-    ctx.fillRect(0, 0, 256, 512);
-    noise(ctx, 256, 512, 9000, 0.08);
-    ctx.fillStyle = '#e8e8e8';
-    ctx.fillRect(10, 0, 6, 512);
-    ctx.fillRect(240, 0, 6, 512);
-    ctx.fillRect(125, 0, 6, 256);
-  });
-}
-
-export function curbTexture(): THREE.CanvasTexture {
-  return canvasTexture(16, 64, (ctx) => {
-    ctx.fillStyle = '#d42020';
-    ctx.fillRect(0, 0, 16, 32);
-    ctx.fillStyle = '#f2f2f2';
-    ctx.fillRect(0, 32, 16, 32);
-  });
-}
-
-export function grassTexture(): THREE.CanvasTexture {
+export function asphaltTexture(): THREE.CanvasTexture {
   return canvasTexture(256, 256, (ctx) => {
-    ctx.fillStyle = '#4c7a34';
+    ctx.fillStyle = '#3b3d41';
     ctx.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 6000; i++) {
-      const g = 90 + Math.random() * 60;
-      ctx.fillStyle = `rgba(${g * 0.5},${g},${g * 0.35},0.35)`;
-      ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 3);
+    noise(ctx, 256, 256, 7000, 0.07);
+  });
+}
+
+export function sidewalkTexture(): THREE.CanvasTexture {
+  return canvasTexture(128, 128, (ctx) => {
+    ctx.fillStyle = '#b9b2a6';
+    ctx.fillRect(0, 0, 128, 128);
+    noise(ctx, 128, 128, 1500, 0.06);
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i <= 128; i += 32) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, 128);
+      ctx.moveTo(0, i);
+      ctx.lineTo(128, i);
+      ctx.stroke();
     }
   });
 }
 
-export function barrierTexture(): THREE.CanvasTexture {
-  return canvasTexture(64, 32, (ctx) => {
-    ctx.fillStyle = '#e8e8e8';
-    ctx.fillRect(0, 0, 64, 32);
-    ctx.fillStyle = '#1d4fd6';
-    ctx.fillRect(0, 0, 32, 32);
+/**
+ * One window bay of a facade: white wall (tinted by material color) with a
+ * dark window. One texture repeat = 6 m wide x 4 m tall. Texel (0,0) is wall,
+ * so roofs (uv 0) sample plain wall.
+ */
+export function facadeTexture(): THREE.CanvasTexture {
+  return canvasTexture(64, 64, (ctx) => {
+    ctx.fillStyle = '#f2f2f2';
+    ctx.fillRect(0, 0, 64, 64);
+    noise(ctx, 64, 64, 300, 0.05);
+    ctx.fillStyle = '#26323d';
+    ctx.fillRect(14, 14, 36, 30);
+    ctx.fillStyle = 'rgba(160,200,230,0.35)';
+    ctx.fillRect(14, 14, 18, 30);
+    ctx.fillStyle = '#d8d8d8';
+    ctx.fillRect(10, 44, 44, 4);
   });
 }
 
-export function checkerTexture(): THREE.CanvasTexture {
-  return canvasTexture(64, 64, (ctx) => {
-    for (let y = 0; y < 8; y++) {
-      for (let x = 0; x < 8; x++) {
-        ctx.fillStyle = (x + y) % 2 ? '#111' : '#f4f4f4';
-        ctx.fillRect(x * 8, y * 8, 8, 8);
-      }
+export function signTexture(text: string, bg: string, fg: string): THREE.CanvasTexture {
+  return canvasTexture(512, 96, (ctx) => {
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, 512, 96);
+    ctx.fillStyle = fg;
+    ctx.font = 'bold 64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 256, 52);
+  });
+}
+
+export function waterTexture(): THREE.CanvasTexture {
+  return canvasTexture(128, 128, (ctx) => {
+    ctx.fillStyle = '#1f5f7a';
+    ctx.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 400; i++) {
+      ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.12})`;
+      ctx.fillRect(Math.random() * 128, Math.random() * 128, 6 + Math.random() * 10, 1);
     }
   });
 }
