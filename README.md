@@ -54,7 +54,9 @@ browser's built-in text-to-speech.
 Debug URL flags: `?crew=dom|brian` skips the menu and cutscene (add `&intro` to watch it),
 `?autopilot` follows the GPS (`?autopilot=detour` disobeys it at random intersections to test
 rerouting, `?autopilot=wander` turns at random), `?nocops` disables police,
-`?timescale=4&renderEvery=8` runs the simulation faster for automated tests. `window.fast5()` in the
+`?timescale=4&renderEvery=8` runs the simulation faster for automated tests, and `?capture` steps the
+game only when `window.fast5Frame(n)` is called (fixed 1/30 s frames) for recording smooth clips
+headlessly. `window.fast5()` in the
 console returns a state snapshot, including partner-quality stats (`partnerQuality`) and what the
 partner is currently thinking (`partnerThinks`), hard hits on the player's car (`impacts`) and
 the GPS reroute log (`rerouteLog`).

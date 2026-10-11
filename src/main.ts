@@ -264,7 +264,7 @@ async function start(): Promise<void> {
    * slowing for corners. 'route' follows the GPS, 'detour' ignores it at
    * random intersections (to test rerouting), 'wander' turns at random.
    */
-  let autoPlan: { corner: THREE.Vector3; exit: THREE.Vector3 | null } | null = null;
+  let autoPlan: { corner: THREE.Vector3; exit: THREE.Vector3 | null; detour: boolean } | null = null;
   function autopilotControls(): ControlState {
     const p = player.position;
     // Spun round: turn back toward the route.
@@ -288,7 +288,7 @@ async function start(): Promise<void> {
             : autopilot === 'detour' && others.length && Math.random() < 0.35
               ? others[Math.floor(Math.random() * others.length)]
               : gpsExit;
-        autoPlan = { corner, exit: exit ?? null };
+        autoPlan = { corner, exit: exit ?? null, detour: !!exit && !!gpsExit && exit.dot(gpsExit) < 0.9 };
       }
     }
     // Follow the hints like a player would: aim for the spike-strip gap, handbrake at the bank.
@@ -717,6 +717,10 @@ async function start(): Promise<void> {
   // Debug: ?timescale=4 runs the simulation faster than real time; ?renderEvery=4 draws every 4th frame.
   const timescale = Number(params.get('timescale') ?? 1);
   const renderEvery = Number(params.get('renderEvery') ?? 1);
+  // Debug: ?capture stops the real-time loop; window.fast5Frame(n, render) then advances exactly n
+  // frames of 1/30 s each, so a headless browser can record smooth video one frame at a time.
+  const capture = params.has('capture');
+  let drawThisFrame = true;
   let frameCount = 0;
   // Debug: ?nocops=1 disables police (for testing the route and ending).
   const noCops = params.has('nocops');
@@ -754,6 +758,7 @@ async function start(): Promise<void> {
     heat,
     gpsNext: gps.nodes[0]?.toArray().filter((_, i) => i !== 1),
     reroutes: gps.reroutes,
+    autoDetourIn: autoPlan?.detour ? Math.round(autoPlan.corner.distanceTo(player.position)) : null,
     rerouteLog: gps.log,
     cops: police.cops.length,
     wrecked: police.wreckedCount,
@@ -789,7 +794,7 @@ async function start(): Promise<void> {
   function frame(time: number): void {
     timer.update(time);
     input.poll();
-    const rawDt = timer.getDelta();
+    const rawDt = capture ? 1 / 30 : timer.getDelta();
     fps = fps * 0.95 + (rawDt > 0 ? 1 / rawDt : 60) * 0.05;
     const realDt = Math.min(rawDt, 0.1) * timescale;
     director.update(realDt);
@@ -857,11 +862,20 @@ async function start(): Promise<void> {
       hud.update(dt, null);
     }
 
-    if (++frameCount % renderEvery === 0) gfx.render();
+    if (++frameCount % renderEvery === 0 && drawThisFrame) gfx.render();
     input.endFrame();
+    if (!capture) requestAnimationFrame(frame);
+  }
+  if (capture) {
+    (window as unknown as { fast5Frame: (n?: number, render?: boolean) => void }).fast5Frame = (n = 1, render = true) => {
+      for (let i = 0; i < n; i++) {
+        drawThisFrame = render && i === n - 1;
+        frame(performance.now());
+      }
+    };
+  } else {
     requestAnimationFrame(frame);
   }
-  requestAnimationFrame(frame);
 }
 
 start();
