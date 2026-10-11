@@ -19,7 +19,8 @@ import { Effects } from './fx';
 import { createGraphics } from './graphics';
 import { Hud } from './hud';
 import { Input, type ControlState } from './input';
-import { PartnerDriver } from './partner';
+import { type Obstacle, PartnerDriver } from './partner';
+import { exits, lanePath, leftOf, nextIntersection, roadHalfWidth, routeExit, snapDir, streetCenter } from './roads';
 import { FIXED_DT, initPhysics } from './physics';
 import { Police } from './police';
 import { Cable, Vault } from './vault';
@@ -150,23 +151,104 @@ async function start(): Promise<void> {
     partnerAi.reset(player);
   }
 
-  let partnerStuck = 0;
   let partnerTeleports = 0;
+  /** Partner quality, accumulated over the chase (seconds). */
+  const pq = { time: 0, formation: 0, wrongWay: 0, stuck: 0, gapSum: 0, behindSum: 0, sideSum: 0, behind8: 0, tooWide: 0 };
+
+  function measurePartner(dt: number): void {
+    const pf = player.forward;
+    const v = partner.body.linvel();
+    const gap = player.position.distanceTo(partner.position);
+    const moving = Math.abs(player.forwardSpeed) > 5;
+    pq.time += dt;
+    pq.gapSum += gap * dt;
+    const rel = player.position.sub(partner.position);
+    const behind = rel.dot(pf);
+    const side = Math.abs(rel.dot(new THREE.Vector3(pf.z, 0, -pf.x)));
+    pq.behindSum += behind * dt;
+    pq.sideSum += side * dt;
+    if (behind > 8) pq.behind8 += dt;
+    if (side > 9) pq.tooWide += dt;
+    if (gap > 2.5 && gap < 11 && pf.dot(partner.forward) > 0.7) pq.formation += dt;
+    if (moving && v.x * pf.x + v.z * pf.z < -2) pq.wrongWay += dt;
+    if (moving && Math.hypot(v.x, v.z) < 1) pq.stuck += dt;
+  }
+
+  /**
+   * Debug autopilot used by play-tests: drives its lane like a person would,
+   * slowing for corners. 'route' follows Mia's route, 'wander' turns at random.
+   */
+  let autoPlan: { corner: THREE.Vector3; exit: THREE.Vector3 | null } | null = null;
+  function autopilotControls(): ControlState {
+    const p = player.position;
+    // Spun round or overshot: turn back toward the route.
+    if (autopilot === 'route' && ROUTE[waypoint].clone().sub(p).normalize().dot(player.forward) < -0.3) {
+      autoPlan = null;
+      return seek(world, player, ROUTE[waypoint], 0.6);
+    }
+    const d = snapDir(player.forward);
+    if (autoPlan && (!autoPlan.exit || p.clone().sub(autoPlan.corner).dot(autoPlan.exit) > 14)) autoPlan = null;
+    if (!autoPlan) {
+      const corner = nextIntersection(p, d);
+      if (corner) {
+        const options = exits(corner, d);
+        const exit = autopilot === 'wander' ? options[Math.floor(Math.random() * options.length)] : routeExit(corner, d, ROUTE.slice(waypoint));
+        autoPlan = { corner, exit: exit ?? null };
+      }
+    }
+    const lane = CHARACTERS[character].side * 3;
+    const path = lanePath(p, d, lane, autoPlan?.corner ?? null, autoPlan?.exit ?? null);
+    const s0 = path.project(p);
+    const speed = player.forwardSpeed;
+    const target = path.at(s0 + 10 + Math.abs(speed) * 0.4);
+    const turning = !!autoPlan?.exit && autoPlan.exit.dot(d) < 0.5;
+    const toCorner = autoPlan ? autoPlan.corner.clone().sub(p).dot(d) : Infinity;
+    const vTarget = turning && toCorner < 45 && toCorner > -10 ? 12 : p.z > SEAWALL_Z ? 45 : 28;
+    const err = vTarget - speed;
+    return {
+      throttle: THREE.MathUtils.clamp(err * 0.3, 0, 1),
+      brake: err < -2 ? THREE.MathUtils.clamp(-err * 0.15, 0, 1) : 0,
+      steer: THREE.MathUtils.clamp(angleTo(player, target) * 2.4, -1, 1),
+      handbrake: false,
+    };
+  }
   let playerStuck = 0;
 
-  /** Teleport the partner back into formation if it's been wedged for a while. */
-  function unstickPartner(dt: number): void {
-    const pinned = Math.abs(player.forwardSpeed) > 5 && Math.abs(partner.forwardSpeed) < 1.5;
-    partnerStuck = pinned ? partnerStuck + dt : 0;
-    if (partnerStuck < 4) return;
-    partnerStuck = 0;
-    const f = player.forward;
-    const slot = player.position.addScaledVector(new THREE.Vector3(f.z, 0, -f.x), -CHARACTERS[character].side * 5.5);
-    if (city.isStreet(slot.x, slot.z)) {
-      partner.place(slot, player.heading);
-      partnerAi.reset(player);
-      partnerTeleports++;
+  /** Put the partner back beside the player (only ever done off-screen). */
+  function recoverPartner(): void {
+    const d = snapDir(player.forward);
+    const center = streetCenter(player.position, d);
+    const playerOffset = player.position.clone().sub(center).dot(leftOf(d));
+    const half = roadHalfWidth(player.position) - 2.3;
+    const offset = THREE.MathUtils.clamp(playerOffset - CHARACTERS[character].side * 5, -half, half);
+    const slot = center.clone().addScaledVector(leftOf(d), offset);
+    if (!city.isStreet(slot.x, slot.z) || Math.abs(offset - playerOffset) < 3) return;
+    partner.place(slot, Math.atan2(d.x, d.z));
+    partner.body.setLinvel({ x: d.x * player.forwardSpeed, y: 0, z: d.z * player.forwardSpeed }, true);
+    partnerAi.reset(player);
+    partnerTeleports++;
+  }
+
+  const frustum = new THREE.Frustum();
+  const isVisible = (p: THREE.Vector3) => camera.position.distanceTo(p) < 160 && frustum.containsPoint(p.clone().setY(1));
+
+  /** Everything the partner should steer around. */
+  function partnerObstacles(): Obstacle[] {
+    const list: Obstacle[] = [
+      { pos: player.position, radius: 1.8, soft: true },
+      { pos: vault.position.setY(0), radius: 2.4, soft: true },
+    ];
+    // Everything is "soft": the partner steers around it when there's a free lane but never
+    // brakes for it. It's chained to the vault, and the Chargers plow through in the film.
+    for (const c of police.cops) list.push({ pos: c.v.position, radius: 2.6, soft: true });
+    const near = partner.position;
+    for (const prop of city.props) {
+      if (prop.value < 1500) continue; // bricks: drive through
+      const t = prop.body.translation();
+      if (Math.abs(t.x - near.x) > 45 || Math.abs(t.z - near.z) > 45) continue;
+      list.push({ pos: new THREE.Vector3(t.x, 0, t.z), radius: prop.value >= 15000 ? 2.5 : prop.value >= 6000 ? 2.2 : 0.7, soft: true });
     }
+    return list;
   }
 
   // ----------------------------------------------------------- physics
@@ -174,8 +256,23 @@ async function start(): Promise<void> {
   function physicsStep(dt: number): void {
     const driving = state === 'breach' || state === 'chase';
     const hold: ControlState = { throttle: 0, brake: 0, steer: 0, handbrake: true };
-    player.controls = driving ? (autopilot ? seek(world, player, ROUTE[waypoint], 0.9) : input.controls()) : hold;
-    partner.controls = driving ? partnerAi.controls(dt, player, partner, vault.position) : hold;
+    const auto = autopilot ? (state === 'chase' ? autopilotControls() : seek(world, player, ROUTE[0], 0.9)) : null;
+    player.controls = driving ? (auto ?? input.controls()) : hold;
+    if (driving) {
+      const vv = vault.body.linvel();
+      partner.controls = partnerAi.controls(dt, {
+        player,
+        me: partner,
+        vault: vault.position,
+        vaultVel: new THREE.Vector3(vv.x, 0, vv.z),
+        route: state === 'chase' ? ROUTE.slice(waypoint) : [],
+        obstacles: partnerObstacles(),
+        visible: isVisible,
+      });
+      if (partnerAi.wantsRecovery && state === 'chase') recoverPartner();
+    } else {
+      partner.controls = hold;
+    }
     player.step(dt);
     partner.step(dt);
 
@@ -186,6 +283,7 @@ async function start(): Promise<void> {
     }
 
     if (state === 'chase' || state === 'outro') for (const c of cables) c.reel(CABLE_TOW_LENGTH, dt);
+    if (state === 'chase') measurePartner(dt);
     world.step();
   }
 
@@ -224,7 +322,6 @@ async function start(): Promise<void> {
 
     if (state === 'chase') {
       chaseTime += dt;
-      unstickPartner(dt);
       if (input.wasPressed('KeyR')) resetConvoy();
       if (autopilot) {
         playerStuck = Math.abs(player.forwardSpeed) < 2 ? playerStuck + dt : 0;
@@ -377,6 +474,8 @@ async function start(): Promise<void> {
       camera.fov += (fov - camera.fov) * Math.min(1, dt * 4);
       camera.updateProjectionMatrix();
     }
+    camera.updateMatrixWorld();
+    frustum.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     gfx.follow(state === 'cutscene' || !player ? camLook.clone().setY(0) : player.position);
   }
 
@@ -412,7 +511,11 @@ async function start(): Promise<void> {
 
   const params = new URL(location.href).searchParams;
   // Debug: ?autopilot=1 drives the player along Mia's route (used by play-tests).
-  const autopilot = params.has('autopilot');
+  const autopilot = params.has('autopilot') ? params.get('autopilot') || 'route' : null;
+  // Debug: ?timescale=4 runs the simulation faster than real time; ?renderEvery=4 draws every 4th frame.
+  const timescale = Number(params.get('timescale') ?? 1);
+  const renderEvery = Number(params.get('renderEvery') ?? 1);
+  let frameCount = 0;
   // Debug: ?nocops=1 disables police (for testing the route and ending).
   const noCops = params.has('nocops');
   const preset = params.get('crew');
@@ -430,6 +533,18 @@ async function start(): Promise<void> {
     partner: partner?.position.toArray().map(Math.round),
     partnerGap: player ? +player.position.distanceTo(partner.position).toFixed(1) : 0,
     partnerTeleports,
+    partnerThinks: partnerAi?.thoughts,
+    partnerQuality: {
+      seconds: Math.round(pq.time),
+      formationPct: Math.round((pq.formation / Math.max(1, pq.time)) * 100),
+      wrongWaySec: +pq.wrongWay.toFixed(1),
+      stuckSec: +pq.stuck.toFixed(1),
+      avgGap: +(pq.gapSum / Math.max(1, pq.time)).toFixed(1),
+      avgBehind: +(pq.behindSum / Math.max(1, pq.time)).toFixed(1),
+      avgSide: +(pq.sideSum / Math.max(1, pq.time)).toFixed(1),
+      behind8Pct: Math.round((pq.behind8 / Math.max(1, pq.time)) * 100),
+      tooWidePct: Math.round((pq.tooWide / Math.max(1, pq.time)) * 100),
+    },
     vault: vault.position.toArray().map(Math.round),
     truck: breach.truckPosition.toArray().map(Math.round),
     cables: cables.map((c) => +c.length.toFixed(1)),
@@ -448,7 +563,7 @@ async function start(): Promise<void> {
     timer.update(time);
     const rawDt = timer.getDelta();
     fps = fps * 0.95 + (rawDt > 0 ? 1 / rawDt : 60) * 0.05;
-    const dt = Math.min(rawDt, 0.1);
+    const dt = Math.min(rawDt, 0.1) * timescale;
     breach.update(dt);
     if (state === 'select') {
       hud.selectInput(input);
@@ -507,7 +622,7 @@ async function start(): Promise<void> {
       hud.update(dt, null);
     }
 
-    gfx.render();
+    if (++frameCount % renderEvery === 0) gfx.render();
     input.endFrame();
     requestAnimationFrame(frame);
   }

@@ -495,6 +495,8 @@ export class City {
 
     for (const side of [-1, 1]) {
       this.fixedBox(BRIDGE_X + side * (BRIDGE_HALF - 0.4), 0.5, cz, 0.4, 0.5, len / 2, concrete);
+      // Invisible upper rail so a tumbling vault can't vault the 1 m barrier.
+      this.fixedBox(BRIDGE_X + side * (BRIDGE_HALF - 0.4), 2.2, cz, 0.4, 1.2, len / 2);
     }
     // Piers.
     for (let z = SEAWALL_Z + 40; z < BRIDGE_END_Z; z += 60) {

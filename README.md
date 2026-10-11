@@ -41,8 +41,11 @@ the other car, chained to the same vault.
 Sound and voiceover start after your first key press (browser rule). Voices use your
 browser's built-in text-to-speech.
 
-Debug URL flags: `?crew=dom|brian` skips the menu and cutscene (add `&intro` to watch it), `?autopilot` drives the route
-automatically, `?nocops` disables police. `window.fast5()` in the console returns a state snapshot.
+Debug URL flags: `?crew=dom|brian` skips the menu and cutscene (add `&intro` to watch it),
+`?autopilot` drives Mia's route (`?autopilot=wander` takes random turns), `?nocops` disables police,
+`?timescale=4&renderEvery=8` runs the simulation faster for automated tests. `window.fast5()` in the
+console returns a state snapshot, including partner-quality stats (`partnerQuality`) and what the
+partner is currently thinking (`partnerThinks`).
 
 ## Code layout
 
@@ -50,7 +53,8 @@ automatically, `?nocops` disables police. `window.fast5()` in the console return
 - `src/graphics.ts`: renderer, sky, environment lighting, bloom and color grade, Rio's mountains
 - `src/breach.ts`: the opening set piece (armored truck, station cops, cutscene shots)
 - `src/cutscene.ts`, `src/voice.ts`, `src/videos.ts`: cutscene player, voiceover, optional video cutscenes
-- `src/partner.ts`: the AI partner (follows your driving line)
+- `src/partner.ts`: the AI partner: reads the street grid and Mia's route, predicts your turns, plans its own lane, steers around cops/props/the vault, steadies the vault's swing
+- `src/roads.ts`: the street network as the AI sees it (lanes, intersections, route turns)
 - `src/fx.ts`, `src/audio.ts`: sparks, dust, muzzle flashes; synthesized engine, sirens, crashes
 - `src/vehicle.ts`: rigid-body car with arcade handling
 - `src/carModel.ts`: Charger-style hero cars, police cruisers, Hobbs's armored truck

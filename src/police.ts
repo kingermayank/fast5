@@ -136,7 +136,7 @@ export class Police {
   private spawn(dt: number, target: Vehicle, heat: number, onBridge: boolean): void {
     this.spawnTimer -= dt;
     const active = this.cops.filter((c) => !c.wrecked).length;
-    if (this.spawnTimer > 0 || active >= 2 + Math.round(heat * 1.5) || this.cops.length >= 14) return;
+    if (this.spawnTimer > 0 || active >= 2 + heat || this.cops.length >= 10) return;
     this.spawnTimer = Math.max(1.2, 4.5 - heat * 0.6);
 
     const tp = target.position;

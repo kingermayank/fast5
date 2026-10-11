@@ -37,6 +37,8 @@ export class Vehicle {
   lateralSpeed = 0;
   /** Disabled vehicles get no drive input (wrecked cops, finished race). */
   enabled = true;
+  /** Multiplier on drive force and top speed (AI catch-up assist). */
+  assist = 1;
 
   constructor(
     private world: RAPIER.World,
@@ -107,7 +109,7 @@ export class Vehicle {
 
     let a = 0;
     if (c.throttle > 0) {
-      a = vF < -1 ? 30 : this.spec.accel * c.throttle * Math.max(0, 1 - vF / this.spec.topSpeed);
+      a = vF < -1 ? 30 : this.spec.accel * this.assist * c.throttle * Math.max(0, 1 - vF / (this.spec.topSpeed * this.assist));
     }
     if (c.brake > 0) {
       a = vF > 1 ? -30 * c.brake : vF > -14 ? -9 : 0;
