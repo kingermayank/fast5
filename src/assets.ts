@@ -18,12 +18,18 @@ export async function loadModels(): Promise<void> {
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   await Promise.all(
     IDS.map(async (id) => {
-      try {
-        const gltf = await loader.loadAsync(`${import.meta.env.BASE_URL}models/${id}.glb`);
-        models.set(id, gltf.scene);
-      } catch (e) {
-        console.warn(`[assets] ${id} failed to load; using the procedural model`, e);
+      // .glb normally; some static hosts only serve JSON, so the same model can also ship as
+      // a self-contained .gltf.json (tools/assets/to-json.mjs).
+      for (const ext of ['glb', 'gltf.json']) {
+        try {
+          const gltf = await loader.loadAsync(`${import.meta.env.BASE_URL}models/${id}.${ext}`);
+          models.set(id, gltf.scene);
+          return;
+        } catch {
+          // Try the next format.
+        }
       }
+      console.warn(`[assets] ${id} failed to load; using the procedural model`);
     }),
   );
 }
