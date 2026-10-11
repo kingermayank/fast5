@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { angleTo, seek } from './ai';
+import { loadModels, model } from './assets';
 import { Sound } from './audio';
 import { BreachScene } from './breach';
 import {
@@ -39,7 +40,7 @@ export const CHARACTERS: Record<CharacterId, { name: string; spec: VehicleSpec; 
     side: 1,
     spec: {
       mass: 2100, accel: 23, topSpeed: 62, turnRate: 2.1, grip: 7.5,
-      model: { body: 0x141416, trim: 0x0b0b0c, rim: 0x3a3a3c, matte: true },
+      model: { body: 0x141416, trim: 0x0b0b0c, rim: 0x3a3a3c, matte: true, asset: 'charger' },
     },
   },
   brian: {
@@ -47,7 +48,7 @@ export const CHARACTERS: Record<CharacterId, { name: string; spec: VehicleSpec; 
     side: -1,
     spec: {
       mass: 1800, accel: 25, topSpeed: 64, turnRate: 2.5, grip: 7,
-      model: { body: 0x17181b, trim: 0x0b0b0c, rim: 0x9ea3aa, matte: true },
+      model: { body: 0x17181b, trim: 0x0b0b0c, rim: 0x9ea3aa, matte: true, asset: 'skyline' },
     },
   },
 };
@@ -56,12 +57,29 @@ type State = 'select' | 'cutscene' | 'breach' | 'chase' | 'outro' | 'busted' | '
 
 const CABLE_TOW_LENGTH = 10;
 
+/** Swap the procedural Christ the Redeemer for the downloaded model, if it loaded. */
+function useStatueModel(statue: THREE.Group): void {
+  const src = model('christ');
+  if (!src) return;
+  const s = src.clone();
+  const size = new THREE.Box3().setFromObject(s).getSize(new THREE.Vector3());
+  // Arms across the view from the city (the group already faces it).
+  if (size.z > size.x) s.rotation.y = Math.PI / 2;
+  // A little larger than life (38 m) so it still reads from the city.
+  s.scale.setScalar(70 / size.y);
+  // The group's origin sits 12 m above the peak; stand the plinth on the summit.
+  s.position.y = -14;
+  statue.clear();
+  statue.add(s);
+}
+
 async function start(): Promise<void> {
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const gfx = createGraphics(canvas);
   const { scene, camera } = gfx;
 
-  const world = await initPhysics();
+  const [world] = await Promise.all([initPhysics(), loadModels()]);
+  useStatueModel(gfx.statue);
   const city = new City(world);
   scene.add(city.group);
   const fx = new Effects();
@@ -773,6 +791,7 @@ async function start(): Promise<void> {
     timeScale: +director.timeScale.toFixed(2),
     blown: [player?.tireBlown ?? 0, partner?.tireBlown ?? 0].map((x) => +x.toFixed(1)),
     fps: Math.round(fps),
+    render: { calls: gfx.renderer.info.render.calls, triangles: gfx.renderer.info.render.triangles },
   });
 
   const BANK_BLIP = new THREE.Vector3((BANK.x0 + BANK.x1) / 2, 0, (BANK.z0 + BANK.z1) / 2);

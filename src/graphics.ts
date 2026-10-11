@@ -6,9 +6,9 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
-/** Low golden-hour sun from the west-southwest. */
-export const SUN_DIR = new THREE.Vector3(-0.62, 0.3, -0.72).normalize();
-const HAZE = 0xd8b08c;
+/** Golden hour: a low sun (about 11 degrees up) from the west-southwest. */
+export const SUN_DIR = new THREE.Vector3(-0.62, 0.19, -0.72).normalize();
+const HAZE = 0xd9a47c;
 
 /** Warm grade + vignette, applied after tone mapping. */
 const GradeShader = {
@@ -22,10 +22,11 @@ const GradeShader = {
     varying vec2 vUv;
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
-      // Lift shadows toward teal, push highlights warm.
+      // Golden-hour grade: shadows toward teal, highlights toward amber, a touch more contrast.
       float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-      c.rgb += mix(vec3(-0.01, 0.01, 0.025), vec3(0.03, 0.012, -0.02), smoothstep(0.2, 0.8, l));
-      c.rgb = mix(vec3(l), c.rgb, 1.08);
+      c.rgb += mix(vec3(-0.015, 0.012, 0.035), vec3(0.045, 0.015, -0.03), smoothstep(0.15, 0.85, l));
+      c.rgb = mix(vec3(l), c.rgb, 1.12);
+      c.rgb = (c.rgb - 0.5) * 1.06 + 0.5;
       float d = distance(vUv, vec2(0.5));
       c.rgb *= 1.0 - vignette * smoothstep(0.35, 0.85, d);
       gl_FragColor = c;
@@ -37,6 +38,8 @@ export interface Graphics {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   sun: THREE.DirectionalLight;
+  /** The statue on the tall peak (procedural until the model loads). */
+  statue: THREE.Group;
   render(): void;
   resize(): void;
   /** Keep the shadow frustum centered on what the camera is looking at. */
@@ -49,20 +52,22 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.75;
+  renderer.toneMappingExposure = 0.8;
+  // Count draw calls and triangles across all post passes (see render()).
+  renderer.info.autoReset = false;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(HAZE, 0.00065);
+  scene.fog = new THREE.FogExp2(HAZE, 0.00052);
   const camera = new THREE.PerspectiveCamera(62, 1, 0.2, 6000);
 
   // Physical sky, also baked into an environment map for reflections.
   const sky = new Sky();
   sky.scale.setScalar(5000);
   const u = sky.material.uniforms;
-  u.turbidity.value = 7;
-  u.rayleigh.value = 2.2;
-  u.mieCoefficient.value = 0.006;
-  u.mieDirectionalG.value = 0.85;
+  u.turbidity.value = 9;
+  u.rayleigh.value = 2.6;
+  u.mieCoefficient.value = 0.007;
+  u.mieDirectionalG.value = 0.9;
   u.sunPosition.value.copy(SUN_DIR);
   scene.add(sky);
 
@@ -72,8 +77,9 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   scene.environment = pmrem.fromScene(gradientSkyScene(), 0.02).texture;
   scene.environmentIntensity = 0.55;
 
-  scene.add(new THREE.HemisphereLight(0xffd9b8, 0x3b3530, 0.35));
-  const sun = new THREE.DirectionalLight(0xffc89a, 2.1);
+  // Warm key, cool fill: shadows pick up the blue of the sky, as at golden hour.
+  scene.add(new THREE.HemisphereLight(0xa9c2e6, 0x4a3b2e, 0.45));
+  const sun = new THREE.DirectionalLight(0xffb27a, 2.5);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const S = 75;
@@ -85,7 +91,7 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   sun.shadow.normalBias = 0.03;
   scene.add(sun, sun.target);
 
-  addMountains(scene);
+  const statue = addMountains(scene);
 
   // Post: MSAA render target, bloom on bright emissives, tone map, grade.
   const size = new THREE.Vector2();
@@ -113,8 +119,12 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
     scene,
     camera,
     sun,
+    statue,
     resize,
-    render: () => composer.render(),
+    render: () => {
+      renderer.info.reset();
+      composer.render();
+    },
     follow(focus) {
       sun.position.copy(focus).addScaledVector(SUN_DIR, 250);
       sun.target.position.copy(focus);
@@ -128,8 +138,8 @@ function gradientSkyScene(): THREE.Scene {
   const geo = new THREE.SphereGeometry(100, 48, 24);
   const colors: number[] = [];
   const pos = geo.attributes.position as THREE.BufferAttribute;
-  const horizon = new THREE.Color(1.0, 0.78, 0.58);
-  const zenith = new THREE.Color(0.32, 0.5, 0.85);
+  const horizon = new THREE.Color(1.0, 0.7, 0.48);
+  const zenith = new THREE.Color(0.27, 0.44, 0.8);
   const ground = new THREE.Color(0.16, 0.14, 0.13);
   const c = new THREE.Color();
   const dir = new THREE.Vector3();
@@ -154,7 +164,7 @@ function gradientSkyScene(): THREE.Scene {
  * Rio's skyline: steep green granite peaks around the city, with a sugarloaf
  * dome and a tall peak carrying a statue silhouette. Far enough to sit in haze.
  */
-function addMountains(scene: THREE.Scene): void {
+function addMountains(scene: THREE.Scene): THREE.Group {
   const mat = new THREE.MeshStandardMaterial({ color: 0x4f6b45, roughness: 1, flatShading: true });
   const rock = new THREE.MeshStandardMaterial({ color: 0x7c7468, roughness: 1, flatShading: true });
   const rand = (() => {
@@ -197,4 +207,5 @@ function addMountains(scene: THREE.Scene): void {
   statue.position.set(tall.position.x, tall.position.y + 310 + 12, tall.position.z);
   statue.lookAt(250, statue.position.y, 350);
   scene.add(statue);
+  return statue;
 }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { model } from './assets';
 
 export const WHEEL_RADIUS = 0.42;
 
@@ -10,7 +11,11 @@ export interface CarModelOptions {
   police?: boolean;
   /** Matte paint (the crew's Chargers) vs glossy (cruisers). */
   matte?: boolean;
+  /** Downloaded model to use when it loaded (see assets.ts); the procedural car otherwise. */
+  asset?: CarAsset;
 }
+
+export type CarAsset = 'charger' | 'skyline' | 'police';
 
 export interface CarModel {
   group: THREE.Group;
@@ -21,6 +26,8 @@ export interface CarModel {
   lightBar?: { red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial };
   paint: THREE.MeshPhysicalMaterial;
   brake: THREE.MeshStandardMaterial;
+  /** For spinning the wheels at the right rate. */
+  wheelRadius: number;
 }
 
 const WIDTH = 1.9;
@@ -126,6 +133,10 @@ function doorDecal(text: string): THREE.CanvasTexture {
  * Origin is on the ground at the car's center, facing +z.
  */
 export function buildCarModel(o: CarModelOptions): CarModel {
+  if (o.asset) {
+    const m = buildAssetCar(o.asset);
+    if (m) return m;
+  }
   const group = new THREE.Group();
   const body = new THREE.Group();
   const p = parts();
@@ -234,7 +245,157 @@ export function buildCarModel(o: CarModelOptions): CarModel {
     if (front) frontPivots.push(pivot);
   }
 
-  return { group, body, spinners, frontPivots, lightBar, paint, brake };
+  return { group, body, spinners, frontPivots, lightBar, paint, brake, wheelRadius: WHEEL_RADIUS };
+}
+
+// ------------------------------------------------------------------ downloaded cars
+
+/** Which source materials are the paint, the tail-light lens and the roof lights. */
+const ASSET_CARS: Record<CarAsset, { paint: RegExp; brake?: RegExp; lights?: RegExp }> = {
+  charger: { paint: /^Paint$/, brake: /^GlassRed$/ },
+  skyline: { paint: /Paint_Material/, brake: /^red_glass$/ },
+  police: { paint: /^body$/, lights: /^roof_lights$/ },
+};
+
+/** Height of the body's roll/pitch pivot above the ground. */
+const BODY_PIVOT = 0.55;
+
+const prepared = new WeakSet<THREE.Object3D>();
+
+/** One-time material fixes on a loaded model (shared by every copy of it). */
+function prepareMaterials(src: THREE.Object3D, paintName: RegExp): void {
+  if (prepared.has(src)) return;
+  prepared.add(src);
+  src.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    for (const m of [mesh.material].flat() as THREE.MeshPhysicalMaterial[]) {
+      // Real refraction costs a second scene render; tinted see-through glass is plenty.
+      if (m.transmission > 0) {
+        m.transmission = 0;
+        m.transparent = true;
+        m.opacity = 0.45;
+        m.depthWrite = false;
+        m.roughness = Math.min(m.roughness, 0.08);
+      }
+      if (paintName.test(m.name) && m.isMeshPhysicalMaterial) {
+        m.clearcoat = 1;
+        m.clearcoatRoughness = 0.04;
+      }
+    }
+  });
+}
+
+/** Split a light-bar mesh into its left and right halves (red and blue). */
+const splitCache = new WeakMap<THREE.BufferGeometry, [THREE.BufferGeometry, THREE.BufferGeometry]>();
+function splitLeftRight(mesh: THREE.Mesh): [THREE.BufferGeometry, THREE.BufferGeometry] {
+  const cached = splitCache.get(mesh.geometry);
+  if (cached) return cached;
+  const g = mesh.geometry;
+  const pos = g.attributes.position;
+  const index = g.index ?? new THREE.BufferAttribute(new Uint32Array([...Array(pos.count).keys()]), 1);
+  const left: number[] = [];
+  const right: number[] = [];
+  const c = new THREE.Vector3();
+  const v = new THREE.Vector3();
+  for (let t = 0; t < index.count; t += 3) {
+    c.set(0, 0, 0);
+    for (let k = 0; k < 3; k++) c.add(v.fromBufferAttribute(pos, index.getX(t + k)));
+    // Positions may be quantized: judge the side in model space.
+    c.divideScalar(3).applyMatrix4(mesh.matrixWorld);
+    (c.x > 0 ? left : right).push(index.getX(t), index.getX(t + 1), index.getX(t + 2));
+  }
+  const half = (ids: number[]) => {
+    const h = g.clone();
+    h.setIndex(ids);
+    return h;
+  };
+  const out: [THREE.BufferGeometry, THREE.BufferGeometry] = [half(left), half(right)];
+  splitCache.set(g, out);
+  return out;
+}
+
+/**
+ * A car from a downloaded model laid out by tools/assets: a `body` node and four
+ * `wheel_FL/FR/RL/RR` nodes, facing +z with the origin on the ground. Returns null
+ * if that model didn't load.
+ */
+function buildAssetCar(asset: CarAsset): CarModel | null {
+  const src = model(asset);
+  if (!src) return null;
+  const cfg = ASSET_CARS[asset];
+  prepareMaterials(src, cfg.paint);
+  const root = src.clone(true);
+  root.updateMatrixWorld(true);
+
+  const group = new THREE.Group();
+  const body = new THREE.Group();
+  body.position.y = BODY_PIVOT;
+  group.add(body);
+  group.updateMatrixWorld(true);
+  const bodyNode = root.getObjectByName('body')!;
+  // Per-car copies of the materials that change at runtime.
+  let paint: THREE.MeshPhysicalMaterial | undefined;
+  let brake: THREE.MeshStandardMaterial | undefined;
+  let lightBar: CarModel['lightBar'];
+  const lightMeshes: THREE.Mesh[] = [];
+  bodyNode.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = mesh.receiveShadow = true;
+    const m = mesh.material as THREE.MeshPhysicalMaterial;
+    if (cfg.paint.test(m.name)) mesh.material = paint ??= m.clone();
+    else if (cfg.brake?.test(m.name)) mesh.material = brake ??= m.clone();
+    else if (cfg.lights?.test(m.name)) lightMeshes.push(mesh);
+  });
+  for (const mesh of lightMeshes) {
+    const [l, r] = splitLeftRight(mesh);
+    const base = mesh.material as THREE.MeshStandardMaterial;
+    lightBar ??= {
+      red: Object.assign(base.clone(), { emissive: new THREE.Color(0xff1020), emissiveIntensity: 3 }),
+      blue: Object.assign(base.clone(), { emissive: new THREE.Color(0x1040ff), emissiveIntensity: 3 }),
+    };
+    const red = new THREE.Mesh(l, lightBar.red);
+    const blue = new THREE.Mesh(r, lightBar.blue);
+    red.matrix.copy(mesh.matrix);
+    blue.matrix.copy(mesh.matrix);
+    red.matrixAutoUpdate = blue.matrixAutoUpdate = false;
+    mesh.parent!.add(red, blue);
+    mesh.removeFromParent();
+  }
+  body.attach(bodyNode);
+  paint ??= new THREE.MeshPhysicalMaterial();
+  if (brake) {
+    brake.emissive = new THREE.Color(0xff2010);
+    brake.emissiveIntensity = 1.2;
+  } else {
+    brake = new THREE.MeshStandardMaterial({ emissive: 0xff2010 });
+  }
+
+  // Wheels: a steering pivot on each axle with a spinner inside it.
+  const spinners: THREE.Object3D[] = [];
+  const frontPivots: THREE.Object3D[] = [];
+  let wheelRadius = WHEEL_RADIUS;
+  const box = new THREE.Box3();
+  for (const id of ['FL', 'FR', 'RL', 'RR']) {
+    const wheel = root.getObjectByName(`wheel_${id}`);
+    if (!wheel) continue;
+    box.setFromObject(wheel);
+    wheelRadius = (box.max.y - box.min.y) / 2;
+    const pivot = new THREE.Group();
+    box.getCenter(pivot.position);
+    const spinner = new THREE.Group();
+    pivot.add(spinner);
+    group.add(pivot);
+    group.updateMatrixWorld(true);
+    spinner.attach(wheel);
+    wheel.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) obj.castShadow = true;
+    });
+    spinners.push(spinner);
+    if (id[0] === 'F') frontPivots.push(pivot);
+  }
+  return { group, body, spinners, frontPivots, lightBar, paint, brake, wheelRadius };
 }
 
 /** Hobbs's armored assault truck: tall, angular, slit windows. Origin on the ground, facing +z. */

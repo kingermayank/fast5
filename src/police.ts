@@ -12,7 +12,7 @@ const COP_SPEC: VehicleSpec = {
   topSpeed: 52,
   turnRate: 2.4,
   grip: 7,
-  model: { body: 0xf4f4f4, trim: 0x15181d, rim: 0x9aa0a6, police: true },
+  model: { body: 0xf4f4f4, trim: 0x15181d, rim: 0x9aa0a6, police: true, asset: 'police' },
 };
 
 interface Cop {

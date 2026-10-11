@@ -51,6 +51,9 @@ resets the convoy, Start skips and retries. It rumbles on hits.
 Sound and voiceover start after your first key press (browser rule). Voices use your
 browser's built-in text-to-speech.
 
+Models are credited in [`assets-src/README.md`](assets-src/README.md) (CC BY and CC BY-NC-SA, via
+Sketchfab). `?procedural` runs with the old code-built cars instead.
+
 Debug URL flags: `?crew=dom|brian` skips the menu and cutscene (add `&intro` to watch it),
 `?autopilot` follows the GPS (`?autopilot=detour` disobeys it at random intersections to test
 rerouting, `?autopilot=wander` turns at random), `?nocops` disables police,
@@ -75,7 +78,10 @@ the GPS reroute log (`rerouteLog`).
 - `src/fx.ts`, `src/audio.ts`: sparks, dust, tire smoke, skid marks, glass, banknotes, nitrous flames;
   synthesized engine, sirens, crashes, screech, alarm
 - `src/vehicle.ts`: rigid-body car with arcade handling
-- `src/carModel.ts`: Charger-style hero cars, police cruisers, Hobbs's armored truck
+- `src/assets.ts`, `src/carModel.ts`: downloaded car models (Dom's Charger, Brian's Skyline, the cruisers) with
+  spinning/steering wheels, brake lights and light bars; procedural fallbacks; Hobbs's armored truck
+- `tools/assets/`: the model pipeline (Blender clean-up, then meshopt/WebP compression) that builds
+  `public/models/` from the downloads listed in [`assets-src/README.md`](assets-src/README.md)
 - `src/vault.ts`: the vault and the winch cables (damped springs with a rope-joint hard stop)
 - `src/city.ts`: Rio: street grid, buildings, police HQ with breakable wall, props, bridge, route
 - `src/police.ts`: police spawning, pursuit and wrecks

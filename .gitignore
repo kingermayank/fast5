@@ -1,4 +1,7 @@
 node_modules
+# Raw model downloads (large; see assets-src/README.md) and the local Blender module.
+assets-src/*.glb
+.bpy
 dist
 .env
 .env.*

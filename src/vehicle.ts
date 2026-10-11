@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildCarModel, type CarModel, type CarModelOptions, WHEEL_RADIUS } from './carModel';
+import { buildCarModel, type CarModel, type CarModelOptions } from './carModel';
 import type { ControlState } from './input';
 import { RAPIER, syncMesh, yawQuat } from './physics';
 
@@ -225,7 +225,8 @@ export class Vehicle {
     this.model.body.rotation.x += (pitch - this.model.body.rotation.x) * Math.min(1, 8 * dt);
     for (const [i, s] of this.model.spinners.entries()) {
       // Rear wheels (indices 2, 3) spin freely while straining against the vault.
-      const spin = i >= 2 ? Math.max(this.forwardSpeed / WHEEL_RADIUS, this.wheelspin * 45) : this.forwardSpeed / WHEEL_RADIUS;
+      const r = this.model.wheelRadius;
+      const spin = i >= 2 ? Math.max(this.forwardSpeed / r, this.wheelspin * 45) : this.forwardSpeed / r;
       s.rotation.x += spin * dt;
     }
     for (const p of this.model.frontPivots) p.rotation.y = this.steer * 0.45;

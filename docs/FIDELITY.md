@@ -181,6 +181,24 @@ Detour test: an autopilot that disobeys the GPS at about a third of intersection
 11 and 6 reroutes. Both reached the swap point with the partner in formation 65–70% of the time. In
 the run with the reroute log on, all 6 reroutes were genuine wrong turns, with no false alarms.
 
+## 4b. Art pipeline (started)
+
+- **Decisions:** golden-hour Rio; runs well on a MacBook Air/Pro; no paid assets (models come from
+  free Sketchfab downloads you provide).
+- **Pipeline** (`tools/assets/`): Blender as a Python module cleans each download (strips rigs and
+  helpers, fixes scale, faces +z, ground origin, one body mesh per material plus four pivoted wheels,
+  optional simplification), then glTF Transform compresses it (meshopt geometry, WebP textures).
+  The four models went from 34 MB to 4.8 MB.
+- **In the game:** Dom's 1970 Charger, Brian's R34 Skyline and Crown Victoria cruisers (simplified to
+  45k triangles for up to ten on screen), with spinning and steering wheels, brake lights, a flashing
+  light bar, clear-coat paint and cheap tinted glass; Christ the Redeemer on the peak.
+- **Budget check** (1280×720): about 0.7–0.8M triangles and 600–1,200 draw calls in the chase. The
+  breach peaks near 2,200 draw calls because every station brick is its own object; instancing them
+  is the next performance fix.
+- **Map (proposed):** the film's chase was shot in San Juan, Puerto Rico (Avenida Ponce de León at
+  Calle Betances through Hato Rey, then the Teodoro Moscoso Bridge). Rebuild those streets from
+  OpenStreetMap, dressed as Rio.
+
 ## 5. Roadmap to the rest of the way
 
 Each phase has a measurable "done when", checked with the same automated play-tests.

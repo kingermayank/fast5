@@ -311,6 +311,15 @@ body {
   animation: pulse 1.4s ease-in-out infinite;
 }
 
+.credits {
+  position: absolute;
+  bottom: 10px;
+  max-width: min(900px, 92vw);
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0.45;
+}
+
 @keyframes pulse {
   50% {
     opacity: 0.4;
