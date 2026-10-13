@@ -311,6 +311,16 @@ body {
   animation: pulse 1.4s ease-in-out infinite;
 }
 
+.build {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  opacity: 0.6;
+}
+
 .credits {
   position: absolute;
   bottom: 10px;

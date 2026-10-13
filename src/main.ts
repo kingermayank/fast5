@@ -22,6 +22,9 @@ import { Vehicle, type VehicleSpec } from './vehicle';
 import { CUTSCENE_VIDEOS } from './videos';
 import { Voice } from './voice';
 
+declare const __BUILD__: string;
+document.getElementById('build')!.textContent = `San Juan map · build ${__BUILD__}`;
+
 type CharacterId = 'dom' | 'brian';
 
 export const CHARACTERS: Record<CharacterId, { name: string; spec: VehicleSpec; side: 1 | -1 }> = {
