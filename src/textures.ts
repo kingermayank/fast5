@@ -250,3 +250,77 @@ export function waterTexture(): THREE.CanvasTexture {
     }
   });
 }
+
+/**
+ * Rio's black-and-white wave mosaic pavement (the Copacabana calçadão), for the
+ * avenue sidewalks. One repeat covers 4 m x 4 m.
+ */
+export function mosaicTexture(): THREE.CanvasTexture {
+  return canvasTexture(256, 256, (ctx) => {
+    ctx.fillStyle = '#e9e5dc';
+    ctx.fillRect(0, 0, 256, 256);
+    ctx.fillStyle = '#26262a';
+    // Two wave bands per repeat, seamless in both directions.
+    for (const y0 of [32, 160]) {
+      ctx.beginPath();
+      for (let x = 0; x <= 256; x += 4) ctx.lineTo(x, y0 + Math.sin((x / 256) * Math.PI * 2) * 30);
+      for (let x = 256; x >= 0; x -= 4) ctx.lineTo(x, y0 + 46 + Math.sin((x / 256) * Math.PI * 2) * 30);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // Stone joints.
+    ctx.strokeStyle = 'rgba(120,115,105,0.35)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 1400; i++) {
+      const x = Math.random() * 256;
+      const y = Math.random() * 256;
+      ctx.strokeRect(x, y, 5 + Math.random() * 3, 5 + Math.random() * 3);
+    }
+  });
+}
+
+/** Tropical lawn: uneven green with dry patches. One repeat covers 8 m x 8 m. */
+export function grassTexture(): THREE.CanvasTexture {
+  return canvasTexture(256, 256, (ctx) => {
+    ctx.fillStyle = '#4f7a3a';
+    ctx.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = `rgba(${Math.random() < 0.6 ? '120,140,60' : '40,80,35'},0.25)`;
+      ctx.beginPath();
+      ctx.arc(Math.random() * 256, Math.random() * 256, 10 + Math.random() * 30, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (let i = 0; i < 9000; i++) {
+      ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '30,60,25' : '140,170,90'},0.3)`;
+      ctx.fillRect(Math.random() * 256, Math.random() * 256, 1, 3);
+    }
+  });
+}
+
+/**
+ * The ground between buildings: worn concrete, dirt and patchy grass, as in the
+ * yards and lots of a hot, rainy city. One repeat covers about 32 m.
+ */
+export function groundTexture(): THREE.CanvasTexture {
+  return canvasTexture(512, 512, (ctx) => {
+    ctx.fillStyle = '#a39c8e';
+    ctx.fillRect(0, 0, 512, 512);
+    const blob = (color: string, n: number, r0: number, r1: number) => {
+      for (let i = 0; i < n; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 512;
+        const r = r0 + Math.random() * (r1 - r0);
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, color);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        // Draw wrapped copies so the texture tiles.
+        for (const dx of [-512, 0, 512]) for (const dy of [-512, 0, 512]) ctx.fillRect(x - r + dx, y - r + dy, r * 2, r * 2);
+      }
+    };
+    blob('rgba(108,128,72,0.55)', 26, 30, 90); // grass
+    blob('rgba(140,118,88,0.35)', 18, 20, 70); // dirt
+    blob('rgba(80,80,78,0.25)', 14, 15, 50); // stains
+    noise(ctx, 512, 512, 26000, 0.07);
+  });
+}

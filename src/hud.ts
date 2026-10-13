@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { BRIDGE_X, PITCH, SEAWALL_Z, STREET_HALF } from './city';
 import type { Input } from './input';
+import { MAP, points, RAW } from './roadmap';
 
 export interface HudState {
   speedKmh: number;
@@ -21,7 +21,7 @@ export interface HudState {
   vault: THREE.Vector3;
   partner: THREE.Vector3;
   cops: THREE.Vector3[];
-  /** The GPS route, next intersection first. */
+  /** The GPS route ahead, as a polyline along the streets. */
   route: THREE.Vector3[];
   /** Points of interest on the minimap. */
   blips: { pos: THREE.Vector3; color: string; label: string }[];
@@ -31,6 +31,45 @@ const $ = (id: string) => document.getElementById(id)!;
 
 const MAP_SCALE = 0.55; // px per meter
 const MAP_SIZE = 200;
+
+/** The whole street map drawn once (north-up in game coordinates); the radar rotates it. */
+const BASE = (() => {
+  const box = new THREE.Box3().setFromPoints(MAP.nodes.map((n) => n.pos)).expandByScalar(200);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil((box.max.x - box.min.x) * MAP_SCALE);
+  canvas.height = Math.ceil((box.max.z - box.min.z) * MAP_SCALE);
+  const ctx = canvas.getContext('2d')!;
+  const X = (x: number) => (x - box.min.x) * MAP_SCALE;
+  const Z = (z: number) => (z - box.min.z) * MAP_SCALE;
+  // Water, then land, then streets.
+  ctx.fillStyle = 'rgba(20,48,70,0.9)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'rgba(15,20,28,0.95)';
+  for (const poly of RAW.land) {
+    ctx.beginPath();
+    for (const ring of poly) {
+      points(ring).forEach((p, i) => (i ? ctx.lineTo(X(p.x), Z(p.z)) : ctx.moveTo(X(p.x), Z(p.z))));
+      ctx.closePath();
+    }
+    ctx.fill('evenodd');
+  }
+  ctx.fillStyle = 'rgba(70,80,96,0.55)';
+  for (const b of RAW.buildings) {
+    ctx.beginPath();
+    points(b.p).forEach((p, i) => (i ? ctx.lineTo(X(p.x), Z(p.z)) : ctx.moveTo(X(p.x), Z(p.z))));
+    ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(200,205,215,0.5)';
+  ctx.lineCap = ctx.lineJoin = 'round';
+  for (const e of [...MAP.edges].sort((a, b) => b.hw - a.hw)) {
+    ctx.lineWidth = Math.max(2, e.hw * 2 * MAP_SCALE);
+    ctx.strokeStyle = e.rank <= 2 ? 'rgba(225,215,185,0.6)' : 'rgba(200,205,215,0.45)';
+    ctx.beginPath();
+    e.pts.forEach((p, i) => (i ? ctx.lineTo(X(p.x), Z(p.z)) : ctx.moveTo(X(p.x), Z(p.z))));
+    ctx.stroke();
+  }
+  return { canvas, origin: box.min };
+})();
 
 export class Hud {
   private hud = $('hud');
@@ -214,21 +253,19 @@ export class Hud {
     ctx.beginPath();
     ctx.arc(c, c, c, 0, Math.PI * 2);
     ctx.clip();
-    ctx.fillStyle = 'rgba(15,20,28,0.75)';
-    ctx.fillRect(0, 0, MAP_SIZE, MAP_SIZE);
 
-    // Streets.
-    ctx.strokeStyle = 'rgba(200,205,215,0.45)';
-    ctx.lineWidth = STREET_HALF * 2 * MAP_SCALE;
-    ctx.beginPath();
-    const line = (a: THREE.Vector3, b: THREE.Vector3) => {
-      ctx.moveTo(...toMap(a));
-      ctx.lineTo(...toMap(b));
-    };
-    for (let i = 0; i <= 5; i++) line(new THREE.Vector3(i * PITCH, 0, -STREET_HALF), new THREE.Vector3(i * PITCH, 0, 7 * PITCH + STREET_HALF));
-    for (let j = 0; j <= 7; j++) line(new THREE.Vector3(-STREET_HALF, 0, j * PITCH), new THREE.Vector3(5 * PITCH + STREET_HALF, 0, j * PITCH));
-    line(new THREE.Vector3(BRIDGE_X, 0, SEAWALL_Z), new THREE.Vector3(BRIDGE_X, 0, SEAWALL_Z + 1000));
-    ctx.stroke();
+    // The map, turned so the way you're facing is up.
+    const px = (s.player.x - BASE.origin.x) * MAP_SCALE;
+    const pz = (s.player.z - BASE.origin.z) * MAP_SCALE;
+    ctx.save();
+    // Screen = center + R * (map - player), with R taking +heading to up and left of the car to the left.
+    const a = -cos;
+    const b = -sin;
+    const cc = sin;
+    const d = -cos;
+    ctx.setTransform(a, b, cc, d, c - (a * px + cc * pz), c - (b * px + d * pz));
+    ctx.drawImage(BASE.canvas, 0, 0);
+    ctx.restore();
 
     // The GPS route.
     if (s.route.length) {

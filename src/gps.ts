@@ -1,147 +1,131 @@
 import * as THREE from 'three';
-import { BRIDGE_X, PITCH, ROUTE, SEAWALL_Z, STREET_HALF, SWAP_ZONE_Z } from './city';
-import { DIRS, Path } from './roads';
+import { Path } from './roads';
+import { BRIDGE_FOOT, GOAL, MAP, type MapEdge, type MapNode, PLAN } from './roadmap';
 
 /**
- * GTA-style navigation. The street grid is a graph; the route is the cheapest
- * way from wherever the player is to the swap point, recomputed whenever they
- * leave it. Mia's planned route (past the spike strip and the bank) is
- * discounted, so it's the default, but any road that gets there works.
+ * GTA-style navigation. The streets are a graph; the route is the cheapest way
+ * from wherever the player is to the swap point, recomputed whenever they leave
+ * it. Mia's planned route (past the spike strip and the bank) is discounted, so
+ * it's the default, but any road that gets there works.
  */
 
-const NX = 5;
-const NZ = 7;
 /** Planned streets cost this fraction of their length, so the GPS prefers Mia's route. */
 const PLAN_DISCOUNT = 0.25;
 /** Extra cost (meters) of turning at an intersection: with a vault in tow, straight is faster. */
 const TURN_COST = 30;
 /** How long the player must be off the route before it's recomputed (ignores brief wobbles). */
 const OFF_ROUTE_DELAY = 0.5;
-/** Within this distance of an intersection's center you're "in" it. */
-const BOX = STREET_HALF + 2;
+/** Cost (meters) of turning round. Real streets have long blocks, so after a spin it's often the best way. */
+const U_TURN_COST = 80;
 
-const NODES: THREE.Vector3[] = [];
-for (let i = 0; i <= NX; i++) for (let j = 0; j <= NZ; j++) NODES.push(new THREE.Vector3(i * PITCH, 0, j * PITCH));
-const grid = (i: number, j: number) => i * (NZ + 1) + j;
-/** The bridge on-ramp and the swap point at the far end. */
-const RAMP = NODES.push(new THREE.Vector3(BRIDGE_X, 0, SEAWALL_Z + 150)) - 1;
-const GOAL = NODES.push(new THREE.Vector3(BRIDGE_X, 0, SWAP_ZONE_Z)) - 1;
-const BRIDGE_FOOT = grid(BRIDGE_X / PITCH, NZ);
 /** The intersection at the foot of the bridge. */
-export const BRIDGE_FOOT_POS = NODES[BRIDGE_FOOT];
+export const BRIDGE_FOOT_POS = BRIDGE_FOOT.pos;
 
-/** Neighbors by direction index (DIRS: +z, +x, -z, -x); -1 = none. */
-const LINKS: number[][] = NODES.map(() => [-1, -1, -1, -1]);
-for (let i = 0; i <= NX; i++) {
-  for (let j = 0; j <= NZ; j++) {
-    const n = grid(i, j);
-    if (j < NZ) LINKS[n][0] = grid(i, j + 1);
-    if (i < NX) LINKS[n][1] = grid(i + 1, j);
-    if (j > 0) LINKS[n][2] = grid(i, j - 1);
-    if (i > 0) LINKS[n][3] = grid(i - 1, j);
-  }
+const PLANNED = new Set<MapEdge>();
+for (let k = 0; k < PLAN.length - 1; k++) {
+  const e = MAP.between(PLAN[k], PLAN[k + 1]);
+  if (e) PLANNED.add(e);
 }
-LINKS[BRIDGE_FOOT][0] = RAMP;
-LINKS[RAMP][2] = BRIDGE_FOOT;
-LINKS[RAMP][0] = GOAL;
-LINKS[GOAL][2] = RAMP;
 
-const nodeAt = (p: THREE.Vector3) => NODES.findIndex((n) => n.distanceToSquared(p) < 1);
-const edgeKey = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`);
-
-/** Mia's plan as a set of graph edges: the street out of the station, then ROUTE. */
-const PLANNED = new Set<string>();
-{
-  const plan = [new THREE.Vector3(200, 0, 200), ...ROUTE];
-  for (let k = 0; k < plan.length - 1; k++) {
-    let a = nodeAt(plan[k]);
-    const b = nodeAt(plan[k + 1]);
-    const d = plan[k + 1].clone().sub(plan[k]).normalize();
-    const dir = DIRS.findIndex((x) => x.dot(d) > 0.9);
-    while (a !== b && a >= 0 && dir >= 0) {
-      const next = LINKS[a][dir];
-      if (next < 0) break;
-      PLANNED.add(edgeKey(a, next));
-      a = next;
-    }
-  }
-}
+/** Within this distance of an intersection's center you're "in" it. */
+const box = (n: MapNode) => Math.max(8, ...n.edges.map((e) => e.hw)) + 2;
 
 /** Where the player is on the graph: inside an intersection, or on a street heading to one. */
 interface Fix {
   /** The intersection they're in, or the one they're driving toward. */
-  node: number;
-  /** The one behind them on this street (-1 when inside an intersection). */
-  from: number;
-  /** Direction of travel (index into DIRS). */
-  dir: number;
+  node: MapNode;
+  /** The one behind them on this street (null when inside an intersection). */
+  from: MapNode | null;
+  /** The street they're on (or came in by, inside an intersection). */
+  edge: MapEdge;
   inside: boolean;
 }
 
-function dirIndex(v: THREE.Vector3): number {
-  let best = 0;
-  for (let k = 1; k < 4; k++) if (DIRS[k].dot(v) > DIRS[best].dot(v)) best = k;
-  return best;
-}
-
-function locate(p: THREE.Vector3, travel: THREE.Vector3): Fix {
-  // The bridge: a single road north.
-  if (p.z > NZ * PITCH + BOX) {
-    const north = travel.z >= 0;
-    const ramp = NODES[RAMP];
-    if (Math.abs(p.z - ramp.z) < BOX) return { node: RAMP, from: -1, dir: north ? 0 : 2, inside: true };
-    if (north) return p.z < ramp.z ? { node: RAMP, from: BRIDGE_FOOT, dir: 0, inside: false } : { node: GOAL, from: RAMP, dir: 0, inside: false };
-    return p.z > ramp.z ? { node: RAMP, from: GOAL, dir: 2, inside: false } : { node: BRIDGE_FOOT, from: RAMP, dir: 2, inside: false };
-  }
-  const i = THREE.MathUtils.clamp(Math.round(p.x / PITCH), 0, NX);
-  const j = THREE.MathUtils.clamp(Math.round(p.z / PITCH), 0, NZ);
-  const dx = Math.abs(p.x - i * PITCH);
-  const dz = Math.abs(p.z - j * PITCH);
-  if (dx < BOX && dz < BOX) return { node: grid(i, j), from: -1, dir: dirIndex(travel), inside: true };
-  if (dx <= dz) {
-    // A north-south street.
-    const north = travel.z >= 0;
-    const lo = THREE.MathUtils.clamp(Math.floor(p.z / PITCH), 0, NZ);
-    const hi = THREE.MathUtils.clamp(lo + 1, 0, NZ);
-    return north ? { node: grid(i, hi), from: grid(i, lo), dir: 0, inside: false } : { node: grid(i, lo), from: grid(i, hi), dir: 2, inside: false };
-  }
-  const east = travel.x >= 0;
-  const lo = THREE.MathUtils.clamp(Math.floor(p.x / PITCH), 0, NX);
-  const hi = THREE.MathUtils.clamp(lo + 1, 0, NX);
-  return east ? { node: grid(hi, j), from: grid(lo, j), dir: 1, inside: false } : { node: grid(lo, j), from: grid(hi, j), dir: 3, inside: false };
-}
-
-/** Cheapest route from `start` (arriving along `dir`) to the swap point; no U-turns. */
-function shortestRoute(start: number, dir: number): number[] {
-  const S = NODES.length * 4;
-  const cost = new Float64Array(S).fill(Infinity);
-  const prev = new Int32Array(S).fill(-1);
-  const done = new Uint8Array(S);
-  cost[start * 4 + dir] = 0;
-  for (;;) {
-    let s = -1;
-    for (let k = 0; k < S; k++) if (!done[k] && cost[k] < Infinity && (s < 0 || cost[k] < cost[s])) s = k;
-    if (s < 0) return [start];
-    const node = s >> 2;
-    const inDir = s & 3;
-    if (node === GOAL) {
-      const ids: number[] = [];
-      for (let k = s; k >= 0; k = prev[k]) ids.unshift(k >> 2);
-      return ids;
+function locate(p: THREE.Vector3, travel: THREE.Vector3, lastEdge: MapEdge | null): Fix | null {
+  const fix = MAP.locate(p, travel);
+  if (!fix) return null;
+  const { edge } = fix;
+  const node = fix.forward ? edge.b : edge.a;
+  const from = fix.forward ? edge.a : edge.b;
+  for (const n of [node, from]) {
+    if (n.pos.distanceTo(p) < box(n)) {
+      // Came in by the street we were last on, if it leads here.
+      const via = lastEdge && (lastEdge.a === n || lastEdge.b === n) ? lastEdge : edge;
+      return { node: n, from: null, edge: via, inside: true };
     }
-    done[s] = 1;
-    for (let d = 0; d < 4; d++) {
-      const next = LINKS[node][d];
-      if (next < 0 || d === (inDir + 2) % 4) continue;
-      const len = NODES[node].distanceTo(NODES[next]) * (PLANNED.has(edgeKey(node, next)) ? PLAN_DISCOUNT : 1);
-      const c = cost[s] + len + (d === inDir ? 0 : TURN_COST);
-      const t = next * 4 + d;
-      if (c < cost[t]) {
-        cost[t] = c;
-        prev[t] = s;
+  }
+  return { node, from, edge, inside: false };
+}
+
+/** Turn cost between arriving along `inDir` and leaving along `outDir`. */
+function turnCost(inDir: THREE.Vector3, outDir: THREE.Vector3): number {
+  return inDir.dot(outDir) > 0.82 ? 0 : TURN_COST;
+}
+
+/**
+ * Cheapest route to the swap point for a car on street `via`: either on to the
+ * intersection ahead (`start`, `ahead` m away), or turning round to the one
+ * behind. Returns the intersections and the streets into them.
+ */
+function shortestRoute(start: MapNode, via: MapEdge, ahead: number): { nodes: MapNode[]; edges: MapEdge[] } {
+  // States: arriving at a node along an edge.
+  type State = { node: MapNode; edge: MapEdge };
+  const key = (s: State) => `${s.node.id}:${s.edge.id}`;
+  const cost = new Map<string, number>();
+  const prev = new Map<string, State | null>();
+  const states = new Map<string, State>();
+  const open = new Set<string>();
+  const behind = MAP.other(via, start);
+  for (const [s0, c0] of [
+    [{ node: start, edge: via }, ahead],
+    [{ node: behind, edge: via }, Math.max(0, via.length - ahead) + U_TURN_COST],
+  ] as const) {
+    if (c0 >= (cost.get(key(s0)) ?? Infinity)) continue;
+    cost.set(key(s0), c0);
+    prev.set(key(s0), null);
+    states.set(key(s0), s0);
+    open.add(key(s0));
+  }
+  let found: State | null = null;
+  while (open.size) {
+    let bk = '';
+    let bc = Infinity;
+    for (const k of open) {
+      const c = cost.get(k)!;
+      if (c < bc) {
+        bc = c;
+        bk = k;
+      }
+    }
+    open.delete(bk);
+    const s = states.get(bk)!;
+    if (s.node === GOAL) {
+      found = s;
+      break;
+    }
+    const inDir = MAP.arriving(s.edge, s.node);
+    for (const e of s.node.edges) {
+      const next = MAP.other(e, s.node);
+      const turn = e === s.edge ? U_TURN_COST : turnCost(inDir, MAP.leaving(e, s.node));
+      const c = bc + e.length * (PLANNED.has(e) ? PLAN_DISCOUNT : 1) + turn;
+      const t = { node: next, edge: e };
+      const tk = key(t);
+      if (c < (cost.get(tk) ?? Infinity)) {
+        cost.set(tk, c);
+        prev.set(tk, s);
+        states.set(tk, t);
+        open.add(tk);
       }
     }
   }
+  if (!found) return { nodes: [start], edges: [via] };
+  const nodes: MapNode[] = [];
+  const edges: MapEdge[] = [];
+  for (let s: State | null = found; s; s = prev.get(key(s)) ?? null) {
+    nodes.unshift(s.node);
+    edges.unshift(s.edge);
+  }
+  return { nodes, edges };
 }
 
 export interface Turn {
@@ -161,14 +145,19 @@ export class Gps {
   onReroute?: () => void;
   /** Recent reroutes, for debugging. */
   readonly log: string[] = [];
-  private ids: number[] = [];
+  private ids: MapNode[] = [];
+  /** edges[k] leads into ids[k] (edges[0] is the street we're on toward ids[0]). */
+  private edges: MapEdge[] = [];
   private offFor = 0;
+  private lastEdge: MapEdge | null = null;
 
   /** Call every frame with the player's position and direction of travel. */
   update(dt: number, p: THREE.Vector3, travel: THREE.Vector3): void {
-    const fix = locate(p, travel);
+    const fix = locate(p, travel, this.lastEdge);
+    if (!fix) return;
+    if (!fix.inside) this.lastEdge = fix.edge;
     if (!this.ids.length) {
-      this.route(fix);
+      this.route(fix, p);
       return;
     }
     if (this.ids.length === 1 && this.ids[0] === GOAL) return;
@@ -177,13 +166,18 @@ export class Gps {
     if (fix.inside) {
       // Working through an intersection on the route (skip any we somehow jumped past).
       // Off-route intersections aren't judged until they pick a street out of them.
-      if (k > 0) this.ids.splice(0, k);
+      if (k > 0) {
+        this.ids.splice(0, k);
+        this.edges.splice(0, k);
+      }
       onRoute = true;
-    } else if (k === 0) {
+    } else if (fix.edge === this.edges[0] || (k === 0 && MAP.other(this.edges[0], fix.node) === fix.from)) {
+      // On the route's street, either way (turning round to follow it is fine).
       onRoute = true;
-    } else if (k === 1 && fix.from === this.ids[0]) {
+    } else if (k === 1 && fix.from === this.ids[0] && this.edges[1] === fix.edge) {
       // Through the last intersection the way the route said.
       this.ids.shift();
+      this.edges.shift();
       onRoute = true;
     } else {
       onRoute = false;
@@ -191,32 +185,61 @@ export class Gps {
     this.offFor = onRoute ? 0 : this.offFor + dt;
     if (this.offFor > OFF_ROUTE_DELAY) {
       this.offFor = 0;
-      const was = this.ids.slice(0, 2).map((n) => `${NODES[n].x},${NODES[n].z}`).join('>');
-      this.log.push(`at ${Math.round(p.x)},${Math.round(p.z)} heading ${'NESW'[[0, 3, 2, 1][fix.dir]]} to ${NODES[fix.node].x},${NODES[fix.node].z} (route was ${was})`);
+      const was = this.ids.slice(0, 2).map((n) => `${Math.round(n.pos.x)},${Math.round(n.pos.z)}`).join('>');
+      this.log.push(`at ${Math.round(p.x)},${Math.round(p.z)} on ${fix.edge.name || 'a side street'} to ${Math.round(fix.node.pos.x)},${Math.round(fix.node.pos.z)} (route was ${was})`);
       if (this.log.length > 12) this.log.shift();
-      this.route(fix);
+      this.route(fix, p);
       this.reroutes++;
       this.onReroute?.();
     }
     this.sync();
   }
 
-  /** The route as a drivable polyline from `p`. */
+  /**
+   * The route ahead as a drivable polyline from `p`, along the streets: the whole
+   * route as a line, picked up from the point on it nearest to `p` (looking only
+   * near its start, so a route that doubles back can't confuse it).
+   */
   path(p: THREE.Vector3): Path {
-    return new Path([p.clone().setY(0), ...this.nodes]);
+    const here = p.clone().setY(0);
+    if (!this.ids.length) return new Path([here]);
+    const pts: THREE.Vector3[] = [];
+    const e0 = this.edges[0];
+    const n0 = this.ids[0];
+    if (e0 && (e0.a === n0 || e0.b === n0)) pts.push(...MAP.from(e0, MAP.other(e0, n0)).map((q) => q.clone()));
+    else pts.push(n0.pos.clone());
+    const near = pts.length;
+    for (let k = 1; k < this.ids.length; k++) pts.push(...MAP.from(this.edges[k], this.ids[k - 1]).slice(1).map((q) => q.clone()));
+    // Where we are: nearest point on the current street or the next few after it.
+    let prefixEnd = near;
+    let len = 0;
+    for (let i = near; i < pts.length && len < 300; i++, prefixEnd = i) len += pts[i].distanceTo(pts[i - 1]);
+    const s = new Path(pts.slice(0, Math.max(2, prefixEnd))).project(here);
+    const full = new Path(pts);
+    const out = [here];
+    let acc = 0;
+    for (let i = 1; i < pts.length; i++) {
+      acc += pts[i].distanceTo(pts[i - 1]);
+      if (acc > s + 0.5) out.push(pts[i]);
+    }
+    if (out.length === 1) out.push(full.at(full.length));
+    return new Path(out);
   }
 
   /** The next intersection where the route turns, if any. */
   nextTurn(p: THREE.Vector3, travel: THREE.Vector3): Turn | null {
-    let distance = p.distanceTo(this.nodes[0] ?? p);
-    let incoming = this.nodes[0] ? DIRS[locate(p, travel).dir] : travel;
-    for (let k = 0; k < this.nodes.length - 1; k++) {
-      const out = this.nodes[k + 1].clone().sub(this.nodes[k]).normalize();
+    if (!this.ids.length) return null;
+    const full = this.path(p);
+    let distance = full.project(this.ids[0].pos);
+    void travel;
+    for (let k = 0; k < this.ids.length - 1; k++) {
+      const node = this.ids[k];
+      const incoming = MAP.arriving(this.edges[k], node);
+      const out = MAP.leaving(this.edges[k + 1], node);
       const cross = incoming.x * out.z - incoming.z * out.x;
       // Left of travel is +x when facing +z, which makes a left turn a negative cross product.
-      if (Math.abs(cross) > 0.5) return { at: this.nodes[k], side: cross < 0 ? 'left' : 'right', distance };
-      distance += this.nodes[k].distanceTo(this.nodes[k + 1]);
-      incoming = out;
+      if (Math.abs(cross) > 0.5 && incoming.dot(out) < 0.85) return { at: node.pos, side: cross < 0 ? 'left' : 'right', distance };
+      distance += this.edges[k + 1].length;
     }
     return null;
   }
@@ -226,12 +249,17 @@ export class Gps {
     return this.path(p).length;
   }
 
-  private route(fix: Fix): void {
-    this.ids = shortestRoute(fix.node, fix.dir);
+  private route(fix: Fix, p: THREE.Vector3): void {
+    // How far along the street the intersection ahead is (0 when already in one).
+    const f = fix.inside ? null : MAP.locate(p, undefined, 30);
+    const ahead = f && f.edge === fix.edge ? (fix.node === f.edge.b ? f.edge.length - f.s : f.s) : 0;
+    const r = shortestRoute(fix.node, fix.edge, ahead);
+    this.ids = r.nodes;
+    this.edges = r.edges;
     this.sync();
   }
 
   private sync(): void {
-    this.nodes = this.ids.map((n) => NODES[n]);
+    this.nodes = this.ids.map((n) => n.pos);
   }
 }

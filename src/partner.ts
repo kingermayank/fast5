@@ -3,7 +3,7 @@ import { angleTo, avoidance } from './ai';
 import type { City } from './city';
 import type { ControlState } from './input';
 import type { RAPIER } from './physics';
-import { exits, lanePath, leftOf, nextIntersection, Path, roadHalfWidth, routeExit, snapDir, streetCenter } from './roads';
+import { curveSpeed, exits, lanePath, leftOf, nextIntersection, Path, roadDir, roadHalfWidth, routeExit, streetCenter } from './roads';
 import type { Vehicle } from './vehicle';
 
 /** Lateral distance kept from the player's line. */
@@ -42,7 +42,7 @@ export interface PartnerThoughts {
 }
 
 /**
- * The AI partner. It reads the street grid like a driver would:
+ * The AI partner. It reads the streets like a driver would:
  *  - route knowledge: it knows the streets and the live GPS route, so it plans its own
  *    lane through the next intersection instead of chasing the player;
  *  - prediction: it guesses the player's turn from their heading, steering and
@@ -99,11 +99,11 @@ export class PartnerDriver {
     }
 
     const pPos = player.position;
-    const pDir = snapDir(player.forward);
+    const pDir = roadDir(pPos, player.forward);
     const aligned = player.forward.dot(pDir) > 0.82;
     const onRoad = this.city.isStreet(pPos.x, pPos.z);
 
-    // Plan along the street grid when the player is on a street and roughly lined up with it;
+    // Plan along the streets when the player is on one and roughly lined up with it;
     // otherwise (mid-drift, on a sidewalk) follow their actual trail.
     let path: Path;
     let playerPath: Path;
@@ -289,6 +289,9 @@ export class PartnerDriver {
       const myDist = Math.max(0, cornerAhead - (inside ? 4 : 0));
       vTarget = Math.min(vTarget, (inside ? 8 : 11) + myDist * 0.4);
     }
+
+    // Bends ahead on our own line (the streets curve): don't run wide.
+    vTarget = Math.min(vTarget, Math.max(8, curveSpeed(path, s, 60, 6.5)));
 
     // Something in our lane we couldn't steer around: brake to stop short of it.
     if (blockedAt < Infinity) vTarget = Math.min(vTarget, Math.max(0, (blockedAt - 6) * 0.9));

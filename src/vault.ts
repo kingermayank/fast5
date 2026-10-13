@@ -103,6 +103,12 @@ const DAMPING = 12_000;
 const MAX_PULL = 220_000;
 /** The hard stop (a rope joint) sits this far beyond the cable's length. */
 const STRETCH_LIMIT = 1.6;
+/**
+ * Winch slip clutch (N): past this tension the drum pays cable out rather than
+ * stopping the car dead (after a wide swing the vault can be lying still 30 m
+ * back as you floor it). The winch reels the slack back in afterwards.
+ */
+const SLIP_TENSION = 70_000;
 /** Winch speed (m/s). */
 const REEL_SPEED = 4;
 
@@ -179,8 +185,14 @@ export class Cable {
     const n = d.divideScalar(dist);
     // Positive when the ends are moving apart.
     const opening = pointVelocity(this.vault.body, b).sub(pointVelocity(this.car.body, a)).dot(n);
-    const f = Math.min(MAX_PULL, STIFFNESS * stretch + DAMPING * opening);
+    let f = Math.min(MAX_PULL, STIFFNESS * stretch + DAMPING * opening);
     if (f <= 0) return; // a cable can only pull
+    if (f > SLIP_TENSION && opening > 2) {
+      // Snatched hard: the clutch slips, letting out cable at the rate the ends are parting.
+      this.length += opening * dt;
+      this.syncJoint();
+      f = SLIP_TENSION;
+    }
     this.tension = f;
     const j = f * dt;
     this.car.body.applyImpulseAtPoint({ x: n.x * j, y: n.y * j, z: n.z * j }, a, true);

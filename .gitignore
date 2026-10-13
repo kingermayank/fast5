@@ -7,3 +7,5 @@ dist
 .env.*
 .DS_Store
 *.log
+# Raw OpenStreetMap tiles (tools/map/fetch.mjs downloads them; the built map is src/map/sanjuan.json).
+assets-src/osm/tile_*.json

@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import type { Sound } from './audio';
 import { buildCarModel } from './carModel';
-import { BANK, type City, VAULT_START } from './city';
+import { type City, VAULT_START } from './city';
 import type { Director } from './director';
 import type { Effects } from './fx';
 import type { Hud } from './hud';
 import type { Obstacle } from './partner';
 import { RAPIER } from './physics';
+import { roadHalfWidth } from './roads';
+import { BANK, SPIKES } from './roadmap';
 import type { Cable, Vault } from './vault';
 import type { Vehicle } from './vehicle';
 import type { Voice } from './voice';
@@ -112,39 +114,38 @@ export class ThePull {
 
 // ---------------------------------------------------------------- Spike strip
 
-const STRIP_Z = 420;
-const STRIP_X = 100;
-
 /**
- * Cops lay a spike strip across the street north of (100, 300), leaving a gap
+ * Cops lay a spike strip across Mia's route down Ponce de León, leaving a gap
  * on one side. Mia calls the side; the approach drops into slow motion so the
  * player can pick the gap. Spikes blow tires (less grip and speed, rim sparks).
+ * Laid out in the strip's frame: x across the street (left positive), z along it.
  */
 export class SpikeStrip {
   private state: 'idle' | 'armed' | 'done' = 'idle';
-  /** +1: the gap is on the left (+x heading north). */
+  /** +1: the gap is on the left. */
   private gapSide = Math.random() < 0.5 ? 1 : -1;
   private group = new THREE.Group();
   private hit = new Set<Vehicle>();
   private slowed = false;
   private x0 = 0;
   private x1 = 0;
+  private half = roadHalfWidth(SPIKES.origin);
   private bars: { red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
   private time = 0;
 
   constructor(private ctx: MomentContext) {}
 
-  /** Center x of the open gap while the strip is down (for the test autopilot), else null. */
-  gapX(): number | null {
+  /** Lateral offset (left of the street's center) of the open gap while the strip is down (for the test autopilot), else null. */
+  gapOffset(): number | null {
     if (this.state !== 'armed') return null;
-    return this.gapSide > 0 ? (this.x1 + STRIP_X + 12) / 2 : (STRIP_X - 12 + this.x0) / 2;
+    return this.gapSide > 0 ? (this.x1 + this.half) / 2 : (-this.half + this.x0) / 2;
   }
 
   /** Points the partner AI must treat as solid. */
   obstacles(): Obstacle[] {
     if (this.state !== 'armed') return [];
     const list: Obstacle[] = [];
-    for (let x = this.x0 + 0.6; x <= this.x1; x += 1.4) list.push({ pos: v3(x, 0, STRIP_Z), radius: 0.9 });
+    for (let x = this.x0 + 0.6; x <= this.x1; x += 1.4) list.push({ pos: SPIKES.toWorld(x, 0), radius: 0.9 });
     return list;
   }
 
@@ -156,39 +157,46 @@ export class SpikeStrip {
       b.red.emissiveIntensity = flash ? 4 : 0.2;
       b.blue.emissiveIntensity = flash ? 0.2 : 4;
     }
-    const p = player.position;
-    const onApproach = Math.abs(p.x - STRIP_X) < 14 && p.z > 300 && p.z < STRIP_Z - 25 && player.forward.z > 0.6;
+    const p = SPIKES.toLocal(player.position);
+    const onApproach = Math.abs(p.x) < this.half + 2 && p.z > -140 && p.z < -25 && player.forward.dot(SPIKES.z) > 0.6;
     if (this.state === 'idle' && onApproach) this.arm();
     if (this.state !== 'armed') return;
 
     const side = this.gapSide > 0 ? 'LEFT' : 'RIGHT';
-    hud.hint(p.z < STRIP_Z ? `SPIKE STRIP AHEAD — GAP ON THE ${side}` : '');
-    if (!this.slowed && p.z > STRIP_Z - 32 && p.z < STRIP_Z) {
+    hud.hint(p.z < 0 ? `SPIKE STRIP AHEAD — GAP ON THE ${side}` : '');
+    if (!this.slowed && p.z > -32 && p.z < 0) {
       this.slowed = true;
       director.slowmo(0.35, 1.4);
     }
     for (const car of [player, partner]) {
       if (this.hit.has(car)) continue;
-      if (car.wheels().some((w) => Math.abs(w.z - STRIP_Z) < 0.5 && w.x > this.x0 && w.x < this.x1)) this.blow(car);
+      if (car.wheels().some((w) => {
+        const l = SPIKES.toLocal(w);
+        return Math.abs(l.z) < 0.5 && l.x > this.x0 && l.x < this.x1;
+      })) this.blow(car);
     }
-    if (p.z > STRIP_Z + 10 || p.distanceTo(v3(STRIP_X, 0, STRIP_Z)) > 200) this.resolve();
+    if (p.z > 10 || player.position.distanceTo(SPIKES.origin) > 200) this.resolve();
   }
 
   private arm(): void {
     const { scene, city, sound } = this.ctx;
     this.state = 'armed';
     // Strip covers the street except an 8.5 m gap on the open side.
-    const half = 12;
+    const half = this.half;
     if (this.gapSide > 0) {
-      this.x0 = STRIP_X - half + 0.5;
-      this.x1 = STRIP_X + half - 8.5;
+      this.x0 = -half + 0.5;
+      this.x1 = half - 8.5;
     } else {
-      this.x0 = STRIP_X - half + 8.5;
-      this.x1 = STRIP_X + half - 0.5;
+      this.x0 = -half + 8.5;
+      this.x1 = half - 0.5;
     }
     const len = this.x1 - this.x0;
+    // Built in the strip's frame: local x across, z along.
+    const g = this.group;
+    g.position.copy(SPIKES.origin);
+    g.rotation.y = SPIKES.heading;
     const base = new THREE.Mesh(new THREE.BoxGeometry(len, 0.06, 0.55), new THREE.MeshStandardMaterial({ map: hazardTexture(len), roughness: 0.6 }));
-    base.position.set((this.x0 + this.x1) / 2, 0.04, STRIP_Z);
+    base.position.set((this.x0 + this.x1) / 2, 0.09, 0);
     const spikeGeo = new THREE.ConeGeometry(0.05, 0.16, 5);
     const steel = new THREE.MeshStandardMaterial({ color: 0xc0c4c8, metalness: 0.9, roughness: 0.25 });
     const count = Math.floor(len / 0.18) * 2;
@@ -196,41 +204,41 @@ export class SpikeStrip {
     const m = new THREE.Matrix4();
     for (let i = 0; i < count; i++) {
       const x = this.x0 + 0.1 + (i >> 1) * 0.18;
-      m.makeTranslation(x, 0.14, STRIP_Z + ((i & 1) ? 0.12 : -0.12));
+      m.makeTranslation(x, 0.19, (i & 1) ? 0.12 : -0.12);
       spikes.setMatrixAt(i, m);
     }
     // Yellow and black hazard ends.
     const hazard = new THREE.MeshStandardMaterial({ color: 0xf2c200, roughness: 0.6 });
     for (const x of [this.x0, this.x1]) {
       const cap = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.7), hazard);
-      cap.position.set(x, 0.06, STRIP_Z);
-      this.group.add(cap);
+      cap.position.set(x, 0.11, 0);
+      g.add(cap);
     }
-    this.group.add(base, spikes);
+    g.add(base, spikes);
     // Cones along the blocked part and red road flares at both ends, so it reads from far away.
     const cone = new THREE.MeshStandardMaterial({ color: 0xff5a1a, roughness: 0.6 });
     const flare = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff2010, emissiveIntensity: 6 });
     for (let x = this.x0 + 1; x < this.x1; x += 3) {
       const c = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.75, 10), cone);
-      c.position.set(x, 0.38, STRIP_Z - 2.5);
-      this.group.add(c);
+      c.position.set(x, 0.43, -2.5);
+      g.add(c);
     }
     for (const x of [this.x0 - 0.3, this.x1 + 0.3]) {
       const f = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.4, 8), flare);
-      f.position.set(x, 0.2, STRIP_Z - 0.6);
-      this.group.add(f);
+      f.position.set(x, 0.25, -0.6);
+      g.add(f);
     }
-    scene.add(this.group);
+    scene.add(g);
 
     // Two cruisers parked on the blocked side, lights going.
-    const blockedX = this.gapSide > 0 ? STRIP_X - 9 : STRIP_X + 9;
+    const blockedX = this.gapSide > 0 ? -half + 3 : half - 3;
     for (const [dz, h] of [[7, 0.5], [16, -0.4]]) {
       const model = buildCarModel({ body: 0xf4f4f4, trim: 0x15181d, rim: 0x9aa0a6, police: true });
       if (model.lightBar) this.bars.push(model.lightBar);
       const holder = new THREE.Group();
       model.group.position.y = -0.7;
       holder.add(model.group);
-      city.addProp(holder, v3(blockedX, 0.7, STRIP_Z + dz), RAPIER.ColliderDesc.cuboid(1.0, 0.55, 2.5).setMass(1700).setFriction(0.8), 25000, h);
+      city.addProp(holder, SPIKES.toWorld(blockedX, dz, 0.7), RAPIER.ColliderDesc.cuboid(1.0, 0.55, 2.5).setMass(1700).setFriction(0.8), 25000, SPIKES.heading + h);
     }
     sound.ping(1400, 0.12, 0.3);
     say(this.ctx, 'MIA', `Spike strip ahead! Gap's on the ${this.gapSide > 0 ? 'left' : 'right'}!`);
@@ -241,7 +249,7 @@ export class SpikeStrip {
     this.hit.add(car);
     car.tireBlown = 9;
     sound.bang();
-    for (const w of car.wheels()) if (Math.abs(w.z - STRIP_Z) < 1.2) fx.burst(w.setY(0.3), 0.4);
+    for (const w of car.wheels()) if (Math.abs(SPIKES.toLocal(w).z) < 1.2) fx.burst(w.setY(0.3), 0.4);
     if (car === player) {
       hud.banner('TIRE BLOWN', 'SPEED AND GRIP DOWN', 1.6);
       say(this.ctx, 'MIA', 'You lost a tire! Hold it together!');
@@ -265,21 +273,28 @@ export class SpikeStrip {
 
 // ---------------------------------------------------------------- Bank job
 
-const BANK_CORNER = v3(100, 0, 500);
-
 /**
- * The route turns east past a glass-fronted bank. Mia tells the player to swing
- * the vault through it; a handbrake flick near the corner throws the vault wide
- * (with a helping shove so it reliably connects). When the vault enters the
- * lobby: slow motion, interior camera, glass, banknotes, alarm, big damage.
+ * Mia's route turns onto the expressway past a glass-fronted bank. She tells
+ * the player to swing the vault through it; a handbrake flick near the corner
+ * throws the vault wide (with a helping shove so it reliably connects). When the
+ * vault enters the lobby: slow motion, interior camera, glass, banknotes, alarm,
+ * big damage. Worked out in the bank's frame: x across (away from the avenue),
+ * z along the approach; the lobby spans x 0..w, z 0..d.
  */
 export class BankJob {
   private state: 'idle' | 'hinted' | 'done' = 'idle';
   private swungAt = -10;
   private time = 0;
   private shatterCooldown = 0;
+  /** The corner in the bank's frame. */
+  private corner = BANK.frame.toLocal(BANK.corner);
 
   constructor(private ctx: MomentContext) {}
+
+  /** Where the fling aims: just inside the lobby's corner. */
+  private target(): THREE.Vector3 {
+    return BANK.frame.toWorld(6, 6);
+  }
 
   /**
    * Per physics step: for a moment after the swing, steer the flying vault onto the
@@ -290,7 +305,7 @@ export class BankJob {
     if (this.state !== 'hinted' || this.time - this.swungAt > 1.4) return;
     const { vault } = this.ctx;
     const vv = vault.body.linvel();
-    const to = v3(BANK.x0 + 6, 0, BANK.z0 + 6).sub(vault.position.setY(0));
+    const to = this.target().sub(vault.position.setY(0));
     const want = to.normalize().multiplyScalar(Math.max(Math.hypot(vv.x, vv.z), 16));
     const k = Math.min(1, dt * 8);
     vault.body.setLinvel({ x: vv.x + (want.x - vv.x) * k, y: vv.y, z: vv.z + (want.z - vv.z) * k }, true);
@@ -303,14 +318,14 @@ export class BankJob {
     return this.state !== 'done';
   }
 
-  /** Heading north up the bank's street, with the GPS turning east at its corner. */
+  /** Coming down the avenue toward the corner, with the GPS turning there toward the bank's side. */
   private approaching(): boolean {
     const { player } = this.ctx;
-    const p = player.position;
-    if (Math.abs(p.x - BANK_CORNER.x) > 14 || p.z > BANK_CORNER.z || player.forward.z < 0.5) return false;
+    const p = BANK.frame.toLocal(player.position);
+    if (Math.abs(p.x - this.corner.x) > 14 || p.z > this.corner.z || player.forward.dot(BANK.frame.z) < 0.5) return false;
     const route = this.ctx.route();
-    const k = route.findIndex((n) => n.distanceTo(BANK_CORNER) < 5);
-    return k >= 0 && !!route[k + 1] && route[k + 1].x > BANK_CORNER.x + 50;
+    const k = route.findIndex((n) => n.distanceTo(BANK.corner) < 5);
+    return k >= 0 && !!route[k + 1] && BANK.frame.toLocal(route[k + 1]).x > this.corner.x + 50;
   }
 
   update(dt: number): void {
@@ -335,34 +350,35 @@ export class BankJob {
 
     if (this.state === 'done') return;
     const p = player.position;
-    const toCorner = p.distanceTo(BANK_CORNER);
+    const local = BANK.frame.toLocal(p);
+    const toCorner = p.distanceTo(BANK.corner);
     // Wait until the spike strip is behind us so the two callouts don't overlap.
-    if (this.state === 'idle' && p.z > STRIP_Z + 12 && toCorner < 90 && this.approaching()) {
+    if (this.state === 'idle' && SPIKES.toLocal(p).z > 12 && toCorner < 110 && this.approaching()) {
       this.state = 'hinted';
-      say(this.ctx, 'MIA', 'There’s a bank on the next corner. Swing that vault right through it!');
+      say(this.ctx, 'MIA', 'There’s a bank on the corner where we turn. Swing that vault right through it!');
     }
     if (this.state !== 'hinted') return;
 
-    hud.hint(toCorner < 90 && p.x < 140 ? 'HANDBRAKE (SPACE) THROUGH THE TURN TO SWING THE VAULT' : '');
+    hud.hint(toCorner < 110 && local.x < 24 ? 'HANDBRAKE (SPACE) THROUGH THE TURN TO SWING THE VAULT' : '');
 
     // The swing: handbrake near the corner throws the vault wide toward the lobby.
     const vp = vault.position;
     const vv = vault.body.linvel();
     const vSpeed = Math.hypot(vv.x, vv.z);
     // Generous window: any handbrake while the convoy is working through the corner.
-    const inCorner = toCorner < 40 && vp.distanceTo(BANK_CORNER) < 35 && vp.x < BANK.x0 + 4;
+    const inCorner = toCorner < 45 && vp.distanceTo(BANK.corner) < 40 && BANK.frame.toLocal(vp).x < 4;
     if (player.controls.handbrake && this.time - this.swungAt > 1.5 && inCorner && vSpeed > 4) {
       this.swungAt = this.time;
       // Fling it at the lobby with a little hop, fast enough to slide all the way in from
       // wherever the swing started (friction takes about 4.5 m/s² off it on the ground).
-      const target = v3(BANK.x0 + 6, 0, BANK.z0 + 6);
-      const toLobby = target.sub(vp.clone().setY(0));
+      const target = this.target();
+      const toLobby = target.clone().sub(vp.clone().setY(0));
       const dist = toLobby.length();
       const dir = toLobby.normalize();
-      const speed = THREE.MathUtils.clamp(Math.sqrt(2 * 5 * dist) + 3, 14, 27);
+      const speed = THREE.MathUtils.clamp(Math.sqrt(2 * 5 * dist) + 3, 14, 29);
       vault.body.setLinvel({ x: dir.x * speed, y: 4, z: dir.z * speed }, true);
       // The winches pay out enough cable for it to get there; they reel back in afterwards.
-      for (const c of this.ctx.cables) c.payOut(THREE.MathUtils.clamp(c.car.towPoint().distanceTo(target) + 8, 22, 34));
+      for (const c of this.ctx.cables) c.payOut(THREE.MathUtils.clamp(c.car.towPoint().distanceTo(target) + 8, 22, 40));
       vault.ghostHeroes(true);
       this.ctx.fx.burst(vp.clone().setY(0.3), 0.8);
       this.ctx.sound.clank();
@@ -371,9 +387,10 @@ export class BankJob {
 
     if (this.time - this.swungAt > 1.4) vault.ghostHeroes(false);
 
-    const inside = vp.x > BANK.x0 + 0.3 && vp.x < BANK.x1 && vp.z > BANK.z0 + 0.3 && vp.z < BANK.z1;
+    const lv = BANK.frame.toLocal(vp);
+    const inside = lv.x > 0.3 && lv.x < BANK.w && lv.z > 0.3 && lv.z < BANK.d;
     if (inside && vSpeed > 3) this.smash();
-    else if (p.x > 230 || p.z > 620) {
+    else if (local.x > this.corner.x + 130 || local.z > this.corner.z + 120) {
       this.state = 'done';
       vault.ghostHeroes(false);
       hud.hint('');
@@ -393,9 +410,8 @@ export class BankJob {
     // Inside the lobby, a few meters ahead of the vault and off to one side: it comes straight at us.
     const heading = v3(vv.x, 0, vv.z).normalize();
     const side = v3(heading.z, 0, -heading.x);
-    const cam = vp.clone().addScaledVector(heading, 11).addScaledVector(side, 4).setY(1.8);
-    cam.x = THREE.MathUtils.clamp(cam.x, BANK.x0 + 2, BANK.x1 - 2);
-    cam.z = THREE.MathUtils.clamp(cam.z, BANK.z0 + 2, BANK.z1 - 2);
+    const guess = BANK.frame.toLocal(vp.clone().addScaledVector(heading, 11).addScaledVector(side, 4));
+    const cam = BANK.frame.toWorld(THREE.MathUtils.clamp(guess.x, 2, BANK.w - 2), THREE.MathUtils.clamp(guess.z, 2, BANK.d - 2), 1.8);
     director.play({
       duration: 2.0,
       frame: (k) => ({ pos: cam.clone().add(v3(0, k * 0.6, 0)), look: vault.position.setY(1.2), fov: 58 }),

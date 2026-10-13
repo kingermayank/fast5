@@ -57,18 +57,21 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   renderer.info.autoReset = false;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(HAZE, 0.00052);
-  const camera = new THREE.PerspectiveCamera(62, 1, 0.2, 6000);
+  scene.fog = new THREE.FogExp2(HAZE, 0.0003);
+  const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 9000);
 
   // Physical sky, also baked into an environment map for reflections.
   const sky = new Sky();
-  sky.scale.setScalar(5000);
+  sky.scale.setScalar(8000);
   const u = sky.material.uniforms;
   u.turbidity.value = 9;
   u.rayleigh.value = 2.6;
-  u.mieCoefficient.value = 0.007;
-  u.mieDirectionalG.value = 0.9;
+  u.mieCoefficient.value = 0.004;
+  u.mieDirectionalG.value = 0.85;
   u.sunPosition.value.copy(SUN_DIR);
+  // The sun disc is ~60000x brighter than the sky, which overflows the half-float render target;
+  // bloom then smears infinity over the whole screen whenever you face the sun. Cap it.
+  sky.material.fragmentShader = sky.material.fragmentShader.replace('gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( min( texColor, vec3( 1.8 ) ), 1.0 );');
   scene.add(sky);
 
   // Reflections come from a calibrated gradient sky (the physical sky shader's raw
@@ -165,47 +168,74 @@ function gradientSkyScene(): THREE.Scene {
  * dome and a tall peak carrying a statue silhouette. Far enough to sit in haze.
  */
 function addMountains(scene: THREE.Scene): THREE.Group {
-  const mat = new THREE.MeshStandardMaterial({ color: 0x4f6b45, roughness: 1, flatShading: true });
-  const rock = new THREE.MeshStandardMaterial({ color: 0x7c7468, roughness: 1, flatShading: true });
+  // Half the city's fog: at 3 km full haze would turn them flat tan; this way they read as
+  // Rio's forested hills seen through warm air.
+  const halfFog = (m: THREE.Material) => {
+    m.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <fog_fragment>', '#include <fog_fragment>\n').replace(
+        '#include <fog_fragment>',
+        `#ifdef USE_FOG
+          float fogFactor = 0.55 * (1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth));
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogFactor);
+        #endif`,
+      );
+    };
+    return m;
+  };
+  const mat = halfFog(new THREE.MeshStandardMaterial({ color: 0x24502a, roughness: 1 }));
+  const rock = halfFog(new THREE.MeshStandardMaterial({ color: 0x77736c, roughness: 0.9 }));
   const rand = (() => {
     let s = 11;
     return () => ((s = (s * 16807) % 2147483647) / 2147483647);
   })();
-  const peak = (x: number, z: number, r: number, h: number, m: THREE.Material, squash = 1) => {
-    const geo = new THREE.ConeGeometry(r, h, 14, 6);
+  /**
+   * A Rio morro: a steep-sided dome, lumpy, its foot buried in the city. `spire`
+   * pinches the top (Corcovado) instead of rounding it (Sugarloaf).
+   */
+  const peak = (x: number, z: number, r: number, h: number, m: THREE.Material, squash = 1, spire = 0) => {
+    const geo = new THREE.SphereGeometry(1, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2);
     const pos = geo.attributes.position as THREE.BufferAttribute;
+    const phase = rand() * 10;
     for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i);
-      const k = 1 + (rand() - 0.5) * 0.25 * (1 - Math.abs(y) / h);
-      pos.setXYZ(i, pos.getX(i) * k * squash, y, pos.getZ(i) * k);
+      const px = pos.getX(i);
+      const py = pos.getY(i);
+      const pz = pos.getZ(i);
+      // Steep sides: push the profile out toward a cylinder, then pinch the top for a spire.
+      const side = Math.pow(Math.max(0, 1 - py * py), 0.32) / Math.max(1e-3, Math.hypot(px, pz));
+      const pinch = 1 - spire * Math.pow(py, 1.5);
+      const k = (py < 0.999 ? side : 0) * pinch * (1 + 0.12 * Math.sin(Math.atan2(pz, px) * 3 + phase) * (1 - py));
+      pos.setXYZ(i, px * k * r * squash, py * h, pz * k * r);
     }
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, m);
-    mesh.position.set(x, h / 2 - 10, z);
+    mesh.position.set(x, -h * 0.12, z);
     scene.add(mesh);
     return mesh;
   };
-  // Ring of hills behind the city (south, east, west).
-  for (let a = 0; a < 26; a++) {
-    const ang = Math.PI * 0.55 + (a / 26) * Math.PI * 1.9;
-    const d = 950 + rand() * 500;
-    peak(250 + Math.cos(ang) * d, 350 + Math.sin(ang) * d, 180 + rand() * 160, 160 + rand() * 260, mat);
+  // Ring of hills rising out of the far city, all round except the bay to the north-east
+  // (the map's middle is about (1000, 600); the bridge runs out into the bay).
+  const CX = 1000;
+  const CZ = 600;
+  for (let a = 0; a < 30; a++) {
+    const ang = Math.PI * 0.62 + (a / 30) * Math.PI * 1.55;
+    const d = 2900 + rand() * 700;
+    const r = 260 + rand() * 260;
+    peak(CX + Math.cos(ang) * d, CZ + Math.sin(ang) * d, r, r * (0.7 + rand() * 0.9), mat, 0.8 + rand() * 0.5, rand() * 0.3);
   }
-  // Sugarloaf-style dome out in the bay, east of the bridge.
-  const loaf = new THREE.Mesh(new THREE.SphereGeometry(110, 20, 14), rock);
-  loaf.scale.set(0.8, 1.6, 0.9);
-  loaf.position.set(1100, 20, 1500);
-  scene.add(loaf);
-  // Tall peak with the statue on top, southwest.
-  const tall = peak(-650, -800, 260, 620, mat, 0.8);
+  // Sugarloaf and its smaller twin (Urca) out in the bay, dead ahead as you drive the bridge:
+  // bare granite with a cap of forest.
+  peak(3500, -2150, 150, 400, rock, 0.75, 0.1);
+  peak(3230, -1880, 150, 210, mat, 1.2);
+  // Corcovado with the statue on top, south: ahead as you drive down Ponce de León.
+  const tall = peak(450, 3500, 420, 820, mat, 0.7, 0.55);
   const statue = new THREE.Group();
   const stone = new THREE.MeshStandardMaterial({ color: 0xe9e3d6, roughness: 0.8 });
   const torso = new THREE.Mesh(new THREE.BoxGeometry(6, 26, 5), stone);
   const arms = new THREE.Mesh(new THREE.BoxGeometry(30, 4, 4), stone);
   arms.position.y = 8;
   statue.add(torso, arms);
-  statue.position.set(tall.position.x, tall.position.y + 310 + 12, tall.position.z);
-  statue.lookAt(250, statue.position.y, 350);
+  statue.position.set(tall.position.x, tall.position.y + 820 + 12, tall.position.z);
+  statue.lookAt(CX, statue.position.y, CZ);
   scene.add(statue);
   return statue;
 }

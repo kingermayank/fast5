@@ -3,18 +3,7 @@ import { angleTo, seek } from './ai';
 import { loadModels, model } from './assets';
 import { Sound } from './audio';
 import { BreachScene } from './breach';
-import {
-  BRIDGE_X,
-  BANK,
-  CAR_STARTS,
-  PITCH,
-  City,
-  SEAWALL_Z,
-  STATION_FACADE_X,
-  SWAP_ZONE_Z,
-  VAULT_START,
-  VAULT_START_HEADING,
-} from './city';
+import { CAR_STARTS, City, STATION_FACADE_X, VAULT_START, VAULT_START_HEADING } from './city';
 import { Cutscene } from './cutscene';
 import { Director } from './director';
 import { Effects } from './fx';
@@ -24,7 +13,8 @@ import { Hud } from './hud';
 import { Input, type ControlState } from './input';
 import { BankJob, type MomentContext, SpikeStrip, ThePull } from './moments';
 import { type Obstacle, PartnerDriver } from './partner';
-import { exits, lanePath, leftOf, nextIntersection, roadHalfWidth, routeExit, snapDir, streetCenter } from './roads';
+import { curveSpeed, exits, lanePath, leftOf, nextIntersection, Path, roadDir, roadHalfWidth, routeExit, streetCenter } from './roads';
+import { BANK, BRIDGE, MAP, onBridge, SPIKES } from './roadmap';
 import { FIXED_DT, initPhysics, RAPIER } from './physics';
 import { Police } from './police';
 import { Cable, Vault } from './vault';
@@ -65,8 +55,8 @@ function useStatueModel(statue: THREE.Group): void {
   const size = new THREE.Box3().setFromObject(s).getSize(new THREE.Vector3());
   // Arms across the view from the city (the group already faces it).
   if (size.z > size.x) s.rotation.y = Math.PI / 2;
-  // A little larger than life (38 m) so it still reads from the city.
-  s.scale.setScalar(70 / size.y);
+  // Much larger than life (38 m) so it still reads from the city, 3.5 km away.
+  s.scale.setScalar(120 / size.y);
   // The group's origin sits 12 m above the peak; stand the plinth on the summit.
   s.position.y = -14;
   statue.clear();
@@ -201,28 +191,27 @@ async function start(): Promise<void> {
   /** R: line the crew back up in the middle of the nearest street, facing along the GPS route. */
   function resetConvoy(): void {
     const p = player.position;
-    const target = gps.nodes.find((n) => n.distanceTo(p) > 15) ?? gps.nodes[gps.nodes.length - 1] ?? p.clone().setZ(p.z + 50);
-    let center: THREE.Vector3;
-    let heading: number;
-    const gx = Math.round(p.x / PITCH) * PITCH;
-    const gz = Math.round(p.z / PITCH) * PITCH;
-    if (p.z > SEAWALL_Z) {
-      center = new THREE.Vector3(BRIDGE_X, 0, p.z);
-      heading = 0;
-    } else if (Math.abs(p.x - gx) < Math.abs(p.z - gz)) {
-      center = new THREE.Vector3(gx, 0, p.z);
-      heading = target.z >= p.z ? 0 : Math.PI;
-    } else {
-      center = new THREE.Vector3(p.x, 0, gz);
-      heading = target.x >= p.x ? Math.PI / 2 : -Math.PI / 2;
-    }
-    const f = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
+    // The nearest street, even from the middle of a parking lot.
+    const fix = MAP.locate(p, undefined, 400);
+    if (!fix) return;
+    const center = fix.point;
+    // Along the street, whichever way the route goes.
+    const ahead = gps.path(p).at(30).sub(center);
+    const f = fix.tangent.clone();
+    if (f.dot(ahead) < 0) f.negate();
+    const heading = Math.atan2(f.x, f.z);
     const left = new THREE.Vector3(f.z, 0, -f.x);
     const side = CHARACTERS[character].side;
     player.place(center.clone().addScaledVector(left, side * 2.75), heading);
     partner.place(center.clone().addScaledVector(left, -side * 2.75), heading);
     vault.place(center.clone().addScaledVector(f, -CABLE_TOW_LENGTH - 2.5), heading);
     partnerAi.reset(player);
+  }
+
+  /** Past the swap point on the bridge. */
+  const BRIDGE_PATH = new Path(BRIDGE.pts);
+  function atSwapPoint(p: THREE.Vector3): boolean {
+    return onBridge(p) && BRIDGE_PATH.project(p) >= BRIDGE.goalAlong;
   }
 
   let partnerTeleports = 0;
@@ -285,45 +274,50 @@ async function start(): Promise<void> {
   let autoPlan: { corner: THREE.Vector3; exit: THREE.Vector3 | null; detour: boolean } | null = null;
   function autopilotControls(): ControlState {
     const p = player.position;
-    // Spun round: turn back toward the route.
-    const next = gps.nodes.find((n) => n.distanceTo(p) > 15);
-    if (autopilot !== 'wander' && next && next.clone().sub(p).normalize().dot(player.forward) < -0.3) {
-      autoPlan = null;
-      return seek(world, player, next, 0.6);
-    }
-    const d = snapDir(player.forward);
-    if (autoPlan && (!autoPlan.exit || p.clone().sub(autoPlan.corner).dot(autoPlan.exit) > 14)) autoPlan = null;
-    if (!autoPlan) {
-      const corner = nextIntersection(p, d);
-      if (corner) {
-        const options = exits(corner, d);
-        const gpsExit = routeExit(corner, d, gps.nodes);
-        // 'detour' deliberately disobeys the GPS at about a third of the intersections.
-        const others = options.filter((o) => !gpsExit || o.dot(gpsExit) < 0.9);
-        const exit =
-          autopilot === 'wander'
-            ? options[Math.floor(Math.random() * options.length)]
-            : autopilot === 'detour' && others.length && Math.random() < 0.35
-              ? others[Math.floor(Math.random() * others.length)]
-              : gpsExit;
-        autoPlan = { corner, exit: exit ?? null, detour: !!exit && !!gpsExit && exit.dot(gpsExit) < 0.9 };
+    const d = roadDir(p, player.forward);
+    const side = CHARACTERS[character].side;
+    let path: Path;
+    if (autopilot === 'route') {
+      // Follow the GPS line along the streets, in our lane.
+      path = gps.path(p);
+      const ahead = path.at(15);
+      if (ahead.clone().sub(p).setY(0).normalize().dot(player.forward) < -0.3) return seek(world, player, ahead, 0.6);
+    } else {
+      // 'detour' disobeys the GPS at about a third of the intersections; 'wander' turns at random.
+      if (autoPlan && (!autoPlan.exit || p.clone().sub(autoPlan.corner).dot(autoPlan.exit) > 14)) autoPlan = null;
+      if (!autoPlan) {
+        const corner = nextIntersection(p, d);
+        if (corner) {
+          const options = exits(corner, d);
+          const gpsExit = routeExit(corner, d, gps.nodes);
+          const others = options.filter((o) => !gpsExit || o.dot(gpsExit) < 0.9);
+          const exit =
+            autopilot === 'wander'
+              ? options[Math.floor(Math.random() * options.length)]
+              : others.length && Math.random() < 0.35
+                ? others[Math.floor(Math.random() * others.length)]
+                : gpsExit;
+          autoPlan = { corner, exit: exit ?? null, detour: !!exit && !!gpsExit && exit.dot(gpsExit) < 0.9 };
+        }
       }
+      path = lanePath(p, d, 0, autoPlan?.corner ?? null, autoPlan?.exit ?? null);
     }
     // Follow the hints like a player would: aim for the spike-strip gap, handbrake at the bank.
-    const gap = spikes?.gapX() ?? null;
-    const lane = gap !== null && d.z > 0.9 ? gap - streetCenter(p, d).x : CHARACTERS[character].side * 3;
-    const bankSwing = autopilot !== 'wander' && p.distanceTo(new THREE.Vector3(100, 0, 500)) < 20 && player.forward.z > 0.3;
-    const path = lanePath(p, d, lane, autoPlan?.corner ?? null, autoPlan?.exit ?? null);
+    const gap = spikes?.gapOffset() ?? null;
+    const lane = gap !== null && d.dot(SPIKES.z) > 0.9 ? gap : side * 3;
+    const bankSwing = autopilot !== 'wander' && p.distanceTo(BANK.corner) < 24 && player.forward.dot(BANK.frame.z) > 0.3;
     const s0 = path.project(p);
     const speed = player.forwardSpeed;
-    const target = path.at(s0 + 10 + Math.abs(speed) * 0.4);
-    const turning = !!autoPlan?.exit && autoPlan.exit.dot(d) < 0.5;
-    const toCorner = autoPlan ? autoPlan.corner.clone().sub(p).dot(d) : Infinity;
-    const vTarget = turning && toCorner < 45 && toCorner > -10 ? 12 : p.z > SEAWALL_Z ? 45 : 28;
+    const look = s0 + 10 + Math.abs(speed) * 0.4;
+    const target = path.at(look).addScaledVector(leftOf(path.tangent(look)), lane);
+    const fast = onBridge(p) ? 45 : (MAP.locate(p, d)?.edge.rank ?? 5) <= 1 ? 38 : 28;
+    // Slow for bends and turns ahead, as a driver would (real streets curve).
+    const vTarget = Math.min(fast, Math.max(9, curveSpeed(path, s0, 80, 5.5)));
     const err = vTarget - speed;
     return {
       throttle: THREE.MathUtils.clamp(err * 0.3, 0, 1),
-      brake: err < -2 ? THREE.MathUtils.clamp(-err * 0.15, 0, 1) : 0,
+      // Progressive braking: stamping on the brakes lets the vault slide into you.
+      brake: err < -2 ? THREE.MathUtils.clamp(-err * (err < -8 ? 0.15 : 0.07), 0, 1) : 0,
       steer: THREE.MathUtils.clamp(angleTo(player, target) * 2.4, -1, 1),
       handbrake: bankSwing,
     };
@@ -332,7 +326,7 @@ async function start(): Promise<void> {
 
   /** Put the partner back beside the player (only ever done off-screen). */
   function recoverPartner(): void {
-    const d = snapDir(player.forward);
+    const d = roadDir(player.position, player.forward);
     const center = streetCenter(player.position, d);
     const playerOffset = player.position.clone().sub(center).dot(leftOf(d));
     const half = roadHalfWidth(player.position) - 2.3;
@@ -384,7 +378,7 @@ async function start(): Promise<void> {
         me: partner,
         vault: vault.position,
         vaultVel: new THREE.Vector3(vv.x, 0, vv.z),
-        route: state === 'chase' ? gps.nodes : [],
+        route: state === 'chase' ? gps.path(player.position).points : [],
         obstacles: partnerObstacles(),
         visible: isVisible,
       });
@@ -400,9 +394,9 @@ async function start(): Promise<void> {
     partner.step(dt);
 
     if (state === 'chase' && !noCops) {
-      police.step(dt, player, vault, heat, player.position.z > SEAWALL_Z);
+      police.step(dt, player, vault, heat, onBridge(player.position));
     } else if (state === 'outro' || state === 'busted' || state === 'lost') {
-      police.step(dt, player, vault, heat, player.position.z > SEAWALL_Z);
+      police.step(dt, player, vault, heat, onBridge(player.position));
     }
 
     if (state === 'chase' || state === 'outro') for (const c of cables) c.reel(CABLE_TOW_LENGTH, dt);
@@ -482,7 +476,7 @@ async function start(): Promise<void> {
         hud.showOverlay('BUSTED', `They boxed you in.\nCops wrecked: ${police.wreckedCount}   Damage: ${Hud.money(damage)}   Style: ${style.toLocaleString('en-US')}`, 'Press Enter to try again');
       }
 
-      if (player.position.z > SWAP_ZONE_Z) {
+      if (atSwapPoint(player.position)) {
         enter('outro');
         hud.radio('MIA', 'You made it. Kill the engines.');
       }
@@ -645,6 +639,10 @@ async function start(): Promise<void> {
       look = shot.look;
       fov = shot.fov ?? 50;
       k = 1;
+    } else if (state === 'select' && debugCam) {
+      pos = new THREE.Vector3(debugCam[0], debugCam[1], debugCam[2]);
+      look = new THREE.Vector3(debugCam[3], debugCam[4], debugCam[5]);
+      k = 1;
     } else if (state === 'select') {
       const t = performance.now() / 1000;
       pos = new THREE.Vector3(186 + Math.cos(t * 0.12) * 60, 26, 150 + Math.sin(t * 0.12) * 60);
@@ -730,6 +728,8 @@ async function start(): Promise<void> {
   }
 
   const params = new URL(location.href).searchParams;
+  // Debug: ?cam=x,y,z,lookX,lookY,lookZ holds the title-screen camera there (for looking round the map).
+  const debugCam = params.get('cam')?.split(',').map(Number) ?? null;
   // Debug: ?autopilot=1 drives the player along Mia's route (used by play-tests).
   const autopilot = params.has('autopilot') ? params.get('autopilot') || 'route' : null;
   // Debug: ?timescale=4 runs the simulation faster than real time; ?renderEvery=4 draws every 4th frame.
@@ -794,7 +794,7 @@ async function start(): Promise<void> {
     render: { calls: gfx.renderer.info.render.calls, triangles: gfx.renderer.info.render.triangles },
   });
 
-  const BANK_BLIP = new THREE.Vector3((BANK.x0 + BANK.x1) / 2, 0, (BANK.z0 + BANK.z1) / 2);
+  const BANK_BLIP = BANK.frame.toWorld(BANK.w / 2, BANK.d / 2);
 
   /** HUD guidance: an arrow toward the route 40 m ahead, and the next turn or the distance left. */
   function navigation(): { arrow: number | null; distance: string } {
@@ -846,7 +846,7 @@ async function start(): Promise<void> {
     const drag = updateEffects(dt);
     fx.update(dt);
     vault.render();
-    city.render();
+    city.render(camera);
     city.update(dt);
     updateCamera(dt);
 
@@ -867,7 +867,7 @@ async function start(): Promise<void> {
         busted,
         damage,
         wrecked: police.wreckedCount,
-        objective: state === 'breach' ? 'Rip the vault out of the station' : player.position.z > SEAWALL_Z ? 'Reach the swap point' : 'Drag the vault to the bridge',
+        objective: state === 'breach' ? 'Rip the vault out of the station' : onBridge(player.position) ? 'Reach the swap point' : 'Drag the vault to the bridge',
         ...navigation(),
         player: player.position,
         heading: player.heading,
@@ -886,6 +886,17 @@ async function start(): Promise<void> {
     if (!capture) requestAnimationFrame(frame);
   }
   if (capture) {
+    // Debug (capture mode only): what's solid within r m of (x, z)?
+    (window as unknown as { fast5Colliders: (x: number, z: number, r?: number) => object[] }).fast5Colliders = (x, z, r = 3) => {
+      const hits: object[] = [];
+      world.intersectionsWithShape({ x, y: 1, z }, { x: 0, y: 0, z: 0, w: 1 }, new RAPIER.Ball(r), (c) => {
+        const b = c.parent();
+        const t = c.translation();
+        hits.push({ shape: c.shapeType(), fixed: b?.isFixed(), mass: +(b?.mass() ?? 0).toFixed(0), at: [t.x, t.y, t.z].map((v) => +v.toFixed(1)) });
+        return true;
+      });
+      return hits;
+    };
     (window as unknown as { fast5Frame: (n?: number, render?: boolean) => void }).fast5Frame = (n = 1, render = true) => {
       for (let i = 0; i < n; i++) {
         drawThisFrame = render && i === n - 1;

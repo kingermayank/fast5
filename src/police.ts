@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { seek } from './ai';
 import type { City } from './city';
-import { BRIDGE_X } from './city';
 import { RAPIER } from './physics';
+import { Path } from './roads';
+import { BRIDGE } from './roadmap';
 import type { Vault } from './vault';
 import { Vehicle, type VehicleSpec } from './vehicle';
 
@@ -26,6 +27,8 @@ interface Cop {
   closing: number;
   touching: boolean;
 }
+
+const BRIDGE_PATH = new Path(BRIDGE.pts);
 
 export class Police {
   readonly cops: Cop[] = [];
@@ -176,7 +179,11 @@ export class Police {
     const fwd = target.forward;
     let spot: THREE.Vector3 | undefined;
     if (onBridge) {
-      spot = new THREE.Vector3(BRIDGE_X + (Math.random() - 0.5) * 16, 0, tp.z - 130);
+      // On the deck, 130 m behind.
+      const s = BRIDGE_PATH.project(tp) - 130;
+      if (s < 0) return;
+      const t = BRIDGE_PATH.tangent(s);
+      spot = BRIDGE_PATH.at(s).addScaledVector(new THREE.Vector3(t.z, 0, -t.x), (Math.random() - 0.5) * 16);
     } else {
       const options = this.city.intersections.filter((p) => {
         const d = p.distanceTo(tp);

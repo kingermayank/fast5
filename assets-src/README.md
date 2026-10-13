@@ -25,3 +25,14 @@ racing game. They're fine for prototyping; replace them with originals before an
 python3 -m venv .bpy && .bpy/bin/pip install bpy==5.2.2   # Blender as a Python module
 tools/assets/build.sh
 ```
+
+# Map data
+
+`osm/` holds the OpenStreetMap data for San Juan, Puerto Rico (Hato Rey and the Teodoro Moscoso
+Bridge) that `tools/map/build.mjs` turns into `src/map/sanjuan.json`. The `tile_*.json` downloads
+aren't committed (about 35 MB); `npm run map:fetch` gets them again from the OpenStreetMap API, and
+the lagoon outline (`lagoon.json`) from Nominatim.
+
+Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the
+[Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/). `src/map/sanjuan.json`
+is a derived database and is shared under the same license.
