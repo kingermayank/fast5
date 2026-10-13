@@ -17,8 +17,8 @@ open-world and racing games do and the plan to get Fast5 there.
 
 ## Run it
 
-You need [Node.js](https://nodejs.org/) 20 or newer (on a Mac: `brew install node`, or the installer
-from nodejs.org) and git.
+You need [Node.js](https://nodejs.org/) 22 (or 20.19+; check with `node -v`; on a Mac: `brew install node`,
+or the LTS installer from nodejs.org) and git.
 
 ```bash
 git clone https://github.com/kingermayank/fast5.git   # or, if you already have it: git pull
