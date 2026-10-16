@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Input } from './input';
 import { MAP, points, RAW } from './roadmap';
+import type { RiveUi } from './riveui';
 
 export interface HudState {
   speedKmh: number;
@@ -83,6 +84,9 @@ export class Hud {
   private radioTimer = 0;
   private map = $('minimap') as HTMLCanvasElement;
   private ctx = this.map.getContext('2d')!;
+  /** The Rive UI, once loaded: it draws everything but the minimap. */
+  private ui: RiveUi | null = null;
+  private screens = { select: false, hud: false, cinematic: false, overlay: false };
 
   static money(n: number): string {
     return '$' + Math.round(n).toLocaleString('en-US');
@@ -95,8 +99,32 @@ export class Hud {
 
   // ------------------------------------------------------------ screens
 
+  /** Hand the screens over to the Rive UI (see ui/CONTRACT.md). */
+  attachRive(ui: RiveUi): void {
+    this.ui = ui;
+    document.body.classList.add('rive-ui');
+    // Each part of the HTML UI steps aside only if the file draws it (it has that part's properties).
+    const parts = { hud: 'speed', meter: 'meterLabel', hint: 'hint', radio: 'radioText', banner: 'bannerTitle', cutscene: 'subtitleText', select: 'crew', result: 'resultTitle' };
+    for (const [part, prop] of Object.entries(parts)) document.body.classList.toggle(`rive-${part}`, ui.has(prop));
+    ui.on('crew', (v) => typeof v === 'number' && this.highlight(Math.round(v)));
+    ui.on('confirm', () => this.onSelect && this.confirm(this.selected));
+    ui.set('crew', this.selected);
+    this.syncScreen();
+  }
+
+  /** Which screen the Rive UI shows: the topmost of what's on. */
+  private syncScreen(): void {
+    if (!this.ui) return;
+    const s = this.screens;
+    const screen = s.overlay ? 'result' : s.cinematic ? 'cinematic' : s.select ? 'select' : s.hud ? 'drive' : 'off';
+    this.ui.set('screen', screen);
+    this.ui.interactive(screen === 'select' && this.ui.has('crew'));
+  }
+
   showSelect(onSelect: (id: string) => void): void {
     this.onSelect = onSelect;
+    this.screens.select = true;
+    this.syncScreen();
     this.select.classList.remove('hidden');
     this.cards.forEach((card, i) => {
       card.addEventListener('mouseenter', () => this.highlight(i));
@@ -113,11 +141,14 @@ export class Hud {
 
   hideSelect(): void {
     this.select.classList.add('hidden');
+    this.screens.select = false;
+    this.syncScreen();
   }
 
   private highlight(i: number): void {
     this.selected = i;
     this.cards.forEach((c, k) => c.classList.toggle('active', k === i));
+    this.ui?.set('crew', i);
   }
 
   private confirm(i: number): void {
@@ -128,6 +159,8 @@ export class Hud {
 
   showHud(visible: boolean): void {
     this.hud.classList.toggle('hidden', !visible);
+    this.screens.hud = visible;
+    this.syncScreen();
   }
 
   showOverlay(title: string, body: string, prompt: string): void {
@@ -135,17 +168,26 @@ export class Hud {
     $('overlay-body').textContent = body;
     $('overlay-prompt').textContent = prompt;
     this.overlay.classList.remove('hidden');
+    this.ui?.set('resultTitle', title);
+    this.ui?.set('resultBody', body);
+    this.ui?.set('resultPrompt', prompt);
+    this.screens.overlay = true;
     this.showHud(false);
     this.radioEl.classList.add('hidden');
+    this.ui?.set('radioOn', false);
   }
 
   /** Letterbox bars for cutscenes; hides the gameplay HUD while on. */
   cinematic(on: boolean): void {
     this.cutsceneEl.classList.toggle('hidden', !on);
+    this.screens.cinematic = on;
     if (on) this.showHud(false);
+    else this.syncScreen();
   }
 
   subtitle(who: string, text: string): void {
+    this.ui?.set('subtitleWho', who);
+    this.ui?.set('subtitleText', text);
     const el = $('cutscene-text');
     el.innerHTML = '';
     if (!text) return;
@@ -158,6 +200,7 @@ export class Hud {
   }
 
   titleCard(text: string): void {
+    this.ui?.set('titleCard', text);
     const el = $('title-card');
     el.textContent = text;
     el.classList.toggle('hidden', !text);
@@ -170,6 +213,10 @@ export class Hud {
     this.radioEl.append(b, text);
     this.radioEl.classList.remove('hidden');
     this.radioTimer = 5;
+    this.ui?.set('radioWho', who);
+    this.ui?.set('radioText', text);
+    this.ui?.set('radioOn', true);
+    this.ui?.fire('radio');
   }
 
   // ------------------------------------------------------------ per frame
@@ -186,12 +233,20 @@ export class Hud {
     void el.offsetWidth;
     el.classList.remove('hidden');
     this.bannerTimer = seconds;
+    this.ui?.set('bannerTitle', title);
+    this.ui?.set('bannerSub', sub);
+    this.ui?.set('bannerOn', true);
+    this.ui?.fire('banner');
   }
 
   /** Center meter for a moment (null label hides it). */
   meter(label: string | null, value = 0, prompt = ''): void {
     $('moment-meter').classList.toggle('hidden', label === null);
+    this.ui?.set('meterOn', label !== null);
     if (label === null) return;
+    this.ui?.set('meterLabel', label);
+    this.ui?.set('meterValue', value);
+    this.ui?.set('meterPrompt', prompt);
     $('moment-label').textContent = label;
     ($('moment-fill') as HTMLElement).style.width = `${Math.round(value * 100)}%`;
     $('moment-prompt').textContent = prompt;
@@ -199,6 +254,7 @@ export class Hud {
 
   /** One-line gameplay hint under the objective ('' hides it). */
   hint(text: string): void {
+    this.ui?.set('hint', text);
     $('hint').textContent = text;
     $('hint').classList.toggle('hidden', !text);
   }
@@ -206,13 +262,20 @@ export class Hud {
   update(dt: number, s: HudState | null): void {
     if (this.bannerTimer > 0) {
       this.bannerTimer -= dt;
-      if (this.bannerTimer <= 0) $('banner').classList.add('hidden');
+      if (this.bannerTimer <= 0) {
+        $('banner').classList.add('hidden');
+        this.ui?.set('bannerOn', false);
+      }
     }
     if (this.radioTimer > 0) {
       this.radioTimer -= dt;
-      if (this.radioTimer <= 0) this.radioEl.classList.add('hidden');
+      if (this.radioTimer <= 0) {
+        this.radioEl.classList.add('hidden');
+        this.ui?.set('radioOn', false);
+      }
     }
     if (!s) return;
+    if (this.ui) this.updateRive(this.ui, s);
 
     $('speed').textContent = String(Math.round(s.speedKmh));
     ($('nos-fill') as HTMLElement).style.width = `${Math.round(s.nos * 100)}%`;
@@ -229,6 +292,22 @@ export class Hud {
     bust.classList.toggle('hidden', s.busted <= 0.01);
     ($('busted-fill') as HTMLElement).style.width = `${s.busted * 100}%`;
     this.drawMap(s);
+  }
+
+  private updateRive(ui: RiveUi, s: HudState): void {
+    ui.set('speed', Math.round(s.speedKmh));
+    ui.set('speedText', String(Math.round(s.speedKmh)));
+    ui.set('nos', Math.round(s.nos * 100) / 100);
+    ui.set('heat', s.heat);
+    ui.set('busted', Math.round(s.busted * 100) / 100);
+    ui.set('style', Math.round(s.style).toLocaleString('en-US'));
+    ui.set('damage', Hud.money(s.damage));
+    ui.set('wrecked', String(s.wrecked));
+    ui.set('objective', s.objective);
+    ui.set('guidance', s.arrow === null ? '' : s.distance);
+    ui.set('arrowOn', s.arrow !== null);
+    // Radians, clockwise on screen (the arrow's +left is counter-clockwise); a degree's precision is plenty.
+    if (s.arrow !== null) ui.set('arrowAngle', Math.round(-s.arrow * 57.3) / 57.3);
   }
 
   /**

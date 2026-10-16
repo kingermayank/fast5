@@ -17,6 +17,7 @@ import { curveSpeed, exits, lanePath, leftOf, nextIntersection, Path, roadDir, r
 import { BANK, BRIDGE, MAP, onBridge, SPIKES } from './roadmap';
 import { FIXED_DT, initPhysics, RAPIER } from './physics';
 import { Police } from './police';
+import { RiveUi } from './riveui';
 import { Cable, Vault } from './vault';
 import { Vehicle, type VehicleSpec } from './vehicle';
 import { CUTSCENE_VIDEOS } from './videos';
@@ -86,6 +87,7 @@ async function start(): Promise<void> {
 
   const input = new Input();
   const hud = new Hud();
+  void RiveUi.load().then((ui) => ui && hud.attachRive(ui));
   const gps = new Gps();
   const police = new Police(world, scene, city);
   const director = new Director();
