@@ -32,6 +32,28 @@ function layout(): Layout {
   return new Layout({ fit: Fit.Layout, alignment: Alignment.Center, layoutScaleFactor: scale });
 }
 
+/** A .riv starts with "RIVE"; anything else (a dev server's index.html for a missing file) isn't one. */
+function isRiv(b: ArrayBuffer): boolean {
+  return new TextDecoder().decode(b.slice(0, 4)) === 'RIVE';
+}
+
+/**
+ * The built file, or null if there isn't one. Some static hosts only serve JSON, so the
+ * same file can also ship as a base64 string in fast5.riv.json (tools/assets/riv-to-json.mjs).
+ */
+async function fetchRiv(): Promise<ArrayBuffer | null> {
+  const riv = await fetch(SRC)
+    .then((r) => (r.ok ? r.arrayBuffer() : null))
+    .catch(() => null);
+  if (riv && isRiv(riv)) return riv;
+  const b64: unknown = await fetch(`${SRC}.json`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+  if (typeof b64 !== 'string') return null;
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  return isRiv(bytes.buffer) ? bytes.buffer : null;
+}
+
 // Serve the WASM from our own build rather than a CDN.
 RuntimeLoader.setWasmUrl(wasmUrl);
 RuntimeLoader.setWasmFallbackUrl(null);
@@ -59,11 +81,8 @@ export class RiveUi {
   /** Load the Rive UI over the game, or null if there isn't one. */
   static async load(): Promise<RiveUi | null> {
     if (new URLSearchParams(location.search).has('htmlhud')) return null;
-    // A .riv starts with "RIVE"; anything else (a dev server's index.html for a missing file) isn't one.
-    const buffer = await fetch(SRC)
-      .then((r) => (r.ok ? r.arrayBuffer() : null))
-      .catch(() => null);
-    if (!buffer || new TextDecoder().decode(buffer.slice(0, 4)) !== 'RIVE') return null;
+    const buffer = await fetchRiv();
+    if (!buffer) return null;
     const canvas = document.createElement('canvas');
     canvas.id = 'rive-ui';
     document.body.append(canvas);
