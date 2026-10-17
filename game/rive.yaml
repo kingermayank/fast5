@@ -1,0 +1,6 @@
+name: fast5-game
+main: Game
+scripting: wasm
+logs:
+  file: build/rive.log
+  problems: build/problems.log

@@ -1,0 +1,105 @@
+<Rive version="1" kind="fragment">
+    <!--
+      Fast5 in Rive: the whole game is the scripted layout below (src/game.as),
+      drawn with the GPU API under the vector HUD. The view model is the game's
+      state for the HUD and for the page (audio).
+    -->
+    <ViewModel defaultInstanceId="2:2" name="Game" id="2:1">
+        <ViewModelPropertyNumber name="speed" id="2:10"/>
+        <ViewModelPropertyString name="speedText" id="2:11"/>
+        <ViewModelPropertyNumber name="autopilot" id="2:20"/>
+        <ViewModelPropertyNumber name="nos" id="2:21"/>
+        <ViewModelPropertyNumber name="vaultSpeed" id="2:22"/>
+        <ViewModelPropertyNumber name="vaultGrind" id="2:23"/>
+        <ViewModelPropertyNumber name="cableAStrain" id="2:24"/>
+        <ViewModelPropertyNumber name="cableAHealth" id="2:25"/>
+        <ViewModelPropertyString name="cableAText" id="2:26"/>
+        <ViewModelPropertyNumber name="cableALength" id="2:27"/>
+        <ViewModelPropertyNumber name="cableBStrain" id="2:28"/>
+        <ViewModelPropertyNumber name="cableBHealth" id="2:29"/>
+        <ViewModelPropertyString name="cableBText" id="2:30"/>
+        <ViewModelPropertyNumber name="cableBLength" id="2:31"/>
+        <ViewModelPropertyNumber name="cableABar" id="2:40"/>
+        <ViewModelPropertyColor name="cableAColor" id="2:41"/>
+        <ViewModelPropertyNumber name="cableAHp" id="2:42"/>
+        <ViewModelPropertyNumber name="cableBBar" id="2:43"/>
+        <ViewModelPropertyColor name="cableBColor" id="2:44"/>
+        <ViewModelPropertyNumber name="cableBHp" id="2:45"/>
+        <ViewModelPropertyString name="vaultText" id="2:46"/>
+        <ViewModelPropertyNumber name="nosBar" id="2:47"/>
+        <ViewModelPropertyString name="bannerText" id="2:48"/>
+        <ViewModelPropertyNumber name="bannerAlpha" id="2:49"/>
+        <ViewModelPropertyString name="tuneText" id="2:50"/>
+        <ViewModelPropertyNumber name="tuneAlpha" id="2:51"/>
+        <ViewModelPropertyString name="hint" id="2:52"/>
+        <ViewModelInstance exports="true" name="Default" id="2:2">
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:10"/>
+            <ViewModelInstanceString propertyValue="0" viewModelPropertyId="2:11"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:20"/>
+            <ViewModelInstanceNumber propertyValue="1" viewModelPropertyId="2:21"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:22"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:23"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:24"/>
+            <ViewModelInstanceNumber propertyValue="1" viewModelPropertyId="2:25"/>
+            <ViewModelInstanceString propertyValue="0 kN" viewModelPropertyId="2:26"/>
+            <ViewModelInstanceNumber propertyValue="10" viewModelPropertyId="2:27"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:28"/>
+            <ViewModelInstanceNumber propertyValue="1" viewModelPropertyId="2:29"/>
+            <ViewModelInstanceString propertyValue="0 kN" viewModelPropertyId="2:30"/>
+            <ViewModelInstanceNumber propertyValue="10" viewModelPropertyId="2:31"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:40"/>
+            <ViewModelInstanceColor propertyValue="FF5BD27A" viewModelPropertyId="2:41"/>
+            <ViewModelInstanceNumber propertyValue="220" viewModelPropertyId="2:42"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:43"/>
+            <ViewModelInstanceColor propertyValue="FF5BD27A" viewModelPropertyId="2:44"/>
+            <ViewModelInstanceNumber propertyValue="220" viewModelPropertyId="2:45"/>
+            <ViewModelInstanceString propertyValue="VAULT  0 km/h" viewModelPropertyId="2:46"/>
+            <ViewModelInstanceNumber propertyValue="180" viewModelPropertyId="2:47"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:48"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:49"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:50"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:51"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:52"/>
+        </ViewModelInstance>
+    </ViewModel>
+
+    <Artboard defaultStateMachineId="4:1" styleId="3:1" viewModelId="2:1" viewModelInstanceId="2:2"
+              width="1280" height="720" name="Game" id="3:2">
+        <LayoutComponentStyle name="Game Style" id="3:1"/>
+
+        <!-- The HUD: drawn over the world (earlier siblings paint on top). -->
+        <LayoutComponent clip="false" width="560" height="96" styleId="5:107" name="Title" id="5:106"><LayoutComponentStyle positionTypeValue="absolute" positionLeft="22" positionLeftUnitsValue="points" positionTop="18" positionTopUnitsValue="points" layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" cornerRadiusTL="6" name="Title Style" id="5:107"/><Fill name="Bg"><SolidColor colorValue="99070A10" name="C"/></Fill><Node name="Title Content" id="5:108"><Text x="18" y="12" originX="0" originY="0" sizingValue="autoWidth" name="Text 5:100" id="5:100"><TextStylePaint fontSize="40" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="2" name="S" id="5:101"><Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="8C000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill><Fill name="Fill"><SolidColor colorValue="FFFFB547" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:101" text="THE PULL" name="Run"></TextValueRun></Text><Text x="20" y="58" originX="0" originY="0" sizingValue="autoWidth" name="Text 5:102" id="5:102"><TextStylePaint fontSize="13" fontAssetId="1:32" familyName="Inter Medium" styleName="Regular" letterSpacing="0" name="S" id="5:103"><Fill name="Fill"><SolidColor colorValue="E6FFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:103" text="Built in Rive. Drag the vault through Hato Rey without snapping the cables." name="Run"></TextValueRun></Text><Text x="20" y="76" originX="0" originY="0" sizingValue="autoWidth" name="Text 5:104" id="5:104"><TextStylePaint fontSize="11.5" fontAssetId="1:32" familyName="Inter Medium" styleName="Regular" letterSpacing="0" name="S" id="5:105"><Fill name="Fill"><SolidColor colorValue="A6FFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:105" text="W S  drive    A D  steer    Space  handbrake    Shift  nitrous    R  line up    Tab  tune cables" name="Run"></TextValueRun></Text></Node></LayoutComponent>
+        <LayoutComponent clip="false" width="360" height="132" styleId="5:132" name="Cables" id="5:131"><LayoutComponentStyle positionTypeValue="absolute" positionLeft="22" positionLeftUnitsValue="points" positionBottom="22" positionBottomUnitsValue="points" layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" cornerRadiusTL="6" name="Cables Style" id="5:132"/><Fill name="Bg"><SolidColor colorValue="B30A0E16" name="C"/></Fill><Node name="Cables Content" id="5:133"><Text x="18" y="12" originX="0" originY="0" sizingValue="autoWidth" name="Text 5:109" id="5:109"><TextStylePaint fontSize="13" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="4" name="S" id="5:110"><Fill name="Fill"><SolidColor colorValue="FFFFB547" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:110" text="CABLES" name="Run"></TextValueRun></Text><Text x="342" y="12" originX="1" originY="0" sizingValue="autoWidth" name="Text 5:111" id="5:111"><TextStylePaint fontSize="13" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="2" name="S" id="5:112"><Fill name="Fill"><SolidColor colorValue="B3FFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:112" text="VAULT" name="Run"><DataBindContext sourcePathIds="2:1-2:46" propertyKey="268"/></TextValueRun></Text><Text x="18" y="47" originX="0" originY="0" sizingValue="autoWidth" name="Text 5:113" id="5:113"><TextStylePaint fontSize="15" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="2" name="S" id="5:114"><Fill name="Fill"><SolidColor colorValue="FFFFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:114" text="YOU" name="Run"></TextValueRun></Text><Shape x="84" y="56" name="Bar 5:115"><Rectangle width="220" height="10" originX="0" originY="0.5" cornerRadiusTL="3" name="P"></Rectangle><Fill name="F"><SolidColor colorValue="26FFFFFF" name="C"></SolidColor></Fill></Shape><Shape x="84" y="56" name="Bar 5:116"><Rectangle width="0" height="10" originX="0" originY="0.5" cornerRadiusTL="3" name="P"><DataBindContext sourcePathIds="2:1-2:40" propertyKey="20"/></Rectangle><Fill name="F"><SolidColor colorValue="FF5BD27A" name="C"><DataBindContext sourcePathIds="2:1-2:41" propertyKey="37"/></SolidColor></Fill></Shape><Shape x="146" y="56" name="Bar 5:117"><Rectangle width="2" height="16" originX="0" originY="0.5" cornerRadiusTL="0" name="P"></Rectangle><Fill name="F"><SolidColor colorValue="99FF5A3C" name="C"></SolidColor></Fill></Shape><Shape x="84" y="66" name="Bar 5:118"><Rectangle width="220" height="2" originX="0" originY="0.5" cornerRadiusTL="0" name="P"></Rectangle><Fill name="F"><SolidColor colorValue="1FFFFFFF" name="C"></SolidColor></Fill></Shape><Shape x="84" y="66" name="Bar 5:119"><Rectangle width="220" height="2" originX="0" originY="0.5" cornerRadiusTL="0" name="P"><DataBindContext sourcePathIds="2:1-2:42" propertyKey="20"/></Rectangle><Fill name="F"><SolidColor colorValue="B3FFF4E3" name="C"></SolidColor></Fill></Shape><Text x="342" y="47" originX="1" originY="0" sizingValue="autoWidth" name="Text 5:120" id="5:120"><TextStylePaint fontSize="15" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="0" name="S" id="5:121"><Fill name="Fill"><SolidColor colorValue="FFFFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:121" text="0 kN" name="Run"><DataBindContext sourcePathIds="2:1-2:26" propertyKey="268"/></TextValueRun></Text><Text x="18" y="89" originX="0" originY="0" sizingValue="autoWidth" name="Text 5:122" id="5:122"><TextStylePaint fontSize="15" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="2" name="S" id="5:123"><Fill name="Fill"><SolidColor colorValue="FFFFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:123" text="BRIAN" name="Run"></TextValueRun></Text><Shape x="84" y="98" name="Bar 5:124"><Rectangle width="220" height="10" originX="0" originY="0.5" cornerRadiusTL="3" name="P"></Rectangle><Fill name="F"><SolidColor colorValue="26FFFFFF" name="C"></SolidColor></Fill></Shape><Shape x="84" y="98" name="Bar 5:125"><Rectangle width="0" height="10" originX="0" originY="0.5" cornerRadiusTL="3" name="P"><DataBindContext sourcePathIds="2:1-2:43" propertyKey="20"/></Rectangle><Fill name="F"><SolidColor colorValue="FF5BD27A" name="C"><DataBindContext sourcePathIds="2:1-2:44" propertyKey="37"/></SolidColor></Fill></Shape><Shape x="146" y="98" name="Bar 5:126"><Rectangle width="2" height="16" originX="0" originY="0.5" cornerRadiusTL="0" name="P"></Rectangle><Fill name="F"><SolidColor colorValue="99FF5A3C" name="C"></SolidColor></Fill></Shape><Shape x="84" y="108" name="Bar 5:127"><Rectangle width="220" height="2" originX="0" originY="0.5" cornerRadiusTL="0" name="P"></Rectangle><Fill name="F"><SolidColor colorValue="1FFFFFFF" name="C"></SolidColor></Fill></Shape><Shape x="84" y="108" name="Bar 5:128"><Rectangle width="220" height="2" originX="0" originY="0.5" cornerRadiusTL="0" name="P"><DataBindContext sourcePathIds="2:1-2:45" propertyKey="20"/></Rectangle><Fill name="F"><SolidColor colorValue="B3FFF4E3" name="C"></SolidColor></Fill></Shape><Text x="342" y="89" originX="1" originY="0" sizingValue="autoWidth" name="Text 5:129" id="5:129"><TextStylePaint fontSize="15" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="0" name="S" id="5:130"><Fill name="Fill"><SolidColor colorValue="FFFFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:130" text="0 kN" name="Run"><DataBindContext sourcePathIds="2:1-2:30" propertyKey="268"/></TextValueRun></Text></Node></LayoutComponent>
+        <LayoutComponent clip="false" width="200" height="124" styleId="5:143" name="Speed" id="5:142"><LayoutComponentStyle positionTypeValue="absolute" positionRight="26" positionRightUnitsValue="points" positionBottom="18" positionBottomUnitsValue="points" layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" cornerRadiusTL="6" name="Speed Style" id="5:143"/><Node name="Speed Content" id="5:144"><Text x="196" y="0" originX="1" originY="0" sizingValue="autoWidth" name="Text 5:134" id="5:134"><TextStylePaint fontSize="76" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="0" name="S" id="5:135"><Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="8C000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill><Fill name="Fill"><SolidColor colorValue="FFFFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:135" text="0" name="Run"><DataBindContext sourcePathIds="2:1-2:11" propertyKey="268"/></TextValueRun></Text><Text x="196" y="84" originX="1" originY="0" sizingValue="autoWidth" name="Text 5:136" id="5:136"><TextStylePaint fontSize="13" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="4" name="S" id="5:137"><Fill name="Fill"><SolidColor colorValue="B3FFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:137" text="KM/H" name="Run"></TextValueRun></Text><Text x="16" y="98" originX="0" originY="0" sizingValue="autoWidth" name="Text 5:138" id="5:138"><TextStylePaint fontSize="12" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="3" name="S" id="5:139"><Fill name="Fill"><SolidColor colorValue="FF5AC8FA" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:139" text="NOS" name="Run"></TextValueRun></Text><Shape x="16" y="118" name="Bar 5:140"><Rectangle width="180" height="5" originX="0" originY="0.5" cornerRadiusTL="2" name="P"></Rectangle><Fill name="F"><SolidColor colorValue="26FFFFFF" name="C"></SolidColor></Fill></Shape><Shape x="16" y="118" name="Bar 5:141"><Rectangle width="180" height="5" originX="0" originY="0.5" cornerRadiusTL="2" name="P"><DataBindContext sourcePathIds="2:1-2:47" propertyKey="20"/></Rectangle><Fill name="F"><SolidColor colorValue="FF5AC8FA" name="C"></SolidColor></Fill></Shape></Node></LayoutComponent>
+        <LayoutComponent clip="false" width="100" height="120" styleId="5:146" name="Banner" id="5:145"><DataBindContext sourcePathIds="2:1-2:49" propertyKey="18"/><LayoutComponentStyle positionTypeValue="absolute" positionLeft="0" positionLeftUnitsValue="points" positionRight="0" positionRightUnitsValue="points" positionTop="150" positionTopUnitsValue="points" widthUnitsValue="percent" layoutHeightScaleType="fixed" layoutAlignmentType="center" name="Banner Style" id="5:146"/><Text x="0" y="0" originX="0" originY="0" sizingValue="autoWidth" name="Text 5:147" id="5:147"><LayoutParticipant layoutWidthScaleType="hug" layoutHeightScaleType="hug" name="LP"/><TextStylePaint fontSize="72" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="3" name="S" id="5:148"><Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="8C000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill><Fill name="Fill"><SolidColor colorValue="FFFF6A2E" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:148" text="" name="Run"><DataBindContext sourcePathIds="2:1-2:48" propertyKey="268"/></TextValueRun></Text></LayoutComponent>
+        <LayoutComponent clip="false" width="330" height="262" styleId="5:154" name="Tune" id="5:153"><DataBindContext sourcePathIds="2:1-2:51" propertyKey="18"/><LayoutComponentStyle positionTypeValue="absolute" positionRight="22" positionRightUnitsValue="points" positionTop="18" positionTopUnitsValue="points" layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" cornerRadiusTL="6" name="Tune Style" id="5:154"/><Fill name="Bg"><SolidColor colorValue="B30A0E16" name="C"/></Fill><Node name="Tune Content" id="5:155"><Text x="18" y="12" originX="0" originY="0" sizingValue="autoWidth" name="Text 5:149" id="5:149"><TextStylePaint fontSize="13" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="2" name="S" id="5:150"><Fill name="Fill"><SolidColor colorValue="FFFFB547" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:150" text="TUNE  ·  [ ]  pick    − =  change" name="Run"></TextValueRun></Text><Text x="18" y="40" originX="0" originY="0" sizingValue="fixed" width="300" wrapValue="wrap" name="Text 5:151" id="5:151"><TextStylePaint fontSize="13" fontAssetId="1:32" familyName="Inter Medium" styleName="Regular" letterSpacing="0" lineHeight="25" name="S" id="5:152"><Fill name="Fill"><SolidColor colorValue="F2FFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:152" text="" name="Run"><DataBindContext sourcePathIds="2:1-2:50" propertyKey="268"/></TextValueRun></Text></Node></LayoutComponent>
+        <LayoutComponent clip="false" width="560" height="24" styleId="5:159" name="Hint" id="5:158"><LayoutComponentStyle positionTypeValue="absolute" positionLeft="22" positionLeftUnitsValue="points" positionBottom="162" positionBottomUnitsValue="points" layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" cornerRadiusTL="6" name="Hint Style" id="5:159"/><Node name="Hint Content" id="5:160"><Text x="2" y="2" originX="0" originY="0" sizingValue="autoWidth" name="Text 5:156" id="5:156"><TextStylePaint fontSize="13" fontAssetId="1:32" familyName="Inter Medium" styleName="Regular" letterSpacing="0" name="S" id="5:157"><Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="8C000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill><Fill name="Fill"><SolidColor colorValue="E6FFD9A0" name="C"/></Fill></TextStylePaint><TextValueRun styleId="5:157" text="" name="Run"><DataBindContext sourcePathIds="2:1-2:52" propertyKey="268"/></TextValueRun></Text></Node></LayoutComponent>
+
+        <LayoutComponent width="1280" height="720" styleId="3:11" name="World" id="3:10">
+            <LayoutComponentStyle layoutWidthScaleType="fill" layoutHeightScaleType="fill"
+                widthUnitsValue="auto" heightUnitsValue="auto" name="World Style" id="3:11"/>
+            <ScriptedLayout scriptAssetId="1:1" name="Game Script" id="3:12">
+                <FocusData/>
+            </ScriptedLayout>
+        </LayoutComponent>
+
+        <StateMachine name="Game" id="4:1">
+            <StateMachineLayer name="Focus" id="4:2">
+                <EntryState x="0" y="0"><StateTransition stateToId="4:3"/></EntryState>
+                <AnimationState animationId="4:100" x="200" y="0" id="4:3">
+                    <FocusActionTarget targetId="3:12"/>
+                </AnimationState>
+            </StateMachineLayer>
+        </StateMachine>
+
+        <LinearAnimation duration="1" name="Idle" id="4:100"/>
+    </Artboard>
+
+    <ScriptAsset file="src/game.as" name="game" id="1:1"/>
+    <BlobAsset file="assets/map.bin" name="map" id="1:2"/>
+    <BlobAsset file="assets/charger.mesh" name="charger" id="1:3"/>
+    <BlobAsset file="assets/police.mesh" name="police" id="1:4"/>
+    <FontAsset file="fonts/BarlowCondensed-ExtraBoldItalic.ttf" name="Barlow Condensed ExtraBold Italic" id="1:30"/>
+    <FontAsset file="fonts/BarlowCondensed-SemiBold.ttf" name="Barlow Condensed SemiBold" id="1:31"/>
+    <FontAsset file="fonts/Inter-Medium.ttf" name="Inter Medium" id="1:32"/>
+</Rive>
