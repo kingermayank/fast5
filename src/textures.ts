@@ -189,6 +189,33 @@ export function facadeTextures(style: FacadeStyle, seed: number): { map: THREE.C
   return { map: wrap(color, true), emissive: wrap(glow, true) };
 }
 
+/**
+ * Striped canvas for shop awnings: four colour schemes stacked in bands of v
+ * (red, green, blue, gold, each striped with white), so one material serves
+ * every awning and its UVs pick the scheme. u runs across the awning.
+ */
+export function awningTexture(): THREE.CanvasTexture {
+  return canvasTexture(256, 256, (ctx) => {
+    const schemes = ['#c2352b', '#2f8a4f', '#2a6fb8', '#d9a52b'];
+    schemes.forEach((col, k) => {
+      const y = k * 64;
+      for (let x = 0; x < 256; x += 32) {
+        ctx.fillStyle = col;
+        ctx.fillRect(x, y, 16, 64);
+        ctx.fillStyle = '#f2efe6';
+        ctx.fillRect(x + 16, y, 16, 64);
+      }
+      // Darker toward the scalloped front edge (the lower part of each band).
+      const g = ctx.createLinearGradient(0, y, 0, y + 64);
+      g.addColorStop(0, 'rgba(255,255,255,0.12)');
+      g.addColorStop(1, 'rgba(0,0,0,0.22)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, y, 256, 64);
+    });
+    noise(ctx, 256, 256, 2500, 0.05);
+  });
+}
+
 /** Shop fronts for the ground floor: glass, frames and colored awnings. */
 export function storefrontTexture(): THREE.CanvasTexture {
   return canvasTexture(512, 64, (ctx) => {
@@ -245,6 +272,51 @@ export function signTexture(text: string, bg: string, fg: string): THREE.CanvasT
     ctx.textBaseline = 'middle';
     ctx.fillText(text, 256, 52);
   });
+}
+
+/**
+ * A painted lane arrow, white on transparent and a little worn: straight
+ * ahead, or turning left or right (as the driver sees it, with the arrowhead
+ * at the top of the image). 2.4 m x 4.8 m on the road.
+ */
+export function arrowTexture(kind: 'straight' | 'left' | 'right'): THREE.CanvasTexture {
+  const tex = canvasTexture(192, 384, (ctx) => {
+    ctx.clearRect(0, 0, 192, 384);
+    ctx.fillStyle = ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 22;
+    ctx.lineCap = 'butt';
+    const head = (x: number, y: number, dx: number, dy: number) => {
+      // Arrowhead with its tip at (x, y), pointing along (dx, dy).
+      const px = -dy;
+      const py = dx;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - dx * 70 + px * 42, y - dy * 70 + py * 42);
+      ctx.lineTo(x - dx * 70 - px * 42, y - dy * 70 - py * 42);
+      ctx.closePath();
+      ctx.fill();
+    };
+    ctx.beginPath();
+    if (kind === 'straight') {
+      ctx.moveTo(96, 384);
+      ctx.lineTo(96, 90);
+      ctx.stroke();
+      head(96, 16, 0, -1);
+    } else {
+      const s = kind === 'left' ? -1 : 1;
+      ctx.moveTo(96, 384);
+      ctx.lineTo(96, 220);
+      ctx.quadraticCurveTo(96, 150, 96 + s * 40, 150);
+      ctx.stroke();
+      head(96 + s * 92, 150, s, 0);
+    }
+    // Worn paint.
+    ctx.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 900; i++) ctx.fillRect(Math.random() * 192, Math.random() * 384, 2 + Math.random() * 3, 2 + Math.random() * 3);
+    ctx.globalCompositeOperation = 'source-over';
+  });
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
 }
 
 /** A rooftop helipad: dark disc, yellow ring, white H. */
@@ -361,6 +433,54 @@ export function roofTexture(): THREE.CanvasTexture {
       ctx.stroke();
     }
     noise(ctx, 256, 256, 5000, 0.06);
+  });
+}
+
+/**
+ * Clay roof tiles: barrel tiles in staggered courses, each with its own shade,
+ * a shadow under every course and some weathering. Near-white, so each roof's
+ * tint sets the colour (terracotta, slate, painted metal). One repeat covers
+ * 2 m; v runs up the slope.
+ */
+export function tileTexture(): THREE.CanvasTexture {
+  return canvasTexture(256, 256, (ctx) => {
+    ctx.fillStyle = '#efe7dd';
+    ctx.fillRect(0, 0, 256, 256);
+    const course = 32;
+    const tile = 25.6;
+    for (let row = 0; row < 8; row++) {
+      const y = row * course;
+      for (let col = -1; col < 11; col++) {
+        const x = col * tile + (row % 2) * (tile / 2);
+        const v = 0.86 + Math.random() * 0.22;
+        ctx.fillStyle = `rgba(${Math.round(240 * v)},${Math.round(230 * v)},${Math.round(218 * v)},1)`;
+        ctx.fillRect(x, y, tile, course);
+        // Round barrel: dark at the sides, light down the middle.
+        const g = ctx.createLinearGradient(x, 0, x + tile, 0);
+        g.addColorStop(0, 'rgba(30,15,5,0.35)');
+        g.addColorStop(0.4, 'rgba(255,250,240,0.18)');
+        g.addColorStop(0.55, 'rgba(255,250,240,0.22)');
+        g.addColorStop(1, 'rgba(30,15,5,0.4)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x, y, tile, course);
+      }
+      // Each course overlaps the one below it: a shadow line along its lower edge.
+      ctx.fillStyle = 'rgba(40,20,10,0.45)';
+      ctx.fillRect(0, y + course - 4, 256, 4);
+      ctx.fillStyle = 'rgba(255,245,230,0.25)';
+      ctx.fillRect(0, y, 256, 2);
+    }
+    for (let i = 0; i < 10; i++) {
+      const x = Math.random() * 256;
+      const y = Math.random() * 256;
+      const r = 10 + Math.random() * 30;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, 'rgba(60,55,40,0.22)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      for (const dx of [-256, 0, 256]) for (const dy of [-256, 0, 256]) ctx.fillRect(x - r + dx, y - r + dy, r * 2, r * 2);
+    }
+    noise(ctx, 256, 256, 4000, 0.06);
   });
 }
 

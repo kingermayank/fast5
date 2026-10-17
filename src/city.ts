@@ -1,13 +1,15 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { awning, balcony, orientedRect, parapet, pitchedRoof } from './architecture';
 import { seeThrough } from './cutaway';
 import { RAPIER, syncMesh } from './physics';
 import { BANK, BRIDGE, GOAL, MAP, type MapEdge, PLAN, points, RAW } from './roadmap';
 import { leftOf } from './roads';
 import {
-  asphaltTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, helipadTexture, mosaicTexture, roofTexture, sidewalkTexture, signTexture,
-  storefrontTexture, waterNormalTexture,
+  arrowTexture, asphaltTexture, awningTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, helipadTexture, mosaicTexture, roofTexture, sidewalkTexture, signTexture,
+  storefrontTexture, tileTexture, waterNormalTexture,
 } from './textures';
+import { palmGeometry, palmMaterials, Trees } from './vegetation';
 
 /**
  * The city you drive through: real Hato Rey streets and buildings (see
@@ -60,6 +62,14 @@ const TOWER_COLORS = [0xa9c4d8, 0x9fb3c4, 0xc8d4dc, 0x8fa9bd, 0xd6dee4];
 const HOUSE_ROOFS = [0xb8664a, 0xa85a3e, 0xc47a5a, 0xd8d3c8, 0xefece6, 0x9fae98, 0xa3adb6];
 const OFFICE_ROOFS = [0xd2cec6, 0xe8e6e0, 0xbab3a7, 0x8e9196, 0x6f7276];
 const TOWER_ROOFS = [0x5d6066, 0x7d8086, 0x9a9ca0, 0xd0d0cc];
+/** Signal lamps top to bottom (red, amber, green): [off, lit] colours; lit is bright enough to bloom. */
+const SIGNAL = [
+  [new THREE.Color(0.12, 0.02, 0.02), new THREE.Color(6, 0.4, 0.3)],
+  [new THREE.Color(0.12, 0.08, 0.01), new THREE.Color(6, 3.4, 0.4)],
+  [new THREE.Color(0.02, 0.1, 0.05), new THREE.Color(0.4, 6, 1.6)],
+];
+/** Pitched roofs: mostly terracotta in its shades, some slate and painted metal. */
+const TILE_ROOFS = [0xc8623e, 0xb9553b, 0xd4774c, 0xa94a33, 0xcc8a5e, 0xc0603f, 0xb84e33, 0x7d838a, 0x67707a, 0x5f8466, 0x557799];
 
 function pointInPoly(x: number, z: number, poly: THREE.Vector3[]): boolean {
   let inside = false;
@@ -201,6 +211,16 @@ export class City {
   private roofMat = new THREE.MeshStandardMaterial({ color: 0x8d8f93, roughness: 0.8, metalness: 0.3 });
   /** The roof surfaces themselves (rooftop plant uses roofMat), tinted per building. */
   private roofTopMat = new THREE.MeshStandardMaterial({ map: roofTexture(), vertexColors: true, roughness: 0.92 });
+  /** Pitched clay-tile roofs, tinted per house. */
+  private tileMat = new THREE.MeshStandardMaterial({ map: tileTexture(), vertexColors: true, roughness: 0.8 });
+  private tankMat = new THREE.MeshStandardMaterial({ color: 0x2f74c0, roughness: 0.45 });
+  /** Plain coloured parts (balconies, penthouses, decks, masts), tinted per piece. */
+  private balconyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 });
+  private poolMat = new THREE.MeshStandardMaterial({ color: 0x35b6e6, roughness: 0.12, metalness: 0.1, emissive: 0x0b4f6e, emissiveIntensity: 0.5 });
+  /** Red aviation lights on the masts. */
+  private beaconMat = new THREE.MeshStandardMaterial({ color: 0x400000, emissive: 0xff2a1a, emissiveIntensity: 4 });
+  /** Seen from above and, behind the car, from underneath. */
+  private awningMat = new THREE.MeshStandardMaterial({ map: awningTexture(), roughness: 0.85, side: THREE.DoubleSide });
   private concreteMat = new THREE.MeshStandardMaterial({ color: 0xbdb5a8, roughness: 0.9 });
   /** Static geometry collected per material and chunk, merged into one mesh each at the end. */
   private batches = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[]; cast: boolean }>();
@@ -213,12 +233,15 @@ export class City {
   private scenery: THREE.Object3D[] = [];
   /** Street lamps (they can be knocked over); the head is at LAMP_HEAD in each one's frame. */
   readonly lamps: THREE.Object3D[] = [];
+  /** Park and street trees and shrubs, instanced per square. */
+  private trees = new Trees(() => this.rand());
 
   constructor(private world: RAPIER.World) {
     this.ground = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
     this.intersections = MAP.nodes.filter((n) => n.edges.length >= 3).map((n) => n.pos);
     this.buildGround();
     this.buildRoads();
+    this.buildSignalLamps();
     this.buildBuildings();
     this.buildStation();
     this.buildBank();
@@ -227,13 +250,71 @@ export class City {
     this.buildProps();
     this.buildFiller();
     this.flushBatches();
+    this.trees.build();
+    this.group.add(this.trees.group);
   }
 
-  /** Animate water ripples. */
+  /** Animate water ripples and cycle the traffic lights. */
   update(dt: number): void {
     const n = this.water.material.normalMap!;
     n.offset.x += dt * 0.004;
     n.offset.y += dt * 0.0025;
+    this.signalTime += dt;
+    if (this.signalLamps) {
+      for (let i = 0; i < this.signals.length; i++) {
+        const s = this.signals[i];
+        // A 20 s cycle per intersection: one pair of directions green 8 s, amber 2 s, then the other.
+        const t = (this.signalTime + s.offset + s.group * 10) % 20;
+        const lit = t < 8 ? 2 : t < 10 ? 1 : 0;
+        for (let k = 0; k < 3; k++) this.signalLamps.setColorAt(i * 3 + k, SIGNAL[k][k === lit ? 1 : 0]);
+      }
+      this.signalLamps.instanceColor!.needsUpdate = true;
+    }
+  }
+
+  /** Traffic signals: position (for the lamp instances), cycle offset and which pair of directions. */
+  private signals: { offset: number; group: number }[] = [];
+  private signalLampAt: THREE.Vector3[] = [];
+  private signalLamps?: THREE.InstancedMesh;
+  private signalTime = 0;
+  /** The first direction seen arriving at each signalled intersection (directions across it are the other group). */
+  private signalAxis = new Map<THREE.Vector3, { axis: THREE.Vector3; offset: number }>();
+
+  /**
+   * A traffic signal for traffic arriving along `dir`: pole on the corner at
+   * `pole`, an arm reaching back over the lanes (`right` points to the curb),
+   * and a head facing the drivers, its lamps lit by update().
+   */
+  private addSignal(node: THREE.Vector3, pole: THREE.Vector3, right: THREE.Vector3, dir: THREE.Vector3, hw: number): void {
+    let axis = this.signalAxis.get(node);
+    if (!axis) this.signalAxis.set(node, (axis = { axis: dir.clone(), offset: this.rand() * 20 }));
+    const group = Math.abs(dir.dot(axis.axis)) > 0.7 ? 0 : 1;
+    const steel = new THREE.Color(0x3a3f45);
+    const reach = Math.min(hw - 0.5, 7);
+    const head = pole.clone().addScaledVector(right, -(reach + 1.1) + 0.3);
+    this.batch(tint(new THREE.CylinderGeometry(0.11, 0.14, 6, 7).toNonIndexed().translate(pole.x, 3, pole.z), steel), this.balconyMat);
+    const arm = new THREE.CylinderGeometry(0.09, 0.11, reach + 1.1, 5).toNonIndexed();
+    arm.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), right.clone().negate())));
+    arm.translate(...pole.clone().addScaledVector(right, -(reach + 1.1) / 2).setY(5.8).toArray());
+    this.batch(tint(arm, steel), this.balconyMat);
+    // The head: a dark box hanging under the arm's end, lamps on the face toward the drivers.
+    const box = new THREE.BoxGeometry(0.5, 1.35, 0.4).toNonIndexed().translate(head.x, 5.1, head.z);
+    this.batch(tint(box, new THREE.Color(0x1d2024)), this.balconyMat);
+    for (let k = 0; k < 3; k++) this.signalLampAt.push(head.clone().addScaledVector(dir, -0.22).setY(5.55 - k * 0.42));
+    this.signals.push({ offset: axis.offset, group });
+    this.world.createCollider(RAPIER.ColliderDesc.cylinder(3, 0.14).setTranslation(pole.x, 3, pole.z), this.ground);
+  }
+
+  /** The signal lamps, one instanced draw (call after the roads are built). */
+  private buildSignalLamps(): void {
+    if (!this.signalLampAt.length) return;
+    // Unlit, so a lit lamp's colour (well over 1) blooms.
+    this.signalLamps = new THREE.InstancedMesh(new THREE.SphereGeometry(0.19, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }), this.signalLampAt.length);
+    this.signalLampAt.forEach((p, i) => {
+      this.signalLamps!.setMatrixAt(i, new THREE.Matrix4().makeTranslation(p.x, p.y, p.z));
+      this.signalLamps!.setColorAt(i, SIGNAL[i % 3][0]);
+    });
+    this.group.add(this.signalLamps);
   }
 
   private batch(geo: THREE.BufferGeometry, mat: THREE.Material, cast = true): void {
@@ -324,6 +405,64 @@ export class City {
     return geo;
   }
 
+  /**
+   * The big flat roofs, which the overhead camera looks straight down on: a
+   * stair and lift penthouse, and on apartment blocks a pool with a deck or a
+   * garden; masts with red aviation lights on the towers.
+   */
+  private dressRoof(poly: THREE.Vector3[], h: number, wall: THREE.Color, tower: boolean, office: boolean): void {
+    const r = orientedRect(poly);
+    if (r.width < 8) return;
+    const side = new THREE.Vector3().crossVectors(r.long, new THREE.Vector3(0, 1, 0));
+    const at = (u: number, v: number) => r.center.clone().addScaledVector(r.long, u).addScaledVector(side, v);
+    const inside = (u: number, v: number, hu: number, hv: number) =>
+      [[-1, -1], [1, -1], [1, 1], [-1, 1]].every(([su, sv]) => {
+        const p = at(u + su * hu, v + sv * hv);
+        return pointInPoly(p.x, p.z, poly);
+      });
+    // A box on the roof, along the building, with plain (UV 0) faces.
+    const box = (w: number, hh: number, d: number, u: number, v: number, y: number, color: THREE.Color | number, mat: THREE.Material = this.balconyMat) => {
+      const g = new THREE.BoxGeometry(w, hh, d).toNonIndexed();
+      (g.attributes.uv as THREE.BufferAttribute).array.fill(0);
+      g.applyMatrix4(new THREE.Matrix4().makeBasis(r.long, new THREE.Vector3(0, 1, 0), side).setPosition(at(u, v).setY(y + hh / 2)));
+      this.batch(mat === this.balconyMat ? tint(g, new THREE.Color(color)) : g, mat);
+    };
+    const end = r.length / 2 - 4;
+    if (this.rand() < 0.7 && inside(end, 0, 2, 1.8)) box(3.6, 3, 3.2, end, 0, h, wall.clone().multiplyScalar(0.92));
+    if (tower) {
+      for (let k = 0; k < 1 + Math.floor(this.rand() * 2); k++) {
+        const u = (this.rand() - 0.5) * r.length * 0.6;
+        const v = (this.rand() - 0.5) * r.width * 0.6;
+        if (!inside(u, v, 0.3, 0.3)) continue;
+        const tall = 7 + this.rand() * 7;
+        const p = at(u, v);
+        this.batch(tint(new THREE.CylinderGeometry(0.12, 0.2, tall, 6).toNonIndexed().translate(p.x, h + tall / 2, p.z), new THREE.Color(0x9aa0a6)), this.balconyMat);
+        this.batch(new THREE.SphereGeometry(0.35, 8, 6).translate(p.x, h + tall + 0.2, p.z), this.beaconMat);
+      }
+      return;
+    }
+    if (office || r.length < 14 || r.width < 10) return;
+    const roll = this.rand();
+    if (roll < 0.3 && inside(-2, 0, 5, 3.2)) {
+      // Pool on a wooden deck.
+      box(10, 0.08, 6.4, -2, 0, h, 0xb08654);
+      box(7.5, 0.1, 3.8, -2, 0, h + 0.02, 0xffffff, this.poolMat);
+    } else if (roll < 0.5 && inside(-2, 0, 4, 3)) {
+      // Garden: lawn and a few shrubs.
+      box(8, 0.1, 6, -2, 0, h, 0x5f8a3e);
+      for (let k = 0; k < 4; k++) {
+        const p = at(-2 + (this.rand() - 0.5) * 6, (this.rand() - 0.5) * 4);
+        this.batch(tint(new THREE.IcosahedronGeometry(0.8 + this.rand() * 0.5, 1).translate(p.x, h + 0.7, p.z), new THREE.Color(0x3f7a33)), this.balconyMat);
+      }
+    }
+  }
+
+  /** Does a wall at `mid`, facing `out`, look onto a street within about 16 m? */
+  private facesStreet(mid: THREE.Vector3, out: THREE.Vector3): boolean {
+    for (const d of [3, 7, 11, 16]) if (MAP.onRoad(mid.clone().addScaledVector(out, d), 0.5)) return true;
+    return false;
+  }
+
   /** Is there a building at (x, z)? */
   private inBuilding(x: number, z: number, margin = 0): boolean {
     const gx = Math.floor(x / 50);
@@ -383,47 +522,33 @@ export class City {
       if (a.k !== 'green') continue;
       const area = Math.abs(polyArea(poly));
       const box = new THREE.Box3().setFromPoints(poly);
-      for (let n = Math.min(60, Math.floor(area / 260)); n > 0 && trees.length < 2500; n--) {
+      for (let n = Math.min(90, Math.floor(area / 170)); n > 0 && trees.length < 3500; n--) {
         const x = box.min.x + this.rand() * (box.max.x - box.min.x);
         const z = box.min.z + this.rand() * (box.max.z - box.min.z);
         if (pointInPoly(x, z, poly) && !MAP.onRoad(new THREE.Vector3(x, 0, z), 2)) trees.push(new THREE.Vector3(x, 0, z));
       }
     }
-    this.plantTrees(trees);
+    for (const p of trees) {
+      this.plantTree(p, 0.95 + this.rand() * 0.6);
+      // Shrubs round about.
+      for (let k = this.rand() < 0.5 ? 1 + Math.floor(this.rand() * 2) : 0; k > 0; k--) {
+        const a = this.rand() * Math.PI * 2;
+        const q = p.clone().add(new THREE.Vector3(Math.cos(a), 0, Math.sin(a)).multiplyScalar(3 + this.rand() * 3));
+        if (!MAP.onRoad(q, 1.5)) this.trees.shrub(q, 0.22 + this.rand() * 0.14);
+      }
+    }
+  }
+
+  /** A tree that stops cars: instanced for drawing, with a fixed trunk collider. */
+  private plantTree(p: THREE.Vector3, size: number): void {
+    this.trees.tree(p, size);
+    this.world.createCollider(RAPIER.ColliderDesc.cylinder(1.6, 0.25 * size + 0.08).setTranslation(p.x, 1.6, p.z).setFriction(0.6), this.ground);
   }
 
   /** Middle of the map (for the water plane and the distant scenery). */
   mapCenter(): THREE.Vector3 {
     const box = new THREE.Box3().setFromPoints(MAP.nodes.map((n) => n.pos));
     return box.getCenter(new THREE.Vector3()).setY(0);
-  }
-
-  /** Broad-canopy shade trees (mango, flamboyán), instanced; scenery only. */
-  private plantTrees(at: THREE.Vector3[]): void {
-    if (!at.length) return;
-    const trunk = new THREE.CylinderGeometry(0.25, 0.4, 4, 6).translate(0, 2, 0);
-    const crown = new THREE.IcosahedronGeometry(3.2, 0).scale(1, 0.7, 1).translate(0, 5.2, 0);
-    const geo = mergeGeometries([trunk.toNonIndexed(), crown], true)!;
-    const mats = [
-      new THREE.MeshStandardMaterial({ color: 0x6b5139, roughness: 0.9 }),
-      new THREE.MeshStandardMaterial({ color: 0x3d6b33, roughness: 0.85, flatShading: true }),
-    ];
-    const mesh = new THREE.InstancedMesh(geo, mats, at.length);
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const s = new THREE.Vector3();
-    const color = new THREE.Color();
-    at.forEach((p, i) => {
-      const k = 0.7 + this.rand() * 0.7;
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.rand() * Math.PI * 2);
-      s.set(k, k * (0.8 + this.rand() * 0.4), k);
-      mesh.setMatrixAt(i, m.compose(p, q, s));
-      // A few flamboyán reds among the greens.
-      mesh.setColorAt(i, color.setHex(this.rand() < 0.12 ? 0xd2543a : [0xffffff, 0xd8e8c8, 0xc0d8b0][Math.floor(this.rand() * 3)]));
-    });
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    this.group.add(mesh);
   }
 
   // ---------------------------------------------------------------- streets
@@ -441,7 +566,29 @@ export class City {
     const clear = (n: (typeof MAP.nodes)[number], except: MapEdge) => Math.max(0, ...n.edges.filter((e) => e !== except).map((e) => e.hw)) + 1.5;
 
     const dashes: THREE.Matrix4[] = [];
+    const laneDashes: THREE.Matrix4[] = [];
     const stripes: THREE.Matrix4[] = [];
+    const stops: THREE.Matrix4[] = [];
+    const arrows = { straight: [] as THREE.Matrix4[], left: [] as THREE.Matrix4[], right: [] as THREE.Matrix4[] };
+    const up = new THREE.Vector3(0, 1, 0);
+    /** Dash transforms along a path at a sideways offset (left positive), one every `period` m. */
+    const dashAlong = (path: THREE.Vector3[], offset: number, period: number, out: THREE.Matrix4[]) => {
+      let s = 0;
+      for (let i = 0; i < path.length - 1; i++) {
+        const a = path[i];
+        const b = path[i + 1];
+        const len = a.distanceTo(b);
+        if (len < 1e-3) continue;
+        const dir = b.clone().sub(a).divideScalar(len);
+        const side = leftOf(dir);
+        const yaw = Math.atan2(dir.x, dir.z);
+        for (; s < len; s += period) {
+          const p = a.clone().lerp(b, s / len).addScaledVector(side, offset);
+          out.push(new THREE.Matrix4().makeRotationY(yaw).setPosition(p.x, 0.065, p.z));
+        }
+        s -= len;
+      }
+    };
     for (const e of MAP.edges) {
       this.batch(ribbon(e.pts, -e.hw, e.hw, 0.05, 8, true), asphaltMat, false);
       const ca = e.a.edges.length > 1 ? clear(e.a, e) : 0;
@@ -460,20 +607,41 @@ export class City {
           this.batch(ribbon(mid, side * (e.hw - 0.6) - 0.09, side * (e.hw - 0.6) + 0.09, 0.06, 4), white, false);
         }
       }
-      // Dashed center line on two-way streets wide enough for one.
+      // Center line on two-way streets wide enough for one: double solid yellow on the avenues,
+      // dashed on the rest; dashed white lane lines on the wide ones (two or three lanes each way).
       if (e.hw >= 6 && !e.bridge) {
-        const path = mid;
-        let s = 0;
-        for (let i = 0; i < path.length - 1; i++) {
-          const a = path[i];
-          const b = path[i + 1];
-          const len = a.distanceTo(b);
-          const yaw = Math.atan2(b.x - a.x, b.z - a.z);
-          for (; s < len; s += 10) {
-            const p = a.clone().lerp(b, s / len);
-            dashes.push(new THREE.Matrix4().makeRotationY(yaw).setPosition(p.x, 0.065, p.z));
+        if (e.rank <= 3) for (const o of [-0.2, 0.2]) this.batch(ribbon(mid, o - 0.07, o + 0.07, 0.06, 4), yellow, false);
+        else dashAlong(mid, 0, 10, dashes);
+        if (e.hw >= 8) {
+          const lanes = e.hw >= 11 ? 3 : 2;
+          const w = (e.hw - 0.6) / lanes;
+          for (let k = 1; k < lanes; k++) for (const side of [1, -1]) dashAlong(mid, side * w * k, 9, laneDashes);
+        }
+      }
+      // Stop lines across the lanes arriving at an intersection (traffic keeps right), before any
+      // crossing; on the avenues, an arrow in each of those lanes: left, ahead, right.
+      if (!e.bridge && e.length - ca - cb > 24) {
+        for (const [n, s0, arriving] of [[e.a, ca, -1], [e.b, e.length - cb, 1]] as const) {
+          if (n.edges.length < 3) continue;
+          const sStop = s0 - arriving * (e.rank <= 4 ? 4 : 1);
+          const t = MAP.tangentAt(e, sStop);
+          const dir = t.clone().multiplyScalar(arriving);
+          const right = leftOf(dir).negate();
+          const p = MAP.pointAt(e, sStop);
+          const yaw = Math.atan2(dir.x, dir.z);
+          const q = new THREE.Quaternion().setFromAxisAngle(up, yaw);
+          const across = e.hw - 0.85;
+          stops.push(new THREE.Matrix4().compose(p.clone().addScaledVector(right, 0.25 + across / 2).setY(0.066), q, new THREE.Vector3(across, 1, 0.45)));
+          // Where an avenue crosses, a signal on a mast arm over the arriving lanes.
+          if (Math.min(...n.edges.map((x) => x.rank)) <= 3) this.addSignal(n.pos, p.clone().addScaledVector(right, e.hw + 1.1), right, dir, e.hw);
+          if (e.rank > 3 || e.hw < 6) continue;
+          const lanes = e.hw >= 11 ? 3 : e.hw >= 8 ? 2 : 1;
+          const w = (e.hw - 0.6) / lanes;
+          const at = MAP.pointAt(e, sStop - arriving * 11);
+          for (let k = 0; k < lanes; k++) {
+            const kind = lanes === 1 ? 'straight' : k === 0 ? 'left' : k === lanes - 1 ? 'right' : 'straight';
+            arrows[kind].push(new THREE.Matrix4().compose(at.clone().addScaledVector(right, w * (k + 0.5)).setY(0.067), q, new THREE.Vector3(1, 1, 1)));
           }
-          s -= len;
         }
       }
       // Zebra crossings where avenues meet other streets.
@@ -507,12 +675,29 @@ export class City {
     stripes.forEach((m, i) => stripeMesh.setMatrixAt(i, m));
     stripeMesh.receiveShadow = true;
     this.group.add(dashMesh, stripeMesh);
+    const instanced = (geo: THREE.BufferGeometry, mat: THREE.Material, list: THREE.Matrix4[]) => {
+      if (!list.length) return;
+      const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+      list.forEach((m, i) => mesh.setMatrixAt(i, m));
+      mesh.receiveShadow = true;
+      this.group.add(mesh);
+    };
+    instanced(new THREE.PlaneGeometry(0.15, 3).rotateX(-Math.PI / 2), white, laneDashes);
+    // A unit square, stretched per stop line.
+    instanced(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), white, stops);
+    // Arrows: the texture's top points along the lane (rotateY so v runs along +z).
+    const arrowGeo = new THREE.PlaneGeometry(2.4, 4.8).rotateX(-Math.PI / 2).rotateY(Math.PI);
+    for (const kind of ['straight', 'left', 'right'] as const) {
+      const mat = new THREE.MeshStandardMaterial({ map: arrowTexture(kind), color: 0xe9e9e4, roughness: 0.7, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
+      instanced(arrowGeo, mat, arrows[kind]);
+    }
   }
 
   // ---------------------------------------------------------------- buildings
 
   private buildBuildings(): void {
     const color = new THREE.Color();
+    const pick = (list: number[]) => list[Math.floor(this.rand() * list.length)];
     for (const b of RAW.buildings) {
       const poly = points(b.p);
       const r = this.rand();
@@ -521,19 +706,72 @@ export class City {
       const tower = h >= 28;
       const mat = tower ? this.towerMat : h >= 12 ? this.facadeMats[r < 0.55 ? 1 : 0] : this.facadeMats[r < 0.6 ? 0 : 2];
       const palette = tower ? TOWER_COLORS : h >= 12 ? OFFICE_COLORS : HOUSE_COLORS;
-      color.setHex(palette[Math.floor(this.rand() * palette.length)]);
-      this.batch(tint(this.walls(poly, 0, h, 24, 16), color), mat);
-      const roofs = tower ? TOWER_ROOFS : h >= 12 ? OFFICE_ROOFS : HOUSE_ROOFS;
-      this.batch(tint(this.roof(poly, h), color.setHex(roofs[Math.floor(this.rand() * roofs.length)])), this.roofTopMat);
-      if (h >= 8) this.batch(this.walls(poly, h - 0.4, h + 0.5, 0, 0, 0.3), this.trimMat);
+      const wall = new THREE.Color(pick(palette));
+      this.batch(tint(this.walls(poly, 0, h, 24, 16), wall), mat);
+
+      // Houses that are near enough rectangles get a pitched tile roof (gable or hip); the
+      // rest of the city has flat roofs with a parapet.
+      const rect = h < 8 ? orientedRect(poly) : null;
+      const pitched = !!rect && rect.fill > 0.82 && rect.width >= 4 && rect.width <= 16 && rect.length <= 32 && this.rand() < 0.75;
+      if (pitched) {
+        const hip = rect.length / rect.width < 1.3 || this.rand() < 0.4;
+        const { roof, gables } = pitchedRoof(rect, h, hip);
+        this.batch(tint(roof, color.setHex(pick(TILE_ROOFS))), this.tileMat);
+        if (gables) this.batch(tint(gables, wall), mat);
+      } else {
+        const roofs = tower ? TOWER_ROOFS : h >= 12 ? OFFICE_ROOFS : HOUSE_ROOFS;
+        this.batch(tint(this.roof(poly, h), color.setHex(pick(roofs))), this.roofTopMat);
+        // Parapet: a pale cornice on the big buildings, the wall colour on houses.
+        if (h >= 8) this.batch(parapet(poly, h, 0.9, 0.35, 0.3), this.trimMat);
+        else if (h >= 3) this.batch(tint(parapet(poly, h, 0.5, 0.25), wall), mat);
+      }
 
       const c = poly.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(poly.length);
-      // Shops on the ground floor along the avenues.
+      // Shops on the ground floor along the avenues, with striped awnings over their doors.
       const street = h >= 6 ? MAP.locate(c, undefined, 40) : null;
-      if (street && street.edge.rank <= 3) this.batch(this.walls(poly, 0, 4.2, 24, 0, 0.12), this.storefrontMat);
-      // Rooftop water tanks and AC units (every roof in San Juan has them).
+      const shops = !!street && street.edge.rank <= 3;
+      if (shops) this.batch(this.walls(poly, 0, 4.2, 24, 0, 0.12), this.storefrontMat);
+      // Balconies on the street sides of apartment blocks (not the glass offices).
+      const balconies = !tower && h >= 8 && mat !== this.facadeMats[1] ? 0.35 + this.rand() * 0.5 : 0;
+      const slab = new THREE.Color(pick([0xeae6de, 0xdcd6cc, 0xf2f0ea]));
+      const rail = new THREE.Color(pick([0xf0f0ec, 0x34404c, 0x2a2a2a, 0x8fa3b5]));
+      if (shops || balconies) {
+        for (let i = 0; i < poly.length; i++) {
+          const a = poly[i];
+          const b2 = poly[(i + 1) % poly.length];
+          const len = a.distanceTo(b2);
+          if (len < 5) continue;
+          const along = b2.clone().sub(a).divideScalar(len);
+          const out = new THREE.Vector3(along.z, 0, -along.x);
+          if (!this.facesStreet(a.clone().lerp(b2, 0.5), out)) continue;
+          // Bays match the facade texture's: whole 6 m bays, windows centred, floors every 4 m.
+          const bays = Math.max(1, Math.round(len / 6));
+          for (let k = 0; k < bays; k++) {
+            const at = a.clone().lerp(b2, (k + 0.5) / bays);
+            if (shops && this.rand() < 0.75) this.batch(awning(at.clone().addScaledVector(out, 0.12), along, out, Math.min(4.6, (len / bays) * 0.85), Math.floor(this.rand() * 4)), this.awningMat);
+            for (let y = 4; y < h - 2.5; y += 4) {
+              if (this.rand() > balconies) continue;
+              const bal = balcony(at, along, out, y, 3.2, 1.1);
+              this.batch(tint(bal.slab, slab), this.balconyMat);
+              this.batch(tint(bal.rail, rail), this.balconyMat);
+            }
+          }
+        }
+      }
       const area = polyArea(poly);
-      if (area > 60) {
+      // Blue fibreglass water tanks on the small flat roofs, as all over Rio's hills.
+      if (!pitched && h < 8 && area > 25 && this.rand() < 0.55) {
+        const box = new THREE.Box3().setFromPoints(poly);
+        for (let tries = 0; tries < 6; tries++) {
+          const x = box.min.x + 1.2 + this.rand() * Math.max(0, box.max.x - box.min.x - 2.4);
+          const z = box.min.z + 1.2 + this.rand() * Math.max(0, box.max.z - box.min.z - 2.4);
+          if (!pointInPoly(x, z, poly)) continue;
+          this.batch(new THREE.CylinderGeometry(0.75, 0.65, 1.1, 10).translate(x, h + 0.55, z), this.tankMat);
+          break;
+        }
+      }
+      // Rooftop water tanks and AC units on the bigger flat roofs (every roof in San Juan has them).
+      if (!pitched && area > 60 && h >= 8) {
         const box = new THREE.Box3().setFromPoints(poly);
         const units = 1 + Math.floor(this.rand() * 3);
         for (let k = 0, tries = 0; k < units && tries < 12; tries++) {
@@ -545,6 +783,7 @@ export class City {
           else this.batch(new THREE.BoxGeometry(2.2, 1.4, 1.6).translate(x, h + 0.7, z), this.roofMat);
         }
       }
+      if (!pitched && h >= 12) this.dressRoof(poly, h, wall, tower, mat === this.facadeMats[1]);
       this.addBuildingCollider(poly, h);
       const key = `${Math.floor(c.x / 50)},${Math.floor(c.z / 50)}`;
       let list = this.footprints.get(key);
@@ -690,9 +929,12 @@ export class City {
           if (MAP.onRoad(curb, 0.5) || this.inBuilding(curb.x, curb.z, 0.8)) continue;
           const out = { along: t, out: l };
           const roll = this.rand();
-          if (roll < (important ? 0.42 : 0.55)) this.addPalm(curb);
-          else if (roll < 0.78) this.addLightPost(curb, out);
-          else if (roll < 0.86 && important) this.addKiosk(curb, out);
+          if (roll < (important ? 0.3 : 0.4)) this.addPalm(curb);
+          else if (roll < (important ? 0.48 : 0.58)) this.plantTree(curb, 0.6 + this.rand() * 0.3);
+          else if (roll < (important ? 0.72 : 0.8)) this.addLightPost(curb, out);
+          else if (roll < 0.8 && important) this.addKiosk(curb, out);
+          else if (roll < 0.9) this.addBench(curb.clone().addScaledVector(l, 0.6), out);
+          else this.addBin(curb);
           count++;
           // Parked cars along the curb on the smaller streets and some avenues.
           if (e.rank >= 3 && this.rand() < (important ? 0.12 : 0.22)) {
@@ -705,23 +947,13 @@ export class City {
   }
 
   private static palmGeo?: THREE.BufferGeometry;
-  private static palmMats = [
-    new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.9 }),
-    new THREE.MeshStandardMaterial({ color: 0x3f8a3a, roughness: 0.8, side: THREE.DoubleSide, flatShading: true }),
-  ];
+  private static palmMats?: THREE.Material[];
 
   private addPalm(pos: THREE.Vector3): void {
-    if (!City.palmGeo) {
-      const trunk = new THREE.CylinderGeometry(0.18, 0.3, 8, 7);
-      const fronds: THREE.BufferGeometry[] = [];
-      for (let k = 0; k < 7; k++) {
-        const leaf = new THREE.ConeGeometry(0.5, 4, 3).rotateX(Math.PI / 2 + 0.5).translate(0, 4, 1.8);
-        fronds.push(leaf.rotateY((k / 7) * Math.PI * 2));
-      }
-      City.palmGeo = mergeGeometries([trunk, mergeGeometries(fronds)], true)!;
-    }
+    City.palmGeo ??= palmGeometry();
+    City.palmMats ??= palmMaterials();
     const mesh = new THREE.Mesh(City.palmGeo, City.palmMats);
-    this.addProp(mesh, pos.clone().setY(4.2), RAPIER.ColliderDesc.cylinder(4, 0.3).setMass(250).setFriction(0.6), 2500);
+    this.addProp(mesh, pos.clone().setY(4.2), RAPIER.ColliderDesc.cylinder(4, 0.3).setMass(250).setFriction(0.6), 2500, this.rand() * Math.PI * 2);
     this.scenery.push(mesh);
   }
 
@@ -743,6 +975,40 @@ export class City {
     this.addProp(mesh, pos.clone().setY(3.7), RAPIER.ColliderDesc.cuboid(0.15, 3.5, 0.15).setMass(150), 1800, heading);
     this.scenery.push(mesh);
     this.lamps.push(mesh);
+  }
+
+  private static benchGeo?: THREE.BufferGeometry;
+  private static benchMats = [
+    new THREE.MeshStandardMaterial({ color: 0x9a6b42, roughness: 0.8 }),
+    new THREE.MeshStandardMaterial({ color: 0x2c3036, metalness: 0.5, roughness: 0.5 }),
+  ];
+
+  /** A slatted bench facing the street (`side.out` points away from it). */
+  private addBench(pos: THREE.Vector3, side: { out: THREE.Vector3 }): void {
+    if (!City.benchGeo) {
+      const wood = mergeGeometries([
+        new THREE.BoxGeometry(1.8, 0.07, 0.48).translate(0, 0.05, 0),
+        new THREE.BoxGeometry(1.8, 0.42, 0.06).translate(0, 0.32, -0.24),
+      ]);
+      const metal = mergeGeometries([-0.75, 0.75].map((x) => new THREE.BoxGeometry(0.07, 0.45, 0.46).translate(x, -0.2, -0.02)));
+      City.benchGeo = mergeGeometries([wood!, metal!], true)!;
+    }
+    // Its back to the buildings: the seat faces -out.
+    const heading = Math.atan2(-side.out.x, -side.out.z);
+    const mesh = new THREE.Mesh(City.benchGeo, City.benchMats);
+    this.addProp(mesh, pos.clone().setY(0.45), RAPIER.ColliderDesc.cuboid(0.9, 0.45, 0.28).setMass(60), 400, heading);
+    this.scenery.push(mesh);
+  }
+
+  private static binGeo?: THREE.BufferGeometry;
+  private static binMats = [new THREE.MeshStandardMaterial({ color: 0x2f6b45, roughness: 0.6 }), new THREE.MeshStandardMaterial({ color: 0x24282d, roughness: 0.5 })];
+
+  /** A litter bin. */
+  private addBin(pos: THREE.Vector3): void {
+    City.binGeo ??= mergeGeometries([new THREE.CylinderGeometry(0.28, 0.24, 0.85, 10), new THREE.CylinderGeometry(0.31, 0.31, 0.08, 10).translate(0, 0.46, 0)], true)!;
+    const mesh = new THREE.Mesh(City.binGeo, City.binMats);
+    this.addProp(mesh, pos.clone().setY(0.43), RAPIER.ColliderDesc.cylinder(0.45, 0.3).setMass(25), 150);
+    this.scenery.push(mesh);
   }
 
   private addKiosk(pos: THREE.Vector3, side: { out: THREE.Vector3 }): void {

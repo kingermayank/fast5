@@ -29,7 +29,15 @@ export function seeThrough<T extends THREE.Material>(mat: T): T {
     shader.uniforms.cutDepth = CUTAWAY.depth;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying float vCutHeight;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\nvCutHeight = (modelMatrix * vec4(transformed, 1.0)).y;');
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+        #ifdef USE_INSTANCING
+          vCutHeight = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).y;
+        #else
+          vCutHeight = (modelMatrix * vec4(transformed, 1.0)).y;
+        #endif`,
+      );
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',

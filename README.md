@@ -135,9 +135,12 @@ the GPS reroute log (`rerouteLog`).
 - `tools/assets/`: the model pipeline (Blender clean-up, then meshopt/WebP compression) that builds
   `public/models/` from the downloads listed in [`assets-src/README.md`](assets-src/README.md)
 - `src/vault.ts`: the vault and the winch cables (damped springs with a slip clutch and a rope-joint hard stop)
-- `src/city.ts`: the city from the map: streets with Rio wave-mosaic sidewalks, real buildings with
-  rooftop water tanks and textured roofs, parks and trees, police HQ with breakable wall, the bank, props, the bridge and
-  toll plaza, seawalls, the distant city
+- `src/city.ts`: the city from the map: streets with Rio wave-mosaic sidewalks, lane lines, stop lines,
+  turn arrows and working traffic lights; real buildings (tiled pitched roofs on the houses, balconies,
+  shop awnings, rooftop tanks, penthouses, pools and masts), parks, police HQ with breakable wall, the bank,
+  props (palms, lamps, benches, bins, kiosks, parked cars), the bridge and toll plaza, seawalls, the distant city
+- `src/architecture.ts`: building parts from footprints (pitched roofs, parapets, balconies, awnings)
+- `src/vegetation.ts`: soft rounded trees in Rio's colours, shrubs and palms
 - `tools/map/`: fetches OpenStreetMap data and builds the map (see "The map" above)
 - `ui/`: the Rive UI scenes (RML) and fonts; `src/riveui.ts` loads the built file over the game and `src/hud.ts` feeds it
 - `src/police.ts`: police spawning, pursuit and wrecks
