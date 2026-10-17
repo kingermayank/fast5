@@ -9,11 +9,13 @@
     "preview": "vite preview",
     "map:fetch": "node tools/map/fetch.mjs",
     "map:build": "node tools/map/build.mjs",
-    "ui:build": "rive ui --once && cp ui/build/fast5.riv public/ui/fast5.riv"
+    "ui:build": "rive ui --once && cp ui/build/fast5.riv public/ui/fast5.riv",
+    "game:dev": "rive game --once && mkdir -p public/rive && cp game/build/fast5-game.riv public/rive/fast5-game.riv",
+    "game:build": "rive game --publish && mkdir -p public/rive && cp game/build/fast5-game.riv public/rive/fast5-game.riv"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
-    "@rive-app/webgl2": "2.44.2",
+    "@rive-app/webgl2": "2.45.0",
     "three": "^0.186.1"
   },
   "devDependencies": {

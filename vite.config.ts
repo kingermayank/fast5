@@ -18,5 +18,9 @@ export default defineConfig({
   build: {
     // three.js plus the inlined Rapier wasm; a single chunk is fine for a game.
     chunkSizeWarningLimit: 6000,
+    rollupOptions: {
+      // The three.js game, and the Rive build of it (rive.html).
+      input: { main: 'index.html', rive: 'rive.html' },
+    },
   },
 });

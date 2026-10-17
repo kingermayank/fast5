@@ -32,6 +32,13 @@
         <ViewModelPropertyString name="tuneText" id="2:50"/>
         <ViewModelPropertyNumber name="tuneAlpha" id="2:51"/>
         <ViewModelPropertyString name="hint" id="2:52"/>
+        <ViewModelPropertyNumber name="throttle" id="2:60"/>
+        <ViewModelPropertyNumber name="slip" id="2:61"/>
+        <ViewModelPropertyNumber name="nosOn" id="2:62"/>
+        <ViewModelPropertyNumber name="crashCount" id="2:63"/>
+        <ViewModelPropertyNumber name="crashPower" id="2:64"/>
+        <ViewModelPropertyNumber name="snapCount" id="2:65"/>
+        <ViewModelPropertyNumber name="jerkCount" id="2:66"/>
         <ViewModelInstance exports="true" name="Default" id="2:2">
             <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:10"/>
             <ViewModelInstanceString propertyValue="0" viewModelPropertyId="2:11"/>
@@ -60,6 +67,13 @@
             <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:50"/>
             <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:51"/>
             <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:52"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:60"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:61"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:62"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:63"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:64"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:65"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:66"/>
         </ViewModelInstance>
     </ViewModel>
 

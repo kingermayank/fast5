@@ -70,6 +70,11 @@ function brianSpec(): CarSpec {
   return s;
 }
 
+function setNum(vm: ViewModel, name: string, value: f64): void {
+  let p = vm.getNumber(name);
+  if (p != null) p.value = value;
+}
+
 /** Green while easy, amber as it works, red past the breaking point's warning line. */
 function strainColor(ratio: f64): Color {
   let r: f64, g: f64, b: f64;
@@ -138,6 +143,12 @@ export class Game extends Layout {
   tuneIndex: i32 = 0;
   banner: string = "";
   bannerTime: f64 = 0;
+  // Sound events for the page: counters it watches for changes.
+  crashCount: f64 = 0;
+  crashPower: f64 = 0;
+  snapCount: f64 = 0;
+  jerkCount: f64 = 0;
+  wasTaut: StaticArray<bool> = [false, false];
   slowest: f64 = 0;
   debugFrames: i32 = 0;
 
@@ -477,6 +488,7 @@ export class Game extends Layout {
           this.fx.flash(c.snapX, c.snapY + 0.3, c.snapZ, 1.6);
           this.fx.sparks(c.snapX, c.snapY, c.snapZ, 0, 0, 14, 40);
           this.camera.shake(1.4);
+          this.snapCount++;
           let both = this.cables[0].broken && this.cables[1].broken;
           this.banner = both ? "THE VAULT'S LOOSE" : i == 0 ? "YOUR CABLE SNAPPED" : "BRIAN'S CABLE SNAPPED";
           this.bannerTime = 0;
@@ -540,11 +552,15 @@ export class Game extends Layout {
       let sp = b.speed() + 0.01;
       if (b.scrape > 3 && r.next() < dt * 40) fx.sparks(b.scrapeX, 0.5, b.scrapeZ, -b.vx / sp, -b.vz / sp, 5, 3);
       if (b.impact > 6) {
+        this.crashCount++;
+        this.crashPower = clamp(b.impact / 18, 0.3, 1);
         fx.sparks(b.impactX, 0.6, b.impactZ, 0, 0, 6, <i32>clamp(b.impact, 4, 24));
         this.camera.shake(clamp(b.impact * 0.06, 0.2, 1.2));
       }
     }
     if (vb.impact > 4) {
+      this.crashCount++;
+      this.crashPower = clamp(vb.impact / 10, 0.4, 1);
       fx.sparks(vb.impactX, 0.8, vb.impactZ, 0, 0, 7, <i32>clamp(vb.impact * 2, 6, 40));
       this.camera.shake(clamp(vb.impact * 0.1, 0.3, 1.5));
     }
@@ -595,6 +611,23 @@ export class Game extends Layout {
     if (vt != null) vt.value = "VAULT  " + fmt(this.vault!.sliding * 3.6, 0) + " km/h";
     let nb = vm.getNumber("nosBar");
     if (nb != null) nb.value = 180 * this.nos;
+
+    // Sound: the page synthesises it from these.
+    let pc = player.controls;
+    setNum(vm, "throttle", pc.throttle);
+    setNum(vm, "slip", Math.max(player.wheelspin, clamp((Math.abs(player.slipRear) - 0.1) * 3, 0, 1)));
+    setNum(vm, "nosOn", player.nosActive ? 1 : 0);
+    setNum(vm, "crashCount", this.crashCount);
+    setNum(vm, "crashPower", this.crashPower);
+    setNum(vm, "snapCount", this.snapCount);
+    // A cable going taut with a jolt: the clank.
+    for (let i = 0; i < this.cables.length; i++) {
+      let c = this.cables[i];
+      let taut = !c.broken && c.tension > c.params.breakForce * 0.3;
+      if (taut && !this.wasTaut[i]) this.jerkCount++;
+      this.wasTaut[i] = taut;
+    }
+    setNum(vm, "jerkCount", this.jerkCount);
 
     // Banner: a few seconds, then fades.
     let bt = vm.getString("bannerText");
