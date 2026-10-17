@@ -22,7 +22,9 @@ export class StaticWorld {
   minZ: f64 = 0;
   cols: i32 = 0;
   rows: i32 = 0;
-  cells: Array<Array<i32>> = [];
+  /** Buildings per cell, flattened: cell c holds items[start[c] .. start[c + 1]). */
+  start: Int32Array = new Int32Array(1);
+  items: Int32Array = new Int32Array(0);
   stamp: Int32Array;
   query: i32 = 0;
   found: Array<i32> = [];
@@ -43,12 +45,29 @@ export class StaticWorld {
     this.minZ = minZ - this.cell;
     this.cols = <i32>Math.ceil((maxX - minX) / this.cell) + 2;
     this.rows = <i32>Math.ceil((maxZ - minZ) / this.cell) + 2;
-    for (let i = 0; i < this.cols * this.rows; i++) this.cells.push([]);
-    for (let i = 0; i < map.buildings.length; i++) {
-      let b = map.buildings[i];
-      let c0 = this.col(b.minX), c1 = this.col(b.maxX);
-      let r0 = this.row(b.minZ), r1 = this.row(b.maxZ);
-      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) this.cells[r * this.cols + c].push(i);
+    // Two passes, no per-cell arrays: count, then fill (thousands of small
+    // allocations at load would make for a long collection pause).
+    let cells = this.cols * this.rows;
+    let count = new Int32Array(cells + 1);
+    for (let pass = 0; pass < 2; pass++) {
+      let fill = new Int32Array(cells);
+      for (let i = 0; i < map.buildings.length; i++) {
+        let b = map.buildings[i];
+        let c0 = this.col(b.minX), c1 = this.col(b.maxX);
+        let r0 = this.row(b.minZ), r1 = this.row(b.maxZ);
+        for (let r = r0; r <= r1; r++) {
+          for (let c = c0; c <= c1; c++) {
+            let cell = r * this.cols + c;
+            if (pass == 0) count[cell + 1]++;
+            else this.items[this.start[cell] + fill[cell]++] = i;
+          }
+        }
+      }
+      if (pass == 0) {
+        for (let k = 0; k < cells; k++) count[k + 1] += count[k];
+        this.start = count;
+        this.items = new Int32Array(count[cells]);
+      }
     }
   }
 
@@ -70,9 +89,10 @@ export class StaticWorld {
     let r0 = this.row(minZ), r1 = this.row(maxZ);
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
-        let list = this.cells[r * this.cols + c];
-        for (let k = 0; k < list.length; k++) {
-          let i = list[k];
+        let cell = r * this.cols + c;
+        let end = this.start[cell + 1];
+        for (let k = this.start[cell]; k < end; k++) {
+          let i = this.items[k];
           if (this.stamp[i] == this.query) continue;
           this.stamp[i] = this.query;
           let b = this.map.buildings[i];

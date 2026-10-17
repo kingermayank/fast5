@@ -53,7 +53,8 @@ const ROOFS: StaticArray<u32> = [0x9a948c, 0x8b857c, 0xa79f93, 0x6d6862, 0xb8b0a
 const CLAY: StaticArray<u32> = [0xb5653f, 0xa45a3a, 0xc07a4e];
 
 export class CityMesh {
-  mesh: MeshBuilder = new MeshBuilder();
+  /** The whole city is about 660k vertices: reserve them once rather than doubling as it grows. */
+  mesh: MeshBuilder = new MeshBuilder(700000, 4);
   lists: Array<U32List> = [];
   chunks: Array<Chunk> = [];
   indexCount: i32 = 0;
@@ -353,16 +354,51 @@ export class CityMesh {
     return false;
   }
 
-  /** The GPU buffers: vertices in one go, indices chunk by chunk into their ranges. */
-  upload(): GpuMesh {
-    let gpu = new GpuMesh(<u32>this.mesh.vertexCount * VERTEX_BYTES, <u32>this.indexCount * 4);
-    gpu.vbo.update(0, this.mesh.words.buffer, <u32>this.mesh.vertexCount * VERTEX_BYTES, 0);
-    for (let i = 0; i < this.lists.length; i++) {
-      let l = this.lists[i];
-      if (l.length > 0) gpu.ibo.update(<u32>this.chunks[i].first * 4, l.data.buffer, <u32>l.length * 4, 0);
+  // GPU upload, also in slices: the vertices a few megabytes at a time, then
+  // the index lists chunk by chunk into their ranges.
+  gpu: GpuMesh? = null;
+  uploadedBytes: u32 = 0;
+  uploadedLists: i32 = 0;
+  uploaded: bool = false;
+
+  /** 0..1 */
+  uploadProgress(): f64 {
+    let vb = <f64>this.mesh.vertexCount * <f64>VERTEX_BYTES;
+    if (this.uploaded) return 1;
+    return (<f64>this.uploadedBytes + <f64>this.uploadedLists * 20000) / (vb + <f64>this.lists.length * 20000 + 1);
+  }
+
+  /** Uploads as much as fits in the budget; true once the GPU has all of it. */
+  upload(budget: f64): bool {
+    if (this.uploaded) return true;
+    let start = clock();
+    let vertexBytes = <u32>this.mesh.vertexCount * VERTEX_BYTES;
+    if (this.gpu == null) {
+      this.gpu = new GpuMesh(vertexBytes, <u32>this.indexCount * 4);
+      this.gpu!.indexCount = <u32>this.indexCount;
+      return false;
     }
-    gpu.indexCount = <u32>this.indexCount;
-    return gpu;
+    let gpu = this.gpu!;
+    let slice: u32 = 2 * 1024 * 1024;
+    while (clock() - start < budget) {
+      if (this.uploadedBytes < vertexBytes) {
+        let rest = vertexBytes - this.uploadedBytes;
+        let n = rest < slice ? rest : slice;
+        gpu.vbo.update(this.uploadedBytes, this.mesh.words.buffer, n, this.uploadedBytes);
+        this.uploadedBytes += n;
+      } else if (this.uploadedLists < this.lists.length) {
+        let i = this.uploadedLists++;
+        let l = this.lists[i];
+        if (l.length > 0) gpu.ibo.update(<u32>this.chunks[i].first * 4, l.data.buffer, <u32>l.length * 4, 0);
+      } else {
+        // The GPU has it now: let the script's copy go.
+        this.mesh = new MeshBuilder(4, 4);
+        this.lists = [];
+        this.uploaded = true;
+        return true;
+      }
+    }
+    return false;
   }
 
   next(): void {

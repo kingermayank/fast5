@@ -235,11 +235,18 @@ export function shade(rgb: u32, k: f64): u32 {
 
 /** Growable vertex and index arrays in the GPU layout. */
 export class MeshBuilder {
-  words: Uint32Array = new Uint32Array(4096 * VERTEX_WORDS);
-  floats: Float32Array = Float32Array.wrap(this.words.buffer);
+  words: Uint32Array;
+  floats: Float32Array;
   vertexCount: i32 = 0;
-  indices: Uint32Array = new Uint32Array(8192);
+  indices: Uint32Array;
   indexCount: i32 = 0;
+
+  /** Room for this many vertices and indices before it has to grow. */
+  constructor(vertices: i32 = 4096, indices: i32 = 8192) {
+    this.words = new Uint32Array(vertices * VERTEX_WORDS);
+    this.floats = Float32Array.wrap(this.words.buffer);
+    this.indices = new Uint32Array(indices);
+  }
 
   private growVertices(n: i32): void {
     let need = (this.vertexCount + n) * VERTEX_WORDS;

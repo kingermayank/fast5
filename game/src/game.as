@@ -150,6 +150,9 @@ export class Game extends Layout {
   jerkCount: f64 = 0;
   wasTaut: StaticArray<bool> = [false, false];
   slowest: f64 = 0;
+  loadedFrames: i32 = 0;
+  drawTime: f64 = 0;
+  drawFrames: i32 = 0;
   debugFrames: i32 = 0;
 
   log(message: string): void {
@@ -179,10 +182,11 @@ export class Game extends Layout {
 
   // ------------------------------------------------------------ loading
 
-  /** Parse the map, then build the city a slice per frame. */
+  /** Parse the map, then build the city a slice per frame. True once it's all there. */
   load(): bool {
     let city = this.city!;
-    if (city.done) return true;
+    if (city.done && this.loadedFrames++ > 0) return true;
+    if (city.done) return false;
     let map = this.map;
     if (map == null) {
       let parsed = MapData.parse(this.mapBytes!);
@@ -195,8 +199,8 @@ export class Game extends Layout {
     }
     if (city.step(map, 0.04)) {
       this.log("city: " + city.mesh.vertexCount.toString() + " vertices, " + city.indexCount.toString() + " indices, " + map.buildings.length.toString() + " buildings");
-      return true;
     }
+    // Even on the frame it finishes: the setup gets a frame of its own.
     return false;
   }
 
@@ -662,9 +666,34 @@ export class Game extends Layout {
 
   // ------------------------------------------------------------ drawing
 
+  /** Puts the next slice of the GPU resources in place; true once they all are. */
+  uploadStep(context: Context): bool {
+    let city = this.city!;
+    if (!city.upload(0.03)) return false;
+    if (this.cityGpu == null) {
+      this.cityGpu = city.gpu;
+      return false;
+    }
+    if (this.charger == null) {
+      let blob = context.blob("charger");
+      if (blob != null) this.charger = Model.parse(blob);
+      return false;
+    }
+    if (this.vaultGpu == null) {
+      let vm = new MeshBuilder();
+      Vault.mesh(vm);
+      this.vaultGpu = GpuMesh.from(vm.words.buffer, 0, <u32>vm.vertexCount * VERTEX_BYTES, vm.indices.buffer, 0, <u32>vm.indexCount * 4);
+      this.cableGpu = new GpuMesh(64 * 1024, 64 * 1024);
+      return false;
+    }
+    return true;
+  }
+
   drawLoading(renderer: Renderer): void {
     let map = this.map;
-    let p = map != null ? this.city!.progress(map) : 0;
+    // Building the city is most of the bar, putting it on the GPU the rest.
+    let p = map != null ? this.city!.progress(map) * 0.85 : 0;
+    if (this.ready) p = 0.85 + 0.15 * this.city!.uploadProgress();
     let w = this.width, h = this.height;
     let bw = Math.min(420, w * 0.5);
     let x = (w - bw) / 2, y = h * 0.62;
@@ -680,6 +709,19 @@ export class Game extends Layout {
   }
 
   override draw(renderer: Renderer): void {
+    let started = clock();
+    this.render(renderer);
+    // Script-side cost of a frame (building the draw lists), averaged for tests.
+    if (this.autopilot > 0 && this.ready) {
+      this.drawTime += clock() - started;
+      this.drawFrames++;
+      if (this.drawFrames % 120 == 0) {
+        this.log("draw (script side): " + fmt((this.drawTime / <f64>this.drawFrames) * 1000, 2) + " ms a frame");
+      }
+    }
+  }
+
+  render(renderer: Renderer): void {
     let gfx = this.gfx;
     let city = this.city;
     let context = this.context;
@@ -688,14 +730,10 @@ export class Game extends Layout {
       this.drawLoading(renderer);
       return;
     }
-    if (this.cityGpu == null) {
-      this.cityGpu = city.upload();
-      let blob = context.blob("charger");
-      if (blob != null) this.charger = Model.parse(blob);
-      let vm = new MeshBuilder();
-      Vault.mesh(vm);
-      this.vaultGpu = GpuMesh.from(vm.words.buffer, 0, <u32>vm.vertexCount * VERTEX_BYTES, vm.indices.buffer, 0, <u32>vm.indexCount * 4);
-      this.cableGpu = new GpuMesh(64 * 1024, 64 * 1024);
+    // GPU resources, a budgeted slice per frame (the city's buffers are big).
+    if (!this.uploadStep(context)) {
+      this.drawLoading(renderer);
+      return;
     }
     let cam = this.camera;
     gfx.begin();
