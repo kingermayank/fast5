@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "map:fetch": "node tools/map/fetch.mjs",
-    "map:build": "node tools/map/build.mjs"
+    "map:build": "node tools/map/build.mjs",
+    "ui:build": "rive ui --once && cp ui/build/fast5.riv public/ui/fast5.riv"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",

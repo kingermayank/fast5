@@ -1,0 +1,5 @@
+name: fast5
+main: UI
+logs:
+  file: build/rive.log
+  problems: build/problems.log

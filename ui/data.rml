@@ -1,0 +1,54 @@
+<Rive version="1" kind="fragment">
+    <!-- The game's side of the UI: everything src/hud.ts sets. See CONTRACT.md. -->
+
+    <DataEnumCustom name="Screen" id="2:1">
+        <DataEnumValue key="off" value="off" id="2:2"/>
+        <DataEnumValue key="select" value="select" id="2:3"/>
+        <DataEnumValue key="drive" value="drive" id="2:4"/>
+        <DataEnumValue key="cinematic" value="cinematic" id="2:5"/>
+        <DataEnumValue key="result" value="result" id="2:6"/>
+    </DataEnumCustom>
+
+    <ViewModel defaultInstanceId="2:11" name="Game" id="2:10">
+        <ViewModelPropertyEnumCustom enumId="2:1" name="screen" id="2:20"/>
+        <ViewModelPropertyNumber name="speed" id="2:21"/>
+        <ViewModelPropertyString name="speedText" id="2:22"/>
+        <ViewModelPropertyNumber name="nos" id="2:23"/>
+        <ViewModelPropertyNumber name="heat" id="2:24"/>
+        <ViewModelPropertyNumber name="busted" id="2:25"/>
+        <ViewModelPropertyString name="style" id="2:26"/>
+        <ViewModelPropertyString name="damage" id="2:27"/>
+        <ViewModelPropertyString name="wrecked" id="2:28"/>
+        <ViewModelPropertyString name="objective" id="2:29"/>
+        <ViewModelPropertyString name="guidance" id="2:30"/>
+        <ViewModelPropertyBoolean name="arrowOn" id="2:31"/>
+        <ViewModelPropertyNumber name="arrowAngle" id="2:32"/>
+        <ViewModelPropertyBoolean name="meterOn" id="2:33"/>
+        <ViewModelPropertyString name="meterLabel" id="2:34"/>
+        <ViewModelPropertyNumber name="meterValue" id="2:35"/>
+        <ViewModelPropertyString name="meterPrompt" id="2:36"/>
+        <ViewModelPropertyString name="hint" id="2:37"/>
+
+        <!-- Preview values: what the CLI window shows before any game data. -->
+        <ViewModelInstance exports="true" name="Default" id="2:11">
+            <ViewModelInstanceEnum propertyValue="2:4" viewModelPropertyId="2:20"/>
+            <ViewModelInstanceNumber propertyValue="118" viewModelPropertyId="2:21"/>
+            <ViewModelInstanceString propertyValue="118" viewModelPropertyId="2:22"/>
+            <ViewModelInstanceNumber propertyValue="0.7" viewModelPropertyId="2:23"/>
+            <ViewModelInstanceNumber propertyValue="3" viewModelPropertyId="2:24"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:25"/>
+            <ViewModelInstanceString propertyValue="3,800" viewModelPropertyId="2:26"/>
+            <ViewModelInstanceString propertyValue="$2,664,300" viewModelPropertyId="2:27"/>
+            <ViewModelInstanceString propertyValue="19" viewModelPropertyId="2:28"/>
+            <ViewModelInstanceString propertyValue="Drag the vault to the bridge" viewModelPropertyId="2:29"/>
+            <ViewModelInstanceString propertyValue="LEFT IN 980 m" viewModelPropertyId="2:30"/>
+            <ViewModelInstanceBoolean propertyValue="true" viewModelPropertyId="2:31"/>
+            <ViewModelInstanceNumber propertyValue="-0.6" viewModelPropertyId="2:32"/>
+            <ViewModelInstanceBoolean propertyValue="false" viewModelPropertyId="2:33"/>
+            <ViewModelInstanceString propertyValue="STRAIN" viewModelPropertyId="2:34"/>
+            <ViewModelInstanceNumber propertyValue="0.45" viewModelPropertyId="2:35"/>
+            <ViewModelInstanceString propertyValue="HOLD W TO PULL" viewModelPropertyId="2:36"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:37"/>
+        </ViewModelInstance>
+    </ViewModel>
+</Rive>

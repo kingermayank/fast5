@@ -32,6 +32,14 @@ Run the npm commands inside the `fast5` folder (an `ENOENT ... package.json` err
 the wrong folder). Everything the game needs is in the repo, including the built map; you only
 need the map tools below to change or rebuild it.
 
+### The UI
+
+The HUD is drawn by [Rive](https://rive.app), from the scene files in `ui/` (Rive Markup Language,
+plain text). `npm run ui:build` compiles them into `public/ui/fast5.riv` with the
+[Rive CLI](https://rive.app/docs/cli/overview), which you only need to change the UI: the built file
+is in the repo. `rive ui` opens a live preview that rebuilds as you edit. `ui/CONTRACT.md` lists the
+values the game sends it. Without the file (or with `?htmlhud`) the game falls back to its HTML HUD.
+
 ### The map
 
 `src/map/sanjuan.json` is built from OpenStreetMap by `tools/map/`:
@@ -83,7 +91,8 @@ browser's built-in text-to-speech.
 
 Models are credited in [`assets-src/README.md`](assets-src/README.md) (CC BY and CC BY-NC-SA, via
 Sketchfab). `?procedural` runs with the old code-built cars instead. Map data © OpenStreetMap
-contributors, available under the [Open Database License](https://www.openstreetmap.org/copyright).
+contributors, available under the [Open Database License](https://www.openstreetmap.org/copyright). The UI
+uses the Barlow Condensed and Inter typefaces (SIL Open Font License, in `ui/fonts/`).
 
 Debug URL flags: `?crew=dom|brian` skips the menu and cutscene (add `&intro` to watch it),
 `?autopilot` follows the GPS (`?autopilot=detour` disobeys it at random intersections to test
@@ -120,6 +129,7 @@ the GPS reroute log (`rerouteLog`).
   rooftop water tanks, parks and trees, police HQ with breakable wall, the bank, props, the bridge and
   toll plaza, seawalls, the distant city
 - `tools/map/`: fetches OpenStreetMap data and builds the map (see "The map" above)
+- `ui/`: the Rive UI scenes (RML) and fonts; `src/riveui.ts` loads the built file over the game and `src/hud.ts` feeds it
 - `src/police.ts`: police spawning, pursuit and wrecks
 - `src/ai.ts`: shared steering helpers (seek, obstacle avoidance)
 - `src/hud.ts`: HUD, minimap, radio, cutscene cards, character select

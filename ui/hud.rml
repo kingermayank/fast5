@@ -1,0 +1,753 @@
+<Rive version="1" kind="fragment">
+    <Artboard defaultStateMachineId="4:1" styleId="3:1" viewModelId="2:10" viewModelInstanceId="2:11"
+              width="1280" height="720" name="UI" id="3:2">
+        <LayoutComponentStyle name="UI Style" id="3:1"/>
+
+        <!-- The driving HUD. It fades in when `screen` is drive (layer "Screen"). -->
+        <Node name="HUD" id="3:10">
+
+            <!-- ============ top centre: objective, route arrow, guidance, hint ============ -->
+            <LayoutComponent clip="false" width="100" height="200" styleId="3:14" name="Top" id="3:13">
+                <LayoutComponentStyle positionTypeValue="absolute"
+                    positionLeft="0" positionLeftUnitsValue="points" positionRight="0" positionRightUnitsValue="points"
+                    positionTop="14" positionTopUnitsValue="points"
+                    widthUnitsValue="percent" layoutHeightScaleType="fixed"
+                    flexDirectionValue="column" layoutAlignmentType="topCenter"
+                    gapVertical="4" gapVerticalUnitsValue="points" name="Top Style" id="3:14"/>
+
+                <LayoutComponent clip="false" height="44" styleId="3:31" name="Objective" id="3:30">
+                    <LayoutComponentStyle layoutWidthScaleType="hug" layoutHeightScaleType="fixed" layoutAlignmentType="centerLeft"
+                        paddingLeft="20" paddingLeftUnitsValue="points" paddingRight="22" paddingRightUnitsValue="points"
+                        cornerRadiusTL="3" name="Objective Style" id="3:31"/>
+                    <LayoutComponent width="4" height="44" styleId="3:33" name="Accent" id="3:32">
+                        <LayoutComponentStyle positionTypeValue="absolute"
+                            positionLeft="0" positionLeftUnitsValue="points" positionTop="0" positionTopUnitsValue="points"
+                            layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" name="Accent Style" id="3:33"/>
+                        <Fill name="F"><SolidColor colorValue="FFFFB547" name="C"/></Fill>
+                    </LayoutComponent>
+                    <Text sizingValue="autoWidth" name="Objective Text" id="3:34">
+                <LayoutParticipant layoutWidthScaleType="hug" layoutHeightScaleType="hug" name="LP"/>
+                <TextStylePaint fontSize="24" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="0.5" name="Objective Text Style" id="3:35">
+                    <Fill name="Fill"><SolidColor colorValue="FFFFF4E3" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:35" text="Drag the vault to the bridge" name="Run">
+                    <DataBindContext sourcePathIds="2:10-2:29" propertyKey="268"/>
+                </TextValueRun>
+            </Text>
+                    <Fill name="F"><SolidColor colorValue="D90A0E16" name="C"/></Fill>
+                </LayoutComponent>
+
+                <LayoutComponent clip="false" width="56" height="52" styleId="3:41" name="Arrow Slot" id="3:40">
+                    <LayoutComponentStyle layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" name="Arrow Slot Style" id="3:41"/>
+                    <Node x="28" y="28" name="Arrow Pop" id="3:42">
+                        <Node name="Arrow" id="3:43">
+                            <DataBindContext sourcePathIds="2:10-2:32" propertyKey="15"/>
+                            <Shape name="Head">
+                                <PointsPath isClosed="true" name="P">
+                                    <StraightVertex x="0" y="-21" radius="2"/>
+                                    <StraightVertex x="17" y="14" radius="2"/>
+                                    <StraightVertex x="0" y="6"/>
+                                    <StraightVertex x="-17" y="14" radius="2"/>
+                                </PointsPath>
+                                <Stroke thickness="2" join="round" name="Edge"><SolidColor colorValue="FF0A0E16" name="C"/></Stroke>
+                                <Fill name="Body">
+                                    <LinearGradient startX="0" startY="-21" endX="0" endY="14" name="G">
+                                        <GradientStop colorValue="FFFFD27A" position="0"/>
+                                        <GradientStop colorValue="FFFF9A2E" position="1"/>
+                                    </LinearGradient>
+                                </Fill>
+                                <Fill fillRule="clockwise" name="Glow"><SolidColor colorValue="B3FF9A2E" name="C"/><Feather strength="12" name="F"/></Fill>
+                            </Shape>
+                        </Node>
+                    </Node>
+                </LayoutComponent>
+
+                <Text sizingValue="autoWidth" name="Guidance" id="3:44">
+                <LayoutParticipant layoutWidthScaleType="hug" layoutHeightScaleType="hug" name="LP"/>
+                <TextStylePaint fontSize="21" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="1" name="Guidance Style" id="3:45">
+                    <Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="99000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill>
+                    <Fill name="Fill"><SolidColor colorValue="FFFFF4E3" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:45" text="LEFT IN 980 m" name="Run">
+                    <DataBindContext sourcePathIds="2:10-2:30" propertyKey="268"/>
+                </TextValueRun>
+            </Text>
+
+                <LayoutComponent clip="false" styleId="3:51" name="Hint" id="3:50">
+                    <LayoutComponentStyle layoutWidthScaleType="hug" layoutHeightScaleType="hug"
+                        paddingLeft="14" paddingLeftUnitsValue="points" paddingRight="14" paddingRightUnitsValue="points"
+                        paddingTop="4" paddingTopUnitsValue="points" paddingBottom="5" paddingBottomUnitsValue="points"
+                        cornerRadiusTL="3" name="Hint Style" id="3:51"/>
+                    <ComponentOrigin originX="0.5" originY="0.5" name="Origin"/>
+                    <Text sizingValue="autoWidth" name="Hint Text" id="3:52">
+                <LayoutParticipant layoutWidthScaleType="hug" layoutHeightScaleType="hug" name="LP"/>
+                <TextStylePaint fontSize="17" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="1.5" name="Hint Text Style" id="3:53">
+                    <Fill name="Fill"><SolidColor colorValue="FF140F08" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:53" text="" name="Run">
+                    <DataBindContext sourcePathIds="2:10-2:37" propertyKey="268"/>
+                </TextValueRun>
+            </Text>
+                    <Fill name="F"><SolidColor colorValue="F2FFB547" name="C"/></Fill>
+                </LayoutComponent>
+            </LayoutComponent>
+
+            <!-- ============ top left: heat and run stats ============ -->
+            <LayoutComponent clip="false" width="320" height="170" styleId="3:12" name="Status" id="3:11">
+                <LayoutComponentStyle positionTypeValue="absolute"
+                    positionLeft="26" positionLeftUnitsValue="points" positionTop="20" positionTopUnitsValue="points"
+                    layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" name="Status Style" id="3:12"/>
+                <Node name="Status Art">
+                    <Text x="0" y="0" sizingValue="autoWidth" name="Heat Label" id="3:55">
+                <TextStylePaint fontSize="13" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="4" name="Heat Label Style" id="3:56">
+                    <Fill name="Fill"><SolidColor colorValue="FFFFB547" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:56" text="HEAT" name="Run">
+                </TextValueRun>
+            </Text>
+                    <Node x="0" y="22" name="Pip 1">
+                        <Shape name="Lit" id="3:61">
+                            <DataBindContext sourcePathIds="2:10-2:24" propertyKey="18" converterId="5:11"/>
+                            <PointsPath isClosed="true" name="P"><StraightVertex x="9" y="0"/><StraightVertex x="34" y="0"/><StraightVertex x="25" y="18"/><StraightVertex x="0" y="18"/></PointsPath>
+                            <Fill fillRule="clockwise" name="Glow"><SolidColor colorValue="CCFF3B30" name="C" id="3:71"/><Feather strength="9" name="F"/></Fill>
+                            <Fill name="Body"><SolidColor colorValue="FFFF3B30" name="C" id="3:81"/></Fill>
+                        </Shape>
+                        <Shape name="Off">
+                            <PointsPath isClosed="true" name="P"><StraightVertex x="9" y="0"/><StraightVertex x="34" y="0"/><StraightVertex x="25" y="18"/><StraightVertex x="0" y="18"/></PointsPath>
+                            <Fill name="F"><SolidColor colorValue="1FFFFFFF" name="C"/></Fill>
+                            <Stroke thickness="1.5" name="S"><SolidColor colorValue="4DFFF4E3" name="C"/></Stroke>
+                        </Shape>
+                    </Node>
+                    <Node x="40" y="22" name="Pip 2">
+                        <Shape name="Lit" id="3:62">
+                            <DataBindContext sourcePathIds="2:10-2:24" propertyKey="18" converterId="5:12"/>
+                            <PointsPath isClosed="true" name="P"><StraightVertex x="9" y="0"/><StraightVertex x="34" y="0"/><StraightVertex x="25" y="18"/><StraightVertex x="0" y="18"/></PointsPath>
+                            <Fill fillRule="clockwise" name="Glow"><SolidColor colorValue="CCFF3B30" name="C" id="3:72"/><Feather strength="9" name="F"/></Fill>
+                            <Fill name="Body"><SolidColor colorValue="FFFF3B30" name="C" id="3:82"/></Fill>
+                        </Shape>
+                        <Shape name="Off">
+                            <PointsPath isClosed="true" name="P"><StraightVertex x="9" y="0"/><StraightVertex x="34" y="0"/><StraightVertex x="25" y="18"/><StraightVertex x="0" y="18"/></PointsPath>
+                            <Fill name="F"><SolidColor colorValue="1FFFFFFF" name="C"/></Fill>
+                            <Stroke thickness="1.5" name="S"><SolidColor colorValue="4DFFF4E3" name="C"/></Stroke>
+                        </Shape>
+                    </Node>
+                    <Node x="80" y="22" name="Pip 3">
+                        <Shape name="Lit" id="3:63">
+                            <DataBindContext sourcePathIds="2:10-2:24" propertyKey="18" converterId="5:13"/>
+                            <PointsPath isClosed="true" name="P"><StraightVertex x="9" y="0"/><StraightVertex x="34" y="0"/><StraightVertex x="25" y="18"/><StraightVertex x="0" y="18"/></PointsPath>
+                            <Fill fillRule="clockwise" name="Glow"><SolidColor colorValue="CCFF3B30" name="C" id="3:73"/><Feather strength="9" name="F"/></Fill>
+                            <Fill name="Body"><SolidColor colorValue="FFFF3B30" name="C" id="3:83"/></Fill>
+                        </Shape>
+                        <Shape name="Off">
+                            <PointsPath isClosed="true" name="P"><StraightVertex x="9" y="0"/><StraightVertex x="34" y="0"/><StraightVertex x="25" y="18"/><StraightVertex x="0" y="18"/></PointsPath>
+                            <Fill name="F"><SolidColor colorValue="1FFFFFFF" name="C"/></Fill>
+                            <Stroke thickness="1.5" name="S"><SolidColor colorValue="4DFFF4E3" name="C"/></Stroke>
+                        </Shape>
+                    </Node>
+                    <Node x="120" y="22" name="Pip 4">
+                        <Shape name="Lit" id="3:64">
+                            <DataBindContext sourcePathIds="2:10-2:24" propertyKey="18" converterId="5:14"/>
+                            <PointsPath isClosed="true" name="P"><StraightVertex x="9" y="0"/><StraightVertex x="34" y="0"/><StraightVertex x="25" y="18"/><StraightVertex x="0" y="18"/></PointsPath>
+                            <Fill fillRule="clockwise" name="Glow"><SolidColor colorValue="CCFF3B30" name="C" id="3:74"/><Feather strength="9" name="F"/></Fill>
+                            <Fill name="Body"><SolidColor colorValue="FFFF3B30" name="C" id="3:84"/></Fill>
+                        </Shape>
+                        <Shape name="Off">
+                            <PointsPath isClosed="true" name="P"><StraightVertex x="9" y="0"/><StraightVertex x="34" y="0"/><StraightVertex x="25" y="18"/><StraightVertex x="0" y="18"/></PointsPath>
+                            <Fill name="F"><SolidColor colorValue="1FFFFFFF" name="C"/></Fill>
+                            <Stroke thickness="1.5" name="S"><SolidColor colorValue="4DFFF4E3" name="C"/></Stroke>
+                        </Shape>
+                    </Node>
+                    <Node x="160" y="22" name="Pip 5">
+                        <Shape name="Lit" id="3:65">
+                            <DataBindContext sourcePathIds="2:10-2:24" propertyKey="18" converterId="5:15"/>
+                            <PointsPath isClosed="true" name="P"><StraightVertex x="9" y="0"/><StraightVertex x="34" y="0"/><StraightVertex x="25" y="18"/><StraightVertex x="0" y="18"/></PointsPath>
+                            <Fill fillRule="clockwise" name="Glow"><SolidColor colorValue="CCFF3B30" name="C" id="3:75"/><Feather strength="9" name="F"/></Fill>
+                            <Fill name="Body"><SolidColor colorValue="FFFF3B30" name="C" id="3:85"/></Fill>
+                        </Shape>
+                        <Shape name="Off">
+                            <PointsPath isClosed="true" name="P"><StraightVertex x="9" y="0"/><StraightVertex x="34" y="0"/><StraightVertex x="25" y="18"/><StraightVertex x="0" y="18"/></PointsPath>
+                            <Fill name="F"><SolidColor colorValue="1FFFFFFF" name="C"/></Fill>
+                            <Stroke thickness="1.5" name="S"><SolidColor colorValue="4DFFF4E3" name="C"/></Stroke>
+                        </Shape>
+                    </Node>
+                    <Text x="0" y="58" sizingValue="autoWidth" name="Wrecked Label" id="3:90">
+                <TextStylePaint fontSize="12" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="3" name="Wrecked Label Style" id="3:91">
+                    <Fill name="Fill"><SolidColor colorValue="A6FFF4E3" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:91" text="COPS WRECKED" name="Run">
+                </TextValueRun>
+            </Text>
+                    <Text x="0" y="72" sizingValue="autoWidth" name="Wrecked" id="3:92">
+                <TextStylePaint fontSize="32" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="0" name="Wrecked Style" id="3:93">
+                    <Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="99000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill>
+                    <Fill name="Fill"><SolidColor colorValue="FFFFF4E3" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:93" text="19" name="Run">
+                    <DataBindContext sourcePathIds="2:10-2:28" propertyKey="268"/>
+                </TextValueRun>
+            </Text>
+                    <Text x="130" y="58" sizingValue="autoWidth" name="Style Label" id="3:94">
+                <TextStylePaint fontSize="12" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="3" name="Style Label Style" id="3:95">
+                    <Fill name="Fill"><SolidColor colorValue="A6FFF4E3" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:95" text="STYLE" name="Run">
+                </TextValueRun>
+            </Text>
+                    <Text x="130" y="72" sizingValue="autoWidth" name="Style" id="3:96">
+                <TextStylePaint fontSize="32" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="0" name="Style Style" id="3:97">
+                    <Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="99000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill>
+                    <Fill name="Fill"><SolidColor colorValue="FFFFF4E3" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:97" text="3,800" name="Run">
+                    <DataBindContext sourcePathIds="2:10-2:26" propertyKey="268"/>
+                </TextValueRun>
+            </Text>
+                    <Text x="0" y="118" sizingValue="autoWidth" name="Damage Label" id="3:98">
+                <TextStylePaint fontSize="12" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="3" name="Damage Label Style" id="3:99">
+                    <Fill name="Fill"><SolidColor colorValue="A6FFF4E3" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:99" text="PROPERTY DAMAGE" name="Run">
+                </TextValueRun>
+            </Text>
+                    <Text x="0" y="132" sizingValue="autoWidth" name="Damage" id="3:100">
+                <TextStylePaint fontSize="32" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="0" name="Damage Style" id="3:101">
+                    <Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="99000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill>
+                    <Fill name="Fill"><SolidColor colorValue="FFFFD27A" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:101" text="$2,664,300" name="Run">
+                    <DataBindContext sourcePathIds="2:10-2:27" propertyKey="268"/>
+                </TextValueRun>
+            </Text>
+                    <Shape x="-26" y="-20" name="Shade">
+                        <Rectangle width="440" height="320" originX="0" originY="0" name="P"/>
+                        <Fill name="F">
+                            <RadialGradient startX="0" startY="0" endX="300" endY="0" name="G">
+                                <GradientStop colorValue="B30A0E16" position="0"/>
+                                <GradientStop colorValue="660A0E16" position="0.5"/>
+                                <GradientStop colorValue="000A0E16" position="1"/>
+                            </RadialGradient>
+                        </Fill>
+                    </Shape>
+                </Node>
+            </LayoutComponent>
+
+            <!-- ============ centre, below the car: moment meter, busted meter ============ -->
+            <LayoutComponent clip="false" width="100" height="150" styleId="3:16" name="Centre" id="3:15">
+                <LayoutComponentStyle positionTypeValue="absolute"
+                    positionLeft="0" positionLeftUnitsValue="points" positionRight="0" positionRightUnitsValue="points"
+                    positionTop="57" positionTopUnitsValue="percent"
+                    widthUnitsValue="percent" layoutHeightScaleType="fixed"
+                    flexDirectionValue="column" layoutAlignmentType="topCenter"
+                    gapVertical="10" gapVerticalUnitsValue="points" name="Centre Style" id="3:16"/>
+
+                <LayoutComponent clip="false" width="460" height="86" styleId="3:111" name="Meter" id="3:110">
+                    <LayoutComponentStyle layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" name="Meter Style" id="3:111"/>
+                    <ComponentOrigin originX="0.5" originY="0.5" name="Origin"/>
+                    <Node name="Meter Art">
+                        <Text x="230" y="0" originX="0.5" originY="0" sizingValue="autoWidth" name="Meter Label" id="3:112">
+                <TextStylePaint fontSize="16" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="6" name="Meter Label Style" id="3:113">
+                    <Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="99000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill>
+                    <Fill name="Fill"><SolidColor colorValue="FFFFB547" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:113" text="STRAIN" name="Run">
+                    <DataBindContext sourcePathIds="2:10-2:34" propertyKey="268"/>
+                </TextValueRun>
+            </Text>
+                        <Text x="230" y="52" originX="0.5" originY="0" sizingValue="autoWidth" name="Meter Prompt" id="3:114">
+                <TextStylePaint fontSize="27" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="1" name="Meter Prompt Style" id="3:115">
+                    <Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="99000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill>
+                    <Fill name="Fill"><SolidColor colorValue="FFFFF4E3" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:115" text="HOLD W TO PULL" name="Run">
+                    <DataBindContext sourcePathIds="2:10-2:36" propertyKey="268"/>
+                </TextValueRun>
+            </Text>
+                        <Shape x="20" y="34" name="Meter Fill">
+                            <Rectangle width="190" height="12" originX="0" originY="0.5" cornerRadiusTL="2" name="P">
+                                <DataBindContext sourcePathIds="2:10-2:35" propertyKey="20" converterId="5:33"/>
+                            </Rectangle>
+                            <Fill fillRule="clockwise" name="Glow"><SolidColor colorValue="99FF9A2E" name="C"/><Feather strength="10" name="F"/></Fill>
+                            <Fill name="Body">
+                                <LinearGradient startX="0" startY="0" endX="420" endY="0" name="G">
+                                    <GradientStop colorValue="FFFFD27A" position="0"/>
+                                    <GradientStop colorValue="FFFF9A2E" position="0.6"/>
+                                    <GradientStop colorValue="FFFF3B30" position="1"/>
+                                </LinearGradient>
+                            </Fill>
+                        </Shape>
+                        <Shape x="20" y="34" name="Meter Track">
+                            <Rectangle width="420" height="12" originX="0" originY="0.5" cornerRadiusTL="2" name="P"/>
+                            <Fill name="F"><SolidColor colorValue="B30A0E16" name="C"/></Fill>
+                            <Stroke thickness="1" name="S"><SolidColor colorValue="40FFF4E3" name="C"/></Stroke>
+                        </Shape>
+                    </Node>
+                </LayoutComponent>
+
+                <LayoutComponent clip="false" width="340" height="44" styleId="3:121" name="Busted" id="3:120">
+                    <LayoutComponentStyle layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" name="Busted Style" id="3:121"/>
+                    <Node name="Busted Art" id="3:122">
+                        <DataBindContext sourcePathIds="2:10-2:25" propertyKey="18" converterId="5:32"/>
+                        <Text x="170" y="0" originX="0.5" originY="0" sizingValue="autoWidth" name="Busted Label" id="3:123">
+                <TextStylePaint fontSize="18" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="8" name="Busted Label Style" id="3:124">
+                    <Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="99000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill>
+                    <Fill name="Fill"><SolidColor colorValue="FFFF3B30" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:124" text="BUSTED" name="Run">
+                </TextValueRun>
+            </Text>
+                        <Shape x="20" y="34" name="Busted Fill">
+                            <Rectangle width="150" height="8" originX="0" originY="0.5" cornerRadiusTL="2" name="P">
+                                <DataBindContext sourcePathIds="2:10-2:25" propertyKey="20" converterId="5:31"/>
+                            </Rectangle>
+                            <Fill fillRule="clockwise" name="Glow"><SolidColor colorValue="CCFF3B30" name="C"/><Feather strength="10" name="F"/></Fill>
+                            <Fill name="Body"><SolidColor colorValue="FFFF3B30" name="C"/></Fill>
+                        </Shape>
+                        <Shape x="20" y="34" name="Busted Track">
+                            <Rectangle width="300" height="8" originX="0" originY="0.5" cornerRadiusTL="2" name="P"/>
+                            <Fill name="F"><SolidColor colorValue="B30A0E16" name="C"/></Fill>
+                            <Stroke thickness="1" name="S"><SolidColor colorValue="59FF3B30" name="C"/></Stroke>
+                        </Shape>
+                    </Node>
+                </LayoutComponent>
+            </LayoutComponent>
+
+            <!-- ============ bottom right: speedometer and nitrous ============ -->
+            <LayoutComponent clip="false" width="320" height="236" styleId="3:18" name="Gauge" id="3:17">
+                <LayoutComponentStyle positionTypeValue="absolute"
+                    positionRight="16" positionRightUnitsValue="points" positionBottom="10" positionBottomUnitsValue="points"
+                    layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" name="Gauge Style" id="3:18"/>
+                <Node name="Gauge Art">
+                    <Text x="160" y="114" originX="0.5" originY="0.5" sizingValue="autoWidth" name="Speed" id="3:130">
+                <TextStylePaint fontSize="80" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="0" name="Speed Style" id="3:131">
+                    <Fill fillRule="clockwise" name="Shadow"><SolidColor colorValue="99000000" name="C"/><Feather strength="10" offsetY="2" name="F"/></Fill>
+                    <Fill name="Fill"><SolidColor colorValue="FFFFF4E3" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:131" text="118" name="Run">
+                    <DataBindContext sourcePathIds="2:10-2:22" propertyKey="268"/>
+                </TextValueRun>
+            </Text>
+                    <Text x="160" y="158" originX="0.5" originY="0.5" sizingValue="autoWidth" name="Unit" id="3:132">
+                <TextStylePaint fontSize="15" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="5" name="Unit Style" id="3:133">
+                    <Fill name="Fill"><SolidColor colorValue="FFFFB547" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:133" text="KM/H" name="Run">
+                </TextValueRun>
+            </Text>
+
+                    <Node x="160" y="204" name="Nitrous">
+                        <Text x="-66" y="0" originX="1" originY="0.5" sizingValue="autoWidth" name="NOS Label" id="3:134">
+                <TextStylePaint fontSize="17" fontAssetId="1:30" familyName="Barlow Condensed ExtraBold" styleName="Italic" letterSpacing="1" name="NOS Label Style" id="3:135">
+                    <Fill name="Fill"><SolidColor colorValue="FF3DDCFF" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:135" text="NOS" name="Run">
+                </TextValueRun>
+            </Text>
+                        <Text x="82" y="0" originX="0.5" originY="0.5" sizingValue="autoWidth" name="NOS Key" id="3:136">
+                <TextStylePaint fontSize="11" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="1.5" name="NOS Key Style" id="3:137">
+                    <Fill name="Fill"><SolidColor colorValue="CCFFF4E3" name="C"/></Fill>
+                </TextStylePaint>
+                <TextValueRun styleId="3:137" text="SHIFT" name="Run">
+                </TextValueRun>
+            </Text>
+                        <Shape x="82" y="0" name="NOS Key Cap">
+                            <Rectangle width="40" height="17" cornerRadiusTL="3" name="P"/>
+                            <Stroke thickness="1" name="S"><SolidColor colorValue="80FFF4E3" name="C"/></Stroke>
+                        </Shape>
+                        <Shape x="-58" y="0" name="NOS Fill">
+                            <Rectangle width="80" height="6" originX="0" originY="0.5" cornerRadiusTL="3" name="P">
+                                <DataBindContext sourcePathIds="2:10-2:23" propertyKey="20" converterId="5:22"/>
+                            </Rectangle>
+                            <Fill fillRule="clockwise" name="Glow"><SolidColor colorValue="CC3DDCFF" name="C"/><Feather strength="8" name="F"/></Fill>
+                            <Fill name="Body"><SolidColor colorValue="FF3DDCFF" name="C"/></Fill>
+                        </Shape>
+                        <Shape x="-58" y="0" name="NOS Track">
+                            <Rectangle width="112" height="6" originX="0" originY="0.5" cornerRadiusTL="3" name="P"/>
+                            <Fill name="F"><SolidColor colorValue="CC0A0E16" name="C"/></Fill>
+                            <Stroke thickness="1" name="S"><SolidColor colorValue="4D3DDCFF" name="C"/></Stroke>
+                        </Shape>
+                    </Node>
+
+                    <Shape x="160" y="122" rotation="4.1887902" name="Redline Fill">
+                        <Ellipse width="210" height="210" name="P"/>
+                        <Stroke thickness="10" cap="butt" name="Glow">
+                            <SolidColor colorValue="99FF3B30" name="C"/><Feather strength="7" name="F"/>
+                            <TargetEffect targetId="3:142" name="Trim"/>
+                        </Stroke>
+                        <Stroke thickness="12" cap="butt" name="Body">
+                            <SolidColor colorValue="FFFF3B30" name="C"/>
+                            <TargetEffect targetId="3:142" name="Trim"/>
+                        </Stroke>
+                    </Shape>
+                    <Shape x="160" y="122" rotation="4.1887902" name="Speed Fill">
+                        <Ellipse width="210" height="210" name="P"/>
+                        <Stroke thickness="10" cap="butt" name="Glow">
+                            <SolidColor colorValue="73FFB547" name="C"/><Feather strength="7" name="F"/>
+                            <TargetEffect targetId="3:140" name="Trim"/>
+                        </Stroke>
+                        <Stroke thickness="12" cap="butt" name="Body">
+                            <SolidColor colorValue="FFFFB547" name="C"/>
+                            <TargetEffect targetId="3:140" name="Trim"/>
+                        </Stroke>
+                    </Shape>
+                    <Node name="Ticks">
+                    <Shape x="53.48" y="183.50" rotation="4.188790" name="Tick 0"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="D9FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="47.24" y="163.04" rotation="4.363323" name="Tick 10"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="59FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="38.87" y="143.36" rotation="4.537856" name="Tick 20"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="D9FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="40.00" y="122.00" rotation="4.712389" name="Tick 30"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="59FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="38.87" y="100.64" rotation="4.886922" name="Tick 40"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="D9FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="47.24" y="80.96" rotation="5.061455" name="Tick 50"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="59FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="53.48" y="60.50" rotation="5.235988" name="Tick 60"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="D9FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="68.07" y="44.87" rotation="5.410521" name="Tick 70"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="59FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="80.94" y="27.78" rotation="5.585054" name="Tick 80"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="D9FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="100.00" y="18.08" rotation="5.759587" name="Tick 90"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="59FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="117.93" y="6.42" rotation="5.934119" name="Tick 100"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="D9FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="139.16" y="3.82" rotation="6.108652" name="Tick 110"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="59FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="160.00" y="-1.00" rotation="0.000000" name="Tick 120"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="D9FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="180.84" y="3.82" rotation="0.174533" name="Tick 130"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="59FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="202.07" y="6.42" rotation="0.349066" name="Tick 140"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="D9FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="220.00" y="18.08" rotation="0.523599" name="Tick 150"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="59FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="239.06" y="27.78" rotation="0.698132" name="Tick 160"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="D9FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="251.93" y="44.87" rotation="0.872665" name="Tick 170"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="59FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="266.52" y="60.50" rotation="1.047198" name="Tick 180"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="D9FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="272.76" y="80.96" rotation="1.221730" name="Tick 190"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="59FFF4E3" name="C"/></Fill></Shape>
+                    <Shape x="281.13" y="100.64" rotation="1.396263" name="Tick 200"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="FFFF3B30" name="C"/></Fill></Shape>
+                    <Shape x="280.00" y="122.00" rotation="1.570796" name="Tick 210"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="99FF3B30" name="C"/></Fill></Shape>
+                    <Shape x="281.13" y="143.36" rotation="1.745329" name="Tick 220"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="FFFF3B30" name="C"/></Fill></Shape>
+                    <Shape x="272.76" y="163.04" rotation="1.919862" name="Tick 230"><Rectangle width="2" height="6" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="99FF3B30" name="C"/></Fill></Shape>
+                    <Shape x="266.52" y="183.50" rotation="2.094395" name="Tick 240"><Rectangle width="3" height="12" cornerRadiusTL="1" name="P"/><Fill name="F"><SolidColor colorValue="FFFF3B30" name="C"/></Fill></Shape>
+                    <Text x="37.0" y="193.0" originX="0.5" originY="0.5" name="Label 0"><TextStylePaint fontSize="13" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="1" name="S 0" id="3:700"><Fill name="F"><SolidColor colorValue="A6FFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="3:700" text="0" name="R"/></Text>
+                    <Text x="37.0" y="51.0" originX="0.5" originY="0.5" name="Label 60"><TextStylePaint fontSize="13" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="1" name="S 60" id="3:760"><Fill name="F"><SolidColor colorValue="A6FFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="3:760" text="60" name="R"/></Text>
+                    <Text x="160.0" y="-20.0" originX="0.5" originY="0.5" name="Label 120"><TextStylePaint fontSize="13" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="1" name="S 120" id="3:820"><Fill name="F"><SolidColor colorValue="A6FFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="3:820" text="120" name="R"/></Text>
+                    <Text x="283.0" y="51.0" originX="0.5" originY="0.5" name="Label 180"><TextStylePaint fontSize="13" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="1" name="S 180" id="3:880"><Fill name="F"><SolidColor colorValue="A6FFF4E3" name="C"/></Fill></TextStylePaint><TextValueRun styleId="3:880" text="180" name="R"/></Text>
+                    <Text x="283.0" y="193.0" originX="0.5" originY="0.5" name="Label 240"><TextStylePaint fontSize="13" fontAssetId="1:31" familyName="Barlow Condensed SemiBold" styleName="Regular" letterSpacing="1" name="S 240" id="3:940"><Fill name="F"><SolidColor colorValue="FFFF3B30" name="C"/></Fill></TextStylePaint><TextValueRun styleId="3:940" text="240" name="R"/></Text>
+                    </Node>
+                    <Shape x="160" y="122" rotation="4.1887902" name="Inner Line">
+                        <Ellipse width="186" height="186" name="P"/>
+                        <Stroke thickness="1.5" cap="butt" name="S">
+                            <SolidColor colorValue="40FFB547" name="C"/>
+                            <TrimPath start="0" end="0.6666667" name="T"/>
+                        </Stroke>
+                    </Shape>
+                    <Shape x="160" y="122" rotation="4.1887902" name="Redline Track">
+                        <Ellipse width="210" height="210" name="P"/>
+                        <Stroke thickness="12" cap="butt" name="S">
+                            <SolidColor colorValue="4DFF3B30" name="C"/>
+                            <TrimPath start="0.5555556" end="0.6666667" name="T"/>
+                        </Stroke>
+                    </Shape>
+                    <Shape x="160" y="122" rotation="4.1887902" name="Track">
+                        <Ellipse width="210" height="210" name="P"/>
+                        <Stroke thickness="12" cap="butt" name="S">
+                            <SolidColor colorValue="26FFF4E3" name="C"/>
+                            <TrimPath start="0" end="0.5555556" name="T"/>
+                        </Stroke>
+                    </Shape>
+                    <Shape x="160" y="128" name="Backdrop">
+                        <Ellipse width="330" height="330" name="P"/>
+                        <Fill name="F">
+                            <RadialGradient startX="0" startY="0" endX="165" endY="0" name="G">
+                                <GradientStop colorValue="CC0A0E16" position="0"/>
+                                <GradientStop colorValue="990A0E16" position="0.6"/>
+                                <GradientStop colorValue="000A0E16" position="1"/>
+                            </RadialGradient>
+                        </Fill>
+                    </Shape>
+                </Node>
+            </LayoutComponent>
+
+            <!-- ============ bottom left: bezel round the HTML minimap (200 px, 20 px from the corner) ============ -->
+            <LayoutComponent clip="false" width="216" height="216" styleId="3:20" name="Bezel" id="3:19">
+                <LayoutComponentStyle positionTypeValue="absolute"
+                    positionLeft="12" positionLeftUnitsValue="points" positionBottom="12" positionBottomUnitsValue="points"
+                    layoutWidthScaleType="fixed" layoutHeightScaleType="fixed" name="Bezel Style" id="3:20"/>
+                <Node x="108" y="108" name="Bezel Art">
+                    <Shape x="0" y="-108" name="Heading Notch">
+                        <PointsPath isClosed="true" name="P">
+                            <StraightVertex x="0" y="7"/>
+                            <StraightVertex x="7" y="-3"/>
+                            <StraightVertex x="-7" y="-3"/>
+                        </PointsPath>
+                        <Fill name="F"><SolidColor colorValue="FFFFB547" name="C"/></Fill>
+                    </Shape>
+                    <Shape name="Ring">
+                        <Ellipse width="210" height="210" name="P"/>
+                        <Stroke thickness="4" name="Dark"><SolidColor colorValue="CC0A0E16" name="C"/></Stroke>
+                        <Stroke thickness="1.5" name="Edge"><SolidColor colorValue="80FFB547" name="C"/></Stroke>
+                    </Shape>
+                    <Shape name="Glow">
+                        <Ellipse width="212" height="212" name="P"/>
+                        <Stroke thickness="3" name="S"><SolidColor colorValue="4D000000" name="C"/><Feather strength="6" name="F"/></Stroke>
+                    </Shape>
+                </Node>
+            </LayoutComponent>
+        </Node>
+
+        <GroupEffect name="Speed Trim" id="3:140">
+            <TrimPath start="0" end="0.3" name="T" id="3:141">
+                <DataBindContext sourcePathIds="2:10-2:21" propertyKey="115" converterId="5:3"/>
+            </TrimPath>
+        </GroupEffect>
+        <GroupEffect name="Redline Trim" id="3:142">
+            <TrimPath start="0.5555556" end="0.5555556" name="T" id="3:143">
+                <DataBindContext sourcePathIds="2:10-2:21" propertyKey="115" converterId="5:6"/>
+            </TrimPath>
+        </GroupEffect>
+
+        <StateMachine name="UI" id="4:1">
+            <StateMachineLayer name="Screen" id="4:2">
+                <AnyState x="560" y="0"/>
+                <ExitState x="720" y="0"/>
+                <EntryState x="0" y="0"><StateTransition stateToId="4:3"/></EntryState>
+                <AnimationState animationId="4:100" x="200" y="0" id="4:3">
+                    <StateTransition stateToId="4:4" duration="420">
+                        <CubicEaseInterpolator x1="0.2" y1="0.9" x2="0.3" y2="1"/>
+                        <TransitionViewModelCondition opValue="equal">
+                            <TransitionPropertyViewModelComparator>
+                                <BindablePropertyEnum><DataBindContext sourcePathIds="2:10-2:20" propertyKey="637"/></BindablePropertyEnum>
+                            </TransitionPropertyViewModelComparator>
+                            <TransitionValueEnumComparator value="2:4"/>
+                        </TransitionViewModelCondition>
+                    </StateTransition>
+                </AnimationState>
+                <AnimationState animationId="4:101" x="380" y="120" id="4:4">
+                    <StateTransition stateToId="4:3" duration="220">
+                        <TransitionViewModelCondition opValue="notEqual">
+                            <TransitionPropertyViewModelComparator>
+                                <BindablePropertyEnum><DataBindContext sourcePathIds="2:10-2:20" propertyKey="637"/></BindablePropertyEnum>
+                            </TransitionPropertyViewModelComparator>
+                            <TransitionValueEnumComparator value="2:4"/>
+                        </TransitionViewModelCondition>
+                    </StateTransition>
+                </AnimationState>
+            </StateMachineLayer>
+
+            <StateMachineLayer name="Arrow" id="4:5">
+                <AnyState x="560" y="0"/>
+                <ExitState x="720" y="0"/>
+                <EntryState x="0" y="0"><StateTransition stateToId="4:6"/></EntryState>
+                <AnimationState animationId="4:102" x="200" y="0" id="4:6">
+                    <StateTransition stateToId="4:7" duration="260">
+                        <CubicEaseInterpolator x1="0.3" y1="1.4" x2="0.5" y2="1"/>
+                        <TransitionViewModelCondition>
+                            <TransitionPropertyViewModelComparator>
+                                <BindablePropertyBoolean><DataBindContext sourcePathIds="2:10-2:31" propertyKey="634"/></BindablePropertyBoolean>
+                            </TransitionPropertyViewModelComparator>
+                            <TransitionValueBooleanComparator value="true"/>
+                        </TransitionViewModelCondition>
+                    </StateTransition>
+                </AnimationState>
+                <AnimationState animationId="4:103" x="380" y="120" id="4:7">
+                    <StateTransition stateToId="4:6" duration="160">
+                        <TransitionViewModelCondition>
+                            <TransitionPropertyViewModelComparator>
+                                <BindablePropertyBoolean><DataBindContext sourcePathIds="2:10-2:31" propertyKey="634"/></BindablePropertyBoolean>
+                            </TransitionPropertyViewModelComparator>
+                            <TransitionValueBooleanComparator value="false"/>
+                        </TransitionViewModelCondition>
+                    </StateTransition>
+                </AnimationState>
+            </StateMachineLayer>
+
+            <StateMachineLayer name="Meter" id="4:8">
+                <AnyState x="560" y="0"/>
+                <ExitState x="720" y="0"/>
+                <EntryState x="0" y="0"><StateTransition stateToId="4:9"/></EntryState>
+                <AnimationState animationId="4:104" x="200" y="0" id="4:9">
+                    <StateTransition stateToId="4:10" duration="300">
+                        <CubicEaseInterpolator x1="0.3" y1="1.3" x2="0.5" y2="1"/>
+                        <TransitionViewModelCondition>
+                            <TransitionPropertyViewModelComparator>
+                                <BindablePropertyBoolean><DataBindContext sourcePathIds="2:10-2:33" propertyKey="634"/></BindablePropertyBoolean>
+                            </TransitionPropertyViewModelComparator>
+                            <TransitionValueBooleanComparator value="true"/>
+                        </TransitionViewModelCondition>
+                    </StateTransition>
+                </AnimationState>
+                <AnimationState animationId="4:105" x="380" y="120" id="4:10">
+                    <StateTransition stateToId="4:9" duration="200">
+                        <TransitionViewModelCondition>
+                            <TransitionPropertyViewModelComparator>
+                                <BindablePropertyBoolean><DataBindContext sourcePathIds="2:10-2:33" propertyKey="634"/></BindablePropertyBoolean>
+                            </TransitionPropertyViewModelComparator>
+                            <TransitionValueBooleanComparator value="false"/>
+                        </TransitionViewModelCondition>
+                    </StateTransition>
+                </AnimationState>
+            </StateMachineLayer>
+
+            <StateMachineLayer name="Hint" id="4:11">
+                <AnyState x="560" y="0"/>
+                <ExitState x="720" y="0"/>
+                <EntryState x="0" y="0"><StateTransition stateToId="4:12"/></EntryState>
+                <AnimationState animationId="4:106" x="200" y="0" id="4:12">
+                    <StateTransition stateToId="4:13" duration="260">
+                        <CubicEaseInterpolator x1="0.3" y1="1.4" x2="0.5" y2="1"/>
+                        <TransitionViewModelCondition opValue="notEqual">
+                            <TransitionPropertyViewModelComparator>
+                                <BindablePropertyString><DataBindContext sourcePathIds="2:10-2:37" propertyKey="635"/></BindablePropertyString>
+                            </TransitionPropertyViewModelComparator>
+                            <TransitionValueStringComparator value=""/>
+                        </TransitionViewModelCondition>
+                    </StateTransition>
+                </AnimationState>
+                <AnimationState animationId="4:107" x="380" y="120" id="4:13">
+                    <StateTransition stateToId="4:12" duration="160">
+                        <TransitionViewModelCondition opValue="equal">
+                            <TransitionPropertyViewModelComparator>
+                                <BindablePropertyString><DataBindContext sourcePathIds="2:10-2:37" propertyKey="635"/></BindablePropertyString>
+                            </TransitionPropertyViewModelComparator>
+                            <TransitionValueStringComparator value=""/>
+                        </TransitionViewModelCondition>
+                    </StateTransition>
+                </AnimationState>
+            </StateMachineLayer>
+
+            <StateMachineLayer name="Siren" id="4:14">
+                <AnyState x="560" y="0"/>
+                <ExitState x="720" y="0"/>
+                <EntryState x="0" y="0"><StateTransition stateToId="4:15"/></EntryState>
+                <AnimationState animationId="4:108" x="200" y="0" id="4:15"/>
+            </StateMachineLayer>
+        </StateMachine>
+
+        <LinearAnimation duration="1" name="HUD Hidden" id="4:100">
+            <KeyedObject objectId="3:10"><KeyedProperty property="opacity"><KeyFrameDouble value="0" frame="0"/></KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:11"><KeyedProperty property="x"><KeyFrameDouble value="-40" frame="0"/></KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:13"><KeyedProperty property="y"><KeyFrameDouble value="-30" frame="0"/></KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:17"><KeyedProperty property="x"><KeyFrameDouble value="60" frame="0"/></KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:19"><KeyedProperty property="x"><KeyFrameDouble value="-40" frame="0"/></KeyedProperty></KeyedObject>
+        </LinearAnimation>
+        <LinearAnimation duration="1" name="HUD Shown" id="4:101">
+            <KeyedObject objectId="3:10"><KeyedProperty property="opacity"><KeyFrameDouble value="1" frame="0"/></KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:11"><KeyedProperty property="x"><KeyFrameDouble value="0" frame="0"/></KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:13"><KeyedProperty property="y"><KeyFrameDouble value="0" frame="0"/></KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:17"><KeyedProperty property="x"><KeyFrameDouble value="0" frame="0"/></KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:19"><KeyedProperty property="x"><KeyFrameDouble value="0" frame="0"/></KeyedProperty></KeyedObject>
+        </LinearAnimation>
+        <LinearAnimation duration="1" name="Arrow Off" id="4:102">
+            <KeyedObject objectId="3:42">
+                <KeyedProperty property="opacity"><KeyFrameDouble value="0" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleX"><KeyFrameDouble value="0.4" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleY"><KeyFrameDouble value="0.4" frame="0"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+        <LinearAnimation duration="1" name="Arrow On" id="4:103">
+            <KeyedObject objectId="3:42">
+                <KeyedProperty property="opacity"><KeyFrameDouble value="1" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleX"><KeyFrameDouble value="1" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleY"><KeyFrameDouble value="1" frame="0"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+        <LinearAnimation duration="1" name="Meter Off" id="4:104">
+            <KeyedObject objectId="3:110">
+                <KeyedProperty property="opacity"><KeyFrameDouble value="0" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleX"><KeyFrameDouble value="0.85" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleY"><KeyFrameDouble value="0.85" frame="0"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+        <LinearAnimation duration="1" name="Meter On" id="4:105">
+            <KeyedObject objectId="3:110">
+                <KeyedProperty property="opacity"><KeyFrameDouble value="1" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleX"><KeyFrameDouble value="1" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleY"><KeyFrameDouble value="1" frame="0"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+        <LinearAnimation duration="1" name="Hint Off" id="4:106">
+            <KeyedObject objectId="3:50">
+                <KeyedProperty property="opacity"><KeyFrameDouble value="0" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleX"><KeyFrameDouble value="0.7" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleY"><KeyFrameDouble value="0.7" frame="0"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+        <LinearAnimation duration="1" name="Hint On" id="4:107">
+            <KeyedObject objectId="3:50">
+                <KeyedProperty property="opacity"><KeyFrameDouble value="1" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleX"><KeyFrameDouble value="1" frame="0"/></KeyedProperty>
+                <KeyedProperty property="scaleY"><KeyFrameDouble value="1" frame="0"/></KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+        <LinearAnimation loopValue="loop" duration="40" name="Siren" id="4:108">
+            <KeyedObject objectId="3:71"><KeyedProperty property="colorValue">
+                <KeyFrameColor value="CCFF3B30" frame="0" interpolationType="hold"/>
+                <KeyFrameColor value="CC2F6BFF" frame="20" interpolationType="hold"/>
+                <KeyFrameColor value="CCFF3B30" frame="40" interpolationType="hold"/>
+            </KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:81"><KeyedProperty property="colorValue">
+                <KeyFrameColor value="FFFF3B30" frame="0" interpolationType="hold"/>
+                <KeyFrameColor value="FF3D7BFF" frame="20" interpolationType="hold"/>
+                <KeyFrameColor value="FFFF3B30" frame="40" interpolationType="hold"/>
+            </KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:72"><KeyedProperty property="colorValue">
+                <KeyFrameColor value="CCFF3B30" frame="0" interpolationType="hold"/>
+                <KeyFrameColor value="CC2F6BFF" frame="20" interpolationType="hold"/>
+                <KeyFrameColor value="CCFF3B30" frame="40" interpolationType="hold"/>
+            </KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:82"><KeyedProperty property="colorValue">
+                <KeyFrameColor value="FFFF3B30" frame="0" interpolationType="hold"/>
+                <KeyFrameColor value="FF3D7BFF" frame="20" interpolationType="hold"/>
+                <KeyFrameColor value="FFFF3B30" frame="40" interpolationType="hold"/>
+            </KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:73"><KeyedProperty property="colorValue">
+                <KeyFrameColor value="CCFF3B30" frame="0" interpolationType="hold"/>
+                <KeyFrameColor value="CC2F6BFF" frame="20" interpolationType="hold"/>
+                <KeyFrameColor value="CCFF3B30" frame="40" interpolationType="hold"/>
+            </KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:83"><KeyedProperty property="colorValue">
+                <KeyFrameColor value="FFFF3B30" frame="0" interpolationType="hold"/>
+                <KeyFrameColor value="FF3D7BFF" frame="20" interpolationType="hold"/>
+                <KeyFrameColor value="FFFF3B30" frame="40" interpolationType="hold"/>
+            </KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:74"><KeyedProperty property="colorValue">
+                <KeyFrameColor value="CCFF3B30" frame="0" interpolationType="hold"/>
+                <KeyFrameColor value="CC2F6BFF" frame="20" interpolationType="hold"/>
+                <KeyFrameColor value="CCFF3B30" frame="40" interpolationType="hold"/>
+            </KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:84"><KeyedProperty property="colorValue">
+                <KeyFrameColor value="FFFF3B30" frame="0" interpolationType="hold"/>
+                <KeyFrameColor value="FF3D7BFF" frame="20" interpolationType="hold"/>
+                <KeyFrameColor value="FFFF3B30" frame="40" interpolationType="hold"/>
+            </KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:75"><KeyedProperty property="colorValue">
+                <KeyFrameColor value="CCFF3B30" frame="0" interpolationType="hold"/>
+                <KeyFrameColor value="CC2F6BFF" frame="20" interpolationType="hold"/>
+                <KeyFrameColor value="CCFF3B30" frame="40" interpolationType="hold"/>
+            </KeyedProperty></KeyedObject>
+            <KeyedObject objectId="3:85"><KeyedProperty property="colorValue">
+                <KeyFrameColor value="FFFF3B30" frame="0" interpolationType="hold"/>
+                <KeyFrameColor value="FF3D7BFF" frame="20" interpolationType="hold"/>
+                <KeyFrameColor value="FFFF3B30" frame="40" interpolationType="hold"/>
+            </KeyedProperty></KeyedObject>
+        </LinearAnimation>
+    </Artboard>
+
+    <!-- Converters: game values to angles, lengths and opacities. -->
+    <DataConverterRangeMapper minInput="0" maxInput="240" minOutput="0" maxOutput="0.6666667" clampLower="true" clampUpper="true" name="Speed to arc" id="5:1"/>
+    <DataConverterInterpolator duration="0.12" name="Smooth speed" id="5:2"/>
+    <DataConverterGroup name="Speed arc" id="5:3">
+        <DataConverterGroupItem converterId="5:1"/>
+        <DataConverterGroupItem converterId="5:2"/>
+    </DataConverterGroup>
+    <DataConverterRangeMapper minInput="200" maxInput="240" minOutput="0.5555556" maxOutput="0.6666667" clampLower="true" clampUpper="true" name="Speed to redline arc" id="5:4"/>
+    <DataConverterInterpolator duration="0.12" name="Smooth redline" id="5:5"/>
+    <DataConverterGroup name="Redline arc" id="5:6">
+        <DataConverterGroupItem converterId="5:4"/>
+        <DataConverterGroupItem converterId="5:5"/>
+    </DataConverterGroup>
+    <DataConverterRangeMapper minInput="0" maxInput="1" minOutput="0" maxOutput="1" clampLower="true" clampUpper="true" name="Heat pip 1" id="5:11"/>
+    <DataConverterRangeMapper minInput="1" maxInput="2" minOutput="0" maxOutput="1" clampLower="true" clampUpper="true" name="Heat pip 2" id="5:12"/>
+    <DataConverterRangeMapper minInput="2" maxInput="3" minOutput="0" maxOutput="1" clampLower="true" clampUpper="true" name="Heat pip 3" id="5:13"/>
+    <DataConverterRangeMapper minInput="3" maxInput="4" minOutput="0" maxOutput="1" clampLower="true" clampUpper="true" name="Heat pip 4" id="5:14"/>
+    <DataConverterRangeMapper minInput="4" maxInput="5" minOutput="0" maxOutput="1" clampLower="true" clampUpper="true" name="Heat pip 5" id="5:15"/>
+    <DataConverterRangeMapper minInput="0" maxInput="1" minOutput="0" maxOutput="112" clampLower="true" clampUpper="true" name="NOS to width" id="5:20"/>
+    <DataConverterInterpolator duration="0.15" name="Smooth NOS" id="5:21"/>
+    <DataConverterGroup name="NOS bar" id="5:22">
+        <DataConverterGroupItem converterId="5:20"/>
+        <DataConverterGroupItem converterId="5:21"/>
+    </DataConverterGroup>
+    <DataConverterRangeMapper minInput="0" maxInput="1" minOutput="0" maxOutput="300" clampLower="true" clampUpper="true" name="Busted to width" id="5:31"/>
+    <DataConverterRangeMapper minInput="0" maxInput="0.04" minOutput="0" maxOutput="1" clampLower="true" clampUpper="true" name="Busted to opacity" id="5:32"/>
+    <DataConverterRangeMapper minInput="0" maxInput="1" minOutput="0" maxOutput="420" clampLower="true" clampUpper="true" name="Meter to width" id="5:33"/>
+
+    <FontAsset file="fonts/BarlowCondensed-ExtraBoldItalic.ttf" name="Barlow Condensed ExtraBold Italic" id="1:30"/>
+    <FontAsset file="fonts/BarlowCondensed-SemiBold.ttf" name="Barlow Condensed SemiBold" id="1:31"/>
+</Rive>

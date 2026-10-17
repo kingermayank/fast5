@@ -5,6 +5,10 @@ The game's screens and HUD are drawn by the Rive file built from this folder
 model only: `src/hud.ts` sets these properties, and the file decides how they
 look and animate. Rename one here and in `src/hud.ts` together.
 
+The main artboard is `UI` and its state machine must be named `UI` (the web
+runtime plays it by name; data binds only apply while it runs). The view model
+is `Game`, declared in `data.rml`.
+
 Each part of the HTML UI hides only when the file has the property that marks
 it (in brackets below), so parts can move to Rive one at a time.
 

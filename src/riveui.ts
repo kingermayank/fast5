@@ -14,6 +14,8 @@ import wasmUrl from '@rive-app/webgl2/rive.wasm?url';
 export type UiValue = number | string | boolean;
 
 const SRC = `${import.meta.env.BASE_URL}ui/fast5.riv`;
+/** The main artboard's state machine. It has to be named: binds only apply while a state machine runs. */
+const STATE_MACHINE = 'UI';
 
 // Serve the WASM from our own build rather than a CDN.
 RuntimeLoader.setWasmUrl(wasmUrl);
@@ -58,6 +60,7 @@ export class RiveUi {
         r = new Rive({
           buffer,
           canvas,
+          stateMachine: STATE_MACHINE,
           autoplay: true,
           autoBind: true,
           // Fill the window and let the file's layouts place everything.
@@ -81,11 +84,14 @@ export class RiveUi {
     return this.types.has(name);
   }
 
-  /** Set a view model property. Writes only when the value changes; unknown names warn once. */
+  /**
+   * Set a view model property. Writes only when the value changes. A name the
+   * file doesn't have is ignored: it's a part of the UI the file doesn't draw.
+   */
   set(name: string, value: UiValue): void {
     if (this.last.get(name) === value) return;
     const type = this.types.get(name);
-    if (!type) return this.warn(name, 'no such property');
+    if (!type) return;
     this.last.set(name, value);
     switch (type) {
       case 'number': {
@@ -115,9 +121,7 @@ export class RiveUi {
 
   /** Fire a trigger property. */
   fire(name: string): void {
-    const p = this.vmi.trigger(name);
-    if (p) p.trigger();
-    else this.warn(name, 'no such trigger');
+    if (this.types.get(name) === 'trigger') this.vmi.trigger(name)?.trigger();
   }
 
   /** Call back when the file changes a property (a click on a card, a confirm trigger). */
@@ -130,7 +134,7 @@ export class RiveUi {
       enumType: () => this.vmi.enum(name),
     }[this.types.get(name) ?? ''];
     const p = get?.();
-    if (!p) return this.warn(name, 'nothing to observe');
+    if (!p) return;
     p.on(() => cb('value' in p ? (p.value as UiValue) : undefined));
   }
 
