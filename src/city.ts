@@ -145,30 +145,22 @@ function ribbon(pts: THREE.Vector3[], from: number, to: number, y: number, uvSca
       else uv.push(quv[k][0] / uvScale, quv[k][1] / uvScale);
     });
   }
+  // Make every triangle face up. Strips run either way along a street, and a tight bend
+  // (a wide road, a short segment) can fold a quad over; deciding from the first triangle
+  // alone once turned the whole Piñero expressway face down, so it was culled.
+  for (let i = 0; i < pos.length; i += 9) {
+    // y of (b - a) x (c - a): negative faces down.
+    const up = (pos[i + 5] - pos[i + 2]) * (pos[i + 6] - pos[i]) - (pos[i + 3] - pos[i]) * (pos[i + 8] - pos[i + 2]);
+    if (up >= 0) continue;
+    for (let k = 0; k < 3; k++) [pos[i + 3 + k], pos[i + 6 + k]] = [pos[i + 6 + k], pos[i + 3 + k]];
+    const j = (i / 9) * 6;
+    [uv[j + 2], uv[j + 4]] = [uv[j + 4], uv[j + 2]];
+    [uv[j + 3], uv[j + 5]] = [uv[j + 5], uv[j + 3]];
+  }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.computeVertexNormals();
-  // Strips run either way along a street; make sure they all face up.
-  const nrm = geo.attributes.normal as THREE.BufferAttribute;
-  if (nrm.count && nrm.getY(0) < 0) {
-    const p = geo.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < p.count; i += 3) {
-      for (const attr of [p]) {
-        const x = attr.getX(i + 1);
-        const yy = attr.getY(i + 1);
-        const z = attr.getZ(i + 1);
-        attr.setXYZ(i + 1, attr.getX(i + 2), attr.getY(i + 2), attr.getZ(i + 2));
-        attr.setXYZ(i + 2, x, yy, z);
-      }
-    }
-    const u = uv;
-    for (let i = 0; i < u.length; i += 6) {
-      [u[i + 2], u[i + 4]] = [u[i + 4], u[i + 2]];
-      [u[i + 3], u[i + 5]] = [u[i + 5], u[i + 3]];
-    }
-    geo.computeVertexNormals();
-  }
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.computeVertexNormals();
   return geo;
 }
 
