@@ -10,7 +10,8 @@ runtime plays it by name; data binds only apply while it runs). The view model
 is `Game`, declared in `data.rml`.
 
 Each part of the HTML UI hides only when the file has the property that marks
-it (in brackets below), so parts can move to Rive one at a time.
+it (in brackets below), so parts can move to Rive one at a time. The file has
+them all now.
 
 ## Screens
 
@@ -22,8 +23,11 @@ it (in brackets below), so parts can move to Rive one at a time.
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `crew` | number | Highlighted card: 0 Dom, 1 Brian. The game sets it from the keyboard; the file may set it on hover |
+| `crew` | number | Highlighted card: 0 Dom, 1 Brian. The game sets it from the keyboard; the file sets it on hover |
 | `confirm` | trigger | The file fires it on a click to start with the highlighted crew |
+
+The game makes the Rive canvas take the mouse only on this screen. The HTML credits and build label
+stay on top of it (they carry the asset licences).
 
 ## Driving HUD [`speed`]
 

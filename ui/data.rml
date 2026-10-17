@@ -28,10 +28,26 @@
         <ViewModelPropertyNumber name="meterValue" id="2:35"/>
         <ViewModelPropertyString name="meterPrompt" id="2:36"/>
         <ViewModelPropertyString name="hint" id="2:37"/>
+        <ViewModelPropertyNumber name="crew" id="2:40"/>
+        <ViewModelPropertyTrigger name="confirm" id="2:41"/>
+        <ViewModelPropertyString name="bannerTitle" id="2:42"/>
+        <ViewModelPropertyString name="bannerSub" id="2:43"/>
+        <ViewModelPropertyBoolean name="bannerOn" id="2:44"/>
+        <ViewModelPropertyTrigger name="banner" id="2:45"/>
+        <ViewModelPropertyString name="radioWho" id="2:46"/>
+        <ViewModelPropertyString name="radioText" id="2:47"/>
+        <ViewModelPropertyBoolean name="radioOn" id="2:48"/>
+        <ViewModelPropertyTrigger name="radio" id="2:49"/>
+        <ViewModelPropertyString name="subtitleWho" id="2:50"/>
+        <ViewModelPropertyString name="subtitleText" id="2:51"/>
+        <ViewModelPropertyString name="titleCard" id="2:52"/>
+        <ViewModelPropertyString name="resultTitle" id="2:53"/>
+        <ViewModelPropertyString name="resultBody" id="2:54"/>
+        <ViewModelPropertyString name="resultPrompt" id="2:55"/>
 
-        <!-- Preview values: what the CLI window shows before any game data. -->
+        <!-- Starting values, and what the CLI preview shows (screen starts off: preview with --data=screen=drive). -->
         <ViewModelInstance exports="true" name="Default" id="2:11">
-            <ViewModelInstanceEnum propertyValue="2:4" viewModelPropertyId="2:20"/>
+            <ViewModelInstanceEnum propertyValue="2:2" viewModelPropertyId="2:20"/>
             <ViewModelInstanceNumber propertyValue="118" viewModelPropertyId="2:21"/>
             <ViewModelInstanceString propertyValue="118" viewModelPropertyId="2:22"/>
             <ViewModelInstanceNumber propertyValue="0.7" viewModelPropertyId="2:23"/>
@@ -49,6 +65,22 @@
             <ViewModelInstanceNumber propertyValue="0.45" viewModelPropertyId="2:35"/>
             <ViewModelInstanceString propertyValue="HOLD W TO PULL" viewModelPropertyId="2:36"/>
             <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:37"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:40"/>
+            <ViewModelInstanceTrigger viewModelPropertyId="2:41"/>
+            <ViewModelInstanceString propertyValue="BANK JOB" viewModelPropertyId="2:42"/>
+            <ViewModelInstanceString propertyValue="+$2,500,000 DAMAGE  +1,000" viewModelPropertyId="2:43"/>
+            <ViewModelInstanceBoolean propertyValue="false" viewModelPropertyId="2:44"/>
+            <ViewModelInstanceTrigger viewModelPropertyId="2:45"/>
+            <ViewModelInstanceString propertyValue="MIA" viewModelPropertyId="2:46"/>
+            <ViewModelInstanceString propertyValue="It’s out! Every cop in Rio is coming. Follow my route, or find your own. I’ll guide you." viewModelPropertyId="2:47"/>
+            <ViewModelInstanceBoolean propertyValue="false" viewModelPropertyId="2:48"/>
+            <ViewModelInstanceTrigger viewModelPropertyId="2:49"/>
+            <ViewModelInstanceString propertyValue="HOBBS" viewModelPropertyId="2:50"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:51"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:52"/>
+            <ViewModelInstanceString propertyValue="THE SWAP" viewModelPropertyId="2:53"/>
+            <ViewModelInstanceString propertyValue="While every cop in Rio chased that vault, Roman and Han swapped it for an empty decoy.&#10;Reyes’s money was already gone.&#10;&#10;Time 3:58.2   Cops wrecked 61   Property damage $2,664,300   Style 6,900" viewModelPropertyId="2:54"/>
+            <ViewModelInstanceString propertyValue="Press Enter to play again" viewModelPropertyId="2:55"/>
         </ViewModelInstance>
     </ViewModel>
 </Rive>

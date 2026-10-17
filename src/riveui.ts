@@ -17,6 +17,21 @@ const SRC = `${import.meta.env.BASE_URL}ui/fast5.riv`;
 /** The main artboard's state machine. It has to be named: binds only apply while a state machine runs. */
 const STATE_MACHINE = 'UI';
 
+/**
+ * The UI is designed for a 720 px tall window; it scales with the window's height
+ * (within limits) so it keeps its proportions on a small window and a big screen.
+ * The HTML minimap follows the same scale (--ui-scale) so it stays in its bezel.
+ */
+function uiScale(): number {
+  return Math.min(1.35, Math.max(0.7, window.innerHeight / 720));
+}
+
+function layout(): Layout {
+  const scale = uiScale();
+  document.documentElement.style.setProperty('--ui-scale', String(scale));
+  return new Layout({ fit: Fit.Layout, alignment: Alignment.Center, layoutScaleFactor: scale });
+}
+
 // Serve the WASM from our own build rather than a CDN.
 RuntimeLoader.setWasmUrl(wasmUrl);
 RuntimeLoader.setWasmFallbackUrl(null);
@@ -35,7 +50,10 @@ export class RiveUi {
   ) {
     this.vmi = vmi;
     for (const p of vmi.properties) this.types.set(p.name, String(p.type));
-    window.addEventListener('resize', () => this.rive.resizeDrawingSurfaceToCanvas());
+    window.addEventListener('resize', () => {
+      this.rive.layout = layout();
+      this.rive.resizeDrawingSurfaceToCanvas();
+    });
   }
 
   /** Load the Rive UI over the game, or null if there isn't one. */
@@ -64,7 +82,7 @@ export class RiveUi {
           autoplay: true,
           autoBind: true,
           // Fill the window and let the file's layouts place everything.
-          layout: new Layout({ fit: Fit.Layout, alignment: Alignment.Center }),
+          layout: layout(),
           onLoad: () => {
             r.resizeDrawingSurfaceToCanvas();
             const vmi = r.viewModelInstance;

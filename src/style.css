@@ -144,6 +144,15 @@ body.rive-ui #hud {
   z-index: 2;
 }
 
+/* The Rive UI scales with the window (riveui.ts sets --ui-scale); the minimap scales with it to stay in its bezel. */
+body.rive-hud #minimap {
+  left: calc(20px * var(--ui-scale, 1));
+  bottom: calc(20px * var(--ui-scale, 1));
+  transform: scale(var(--ui-scale, 1));
+  transform-origin: left bottom;
+  box-shadow: none;
+}
+
 body.rive-hud .hud-top-left,
 body.rive-hud .hud-top-center,
 body.rive-hud .hud-bottom-right,
@@ -153,8 +162,18 @@ body.rive-hint #hint,
 body.rive-radio #radio,
 body.rive-banner #banner,
 body.rive-cutscene #cutscene,
-body.rive-select #select,
 body.rive-result #overlay {
+  display: none !important;
+}
+
+/* Crew select: the Rive version draws everything but the credits and the build label, which stay on top. */
+body.rive-select #select {
+  z-index: 3;
+  background: none;
+  pointer-events: none;
+}
+
+body.rive-select #select > :not(.credits):not(.build) {
   display: none !important;
 }
 

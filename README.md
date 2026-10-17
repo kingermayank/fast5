@@ -34,8 +34,9 @@ need the map tools below to change or rebuild it.
 
 ### The UI
 
-The HUD is drawn by [Rive](https://rive.app), from the scene files in `ui/` (Rive Markup Language,
-plain text). `npm run ui:build` compiles them into `public/ui/fast5.riv` with the
+The HUD and every screen on top of the game (crew select, cutscene letterbox and captions, moment
+banners, radio calls, end screens) are drawn by [Rive](https://rive.app), from the scene files in `ui/`
+(Rive Markup Language, plain text). `npm run ui:build` compiles them into `public/ui/fast5.riv` with the
 [Rive CLI](https://rive.app/docs/cli/overview), which you only need to change the UI: the built file
 is in the repo. `rive ui` opens a live preview that rebuilds as you edit. `ui/CONTRACT.md` lists the
 values the game sends it. Without the file (or with `?htmlhud`) the game falls back to its HTML HUD.
