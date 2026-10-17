@@ -26,13 +26,20 @@ function noise(ctx: CanvasRenderingContext2D, w: number, h: number, count: numbe
 
 export function asphaltTexture(): THREE.CanvasTexture {
   return canvasTexture(512, 512, (ctx) => {
-    ctx.fillStyle = '#34363a';
+    // A shade lighter than real asphalt, so streets don't go black from above.
+    ctx.fillStyle = '#404247';
     ctx.fillRect(0, 0, 512, 512);
     noise(ctx, 512, 512, 30000, 0.08);
-    // Patches, cracks and oil stains.
+    // Patches (soft, so they don't read as a repeating grid of squares from above), cracks and oil stains.
     for (let i = 0; i < 10; i++) {
-      ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '20,20,22' : '70,72,76'},0.25)`;
-      ctx.fillRect(Math.random() * 512, Math.random() * 512, 30 + Math.random() * 90, 20 + Math.random() * 60);
+      const x = Math.random() * 512;
+      const y = Math.random() * 512;
+      const r = 25 + Math.random() * 55;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(${Math.random() < 0.5 ? '20,20,22' : '70,72,76'},0.16)`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      for (const dx of [-512, 0, 512]) for (const dy of [-512, 0, 512]) ctx.fillRect(x - r + dx, y - r + dy, r * 2, r * 2);
     }
     ctx.strokeStyle = 'rgba(15,15,15,0.5)';
     ctx.lineWidth = 1.5;
@@ -240,6 +247,25 @@ export function signTexture(text: string, bg: string, fg: string): THREE.CanvasT
   });
 }
 
+/** A rooftop helipad: dark disc, yellow ring, white H. */
+export function helipadTexture(): THREE.CanvasTexture {
+  return canvasTexture(256, 256, (ctx) => {
+    ctx.fillStyle = '#2b2f36';
+    ctx.fillRect(0, 0, 256, 256);
+    ctx.strokeStyle = '#f2c230';
+    ctx.lineWidth = 14;
+    ctx.beginPath();
+    ctx.arc(128, 128, 104, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#f4f4f0';
+    ctx.font = 'bold 150px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('H', 128, 136);
+    noise(ctx, 256, 256, 3000, 0.08);
+  });
+}
+
 export function waterTexture(): THREE.CanvasTexture {
   return canvasTexture(128, 128, (ctx) => {
     ctx.fillStyle = '#1f5f7a';
@@ -294,6 +320,47 @@ export function grassTexture(): THREE.CanvasTexture {
       ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '30,60,25' : '140,170,90'},0.3)`;
       ctx.fillRect(Math.random() * 256, Math.random() * 256, 1, 3);
     }
+  });
+}
+
+/**
+ * Flat roofs, which the overhead view sees most of: sealed concrete in 2 m
+ * panels with tar seams, patches and rain stains. Near-white, so each
+ * building's tint sets its colour. One repeat covers 8 m.
+ */
+export function roofTexture(): THREE.CanvasTexture {
+  return canvasTexture(256, 256, (ctx) => {
+    ctx.fillStyle = '#ecebe7';
+    ctx.fillRect(0, 0, 256, 256);
+    for (let y = 0; y < 256; y += 64) {
+      for (let x = 0; x < 256; x += 64) {
+        const v = 226 + Math.floor(Math.random() * 24);
+        ctx.fillStyle = `rgb(${v},${v - 1},${v - 5})`;
+        ctx.fillRect(x + 1, y + 1, 62, 62);
+      }
+    }
+    for (let i = 0; i < 16; i++) {
+      const x = Math.random() * 256;
+      const y = Math.random() * 256;
+      const r = 12 + Math.random() * 40;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, Math.random() < 0.7 ? 'rgba(70,66,60,0.22)' : 'rgba(255,255,250,0.3)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      // Wrapped copies, so the stains tile.
+      for (const dx of [-256, 0, 256]) for (const dy of [-256, 0, 256]) ctx.fillRect(x - r + dx, y - r + dy, r * 2, r * 2);
+    }
+    ctx.strokeStyle = 'rgba(40,38,36,0.4)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i <= 256; i += 64) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, 256);
+      ctx.moveTo(0, i);
+      ctx.lineTo(256, i);
+      ctx.stroke();
+    }
+    noise(ctx, 256, 256, 5000, 0.06);
   });
 }
 

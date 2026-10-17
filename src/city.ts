@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { seeThrough } from './cutaway';
 import { RAPIER, syncMesh } from './physics';
 import { BANK, BRIDGE, GOAL, MAP, type MapEdge, PLAN, points, RAW } from './roadmap';
 import { leftOf } from './roads';
 import {
-  asphaltTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, mosaicTexture, sidewalkTexture, signTexture, storefrontTexture, waterNormalTexture,
+  asphaltTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, helipadTexture, mosaicTexture, roofTexture, sidewalkTexture, signTexture,
+  storefrontTexture, waterNormalTexture,
 } from './textures';
 
 /**
@@ -26,6 +28,8 @@ export const VAULT_START = new THREE.Vector3(177, 0, 150);
 export const VAULT_START_HEADING = Math.PI / 2; // door faces +x, toward the street
 /** Where the cars wait, facing down the avenue in front of the station. */
 export const CAR_STARTS = [new THREE.Vector3(196.5, 0, 158), new THREE.Vector3(202.5, 0, 158)];
+/** Where a street lamp's light is, in the lamp's own frame. */
+export const LAMP_HEAD = new THREE.Vector3(0, 3.25, 2.1);
 /** x of the station facade; the vault is "out" once it crosses this. */
 export const STATION_FACADE_X = STATION.x1;
 
@@ -52,6 +56,10 @@ function mulberry32(seed: number) {
 const HOUSE_COLORS = [0xf3e3c3, 0xe8a87c, 0x86c5c0, 0xf5d77a, 0xf4f1ea, 0xe98a7a, 0xb7d3e9, 0xd9c2e8, 0xc8d6a4, 0xf2b8a2];
 const OFFICE_COLORS = [0xf4f1ea, 0xe6e1d6, 0xd8dde3, 0xece4d2, 0xcfd6dc];
 const TOWER_COLORS = [0xa9c4d8, 0x9fb3c4, 0xc8d4dc, 0x8fa9bd, 0xd6dee4];
+/** Roofs, which the overhead view sees most: terracotta and pale concrete on houses, membranes on the big ones. */
+const HOUSE_ROOFS = [0xb8664a, 0xa85a3e, 0xc47a5a, 0xd8d3c8, 0xefece6, 0x9fae98, 0xa3adb6];
+const OFFICE_ROOFS = [0xd2cec6, 0xe8e6e0, 0xbab3a7, 0x8e9196, 0x6f7276];
+const TOWER_ROOFS = [0x5d6066, 0x7d8086, 0x9a9ca0, 0xd0d0cc];
 
 function pointInPoly(x: number, z: number, poly: THREE.Vector3[]): boolean {
   let inside = false;
@@ -199,6 +207,8 @@ export class City {
   private storefrontMat = new THREE.MeshStandardMaterial({ map: storefrontTexture(), roughness: 0.5, metalness: 0.2 });
   private trimMat = new THREE.MeshStandardMaterial({ color: 0xd8d2c6, roughness: 0.8 });
   private roofMat = new THREE.MeshStandardMaterial({ color: 0x8d8f93, roughness: 0.8, metalness: 0.3 });
+  /** The roof surfaces themselves (rooftop plant uses roofMat), tinted per building. */
+  private roofTopMat = new THREE.MeshStandardMaterial({ map: roofTexture(), vertexColors: true, roughness: 0.92 });
   private concreteMat = new THREE.MeshStandardMaterial({ color: 0xbdb5a8, roughness: 0.9 });
   /** Static geometry collected per material and chunk, merged into one mesh each at the end. */
   private batches = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[]; cast: boolean }>();
@@ -209,6 +219,8 @@ export class City {
   private footprints = new Map<string, THREE.Vector3[][]>();
   /** Props that are drawn only near the camera. */
   private scenery: THREE.Object3D[] = [];
+  /** Street lamps (they can be knocked over); the head is at LAMP_HEAD in each one's frame. */
+  readonly lamps: THREE.Object3D[] = [];
 
   constructor(private world: RAPIER.World) {
     this.ground = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
@@ -233,6 +245,8 @@ export class City {
   }
 
   private batch(geo: THREE.BufferGeometry, mat: THREE.Material, cast = true): void {
+    // Whatever stands up off the ground (and so casts a shadow) can hide the car from above.
+    if (cast) seeThrough(mat);
     geo.computeBoundingBox();
     const c = geo.boundingBox!.getCenter(new THREE.Vector3());
     const key = `${mat.uuid}|${cast ? 1 : 0}|${Math.floor(c.x / CHUNK)},${Math.floor(c.z / CHUNK)}`;
@@ -517,7 +531,8 @@ export class City {
       const palette = tower ? TOWER_COLORS : h >= 12 ? OFFICE_COLORS : HOUSE_COLORS;
       color.setHex(palette[Math.floor(this.rand() * palette.length)]);
       this.batch(tint(this.walls(poly, 0, h, 24, 16), color), mat);
-      this.batch(this.roof(poly, h), this.roofMat);
+      const roofs = tower ? TOWER_ROOFS : h >= 12 ? OFFICE_ROOFS : HOUSE_ROOFS;
+      this.batch(tint(this.roof(poly, h), color.setHex(roofs[Math.floor(this.rand() * roofs.length)])), this.roofTopMat);
       if (h >= 8) this.batch(this.walls(poly, h - 0.4, h + 0.5, 0, 0, 0.3), this.trimMat);
 
       const c = poly.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(poly.length);
@@ -587,7 +602,7 @@ export class City {
   }
 
   private roof(poly: THREE.Vector3[], h: number): THREE.BufferGeometry {
-    return flatPolygon(poly, [], h, 4);
+    return flatPolygon(poly, [], h, 8);
   }
 
   /** Solid footprint: a convex hull when the building is nearly convex, else its walls as a mesh. */
@@ -728,13 +743,14 @@ export class City {
   private addLightPost(pos: THREE.Vector3, side: { out: THREE.Vector3 }): void {
     if (!City.postGeo) {
       const pole = mergeGeometries([new THREE.BoxGeometry(0.22, 7, 0.22), new THREE.BoxGeometry(0.15, 0.15, 2.4).translate(0, 3.4, 1.1)]);
-      const lamp = new THREE.BoxGeometry(0.4, 0.2, 0.7).translate(0, 3.25, 2.1);
+      const lamp = new THREE.BoxGeometry(0.4, 0.2, 0.7).translate(LAMP_HEAD.x, LAMP_HEAD.y, LAMP_HEAD.z);
       City.postGeo = mergeGeometries([pole, lamp], true)!;
     }
     const heading = Math.atan2(-side.out.x, -side.out.z);
     const mesh = new THREE.Mesh(City.postGeo, City.postMats);
     this.addProp(mesh, pos.clone().setY(3.7), RAPIER.ColliderDesc.cuboid(0.15, 3.5, 0.15).setMass(150), 1800, heading);
     this.scenery.push(mesh);
+    this.lamps.push(mesh);
   }
 
   private addKiosk(pos: THREE.Vector3, side: { out: THREE.Vector3 }): void {
@@ -850,6 +866,15 @@ export class City {
     box(S.roomX0, S.x1, 0, S.h, S.z0, S.roomZ0); // south wing
     box(S.roomX0, S.x1, 0, S.h, S.roomZ1, S.z1); // north wing
     box(S.roomX0, S.x1, S.roomH, S.h, S.roomZ0, S.roomZ1); // above the vault room
+    // A proper roof (it fills the screen from above while you pull the vault out), with a helipad.
+    const roofPoly = [new THREE.Vector3(S.x0, 0, S.z0), new THREE.Vector3(S.x1, 0, S.z0), new THREE.Vector3(S.x1, 0, S.z1), new THREE.Vector3(S.x0, 0, S.z1)];
+    this.batch(tint(flatPolygon(roofPoly, [], S.h + 0.03, 8), new THREE.Color(0x9a9da2)), this.roofTopMat);
+    this.batch(this.walls(roofPoly, S.h - 0.4, S.h + 0.6, 0, 0, 0.3), this.trimMat);
+    const pad = new THREE.Mesh(new THREE.CircleGeometry(7, 40).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: helipadTexture(), roughness: 0.8 }));
+    pad.position.set((S.x0 + S.roomX0) / 2, S.h + 0.06, (S.z0 + S.z1) / 2);
+    pad.rotation.y = -Math.PI / 2;
+    seeThrough(pad.material);
+    this.group.add(pad);
 
     // Forecourt in Rio mosaic between the station and the avenue.
     this.batch(flatPolygon([new THREE.Vector3(S.x0 - 4, 0, S.z0 - 4), new THREE.Vector3(S.x1 + 6, 0, S.z0 - 4), new THREE.Vector3(S.x1 + 6, 0, S.z1 + 4), new THREE.Vector3(S.x0 - 4, 0, S.z1 + 4)], [], 0.1, 4), new THREE.MeshStandardMaterial({ map: mosaicTexture(), roughness: 0.85 }), false);

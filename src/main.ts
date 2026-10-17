@@ -3,15 +3,18 @@ import { angleTo, seek } from './ai';
 import { loadModels, model } from './assets';
 import { Sound } from './audio';
 import { BreachScene } from './breach';
-import { CAR_STARTS, City, STATION_FACADE_X, VAULT_START, VAULT_START_HEADING } from './city';
+import { CAR_STARTS, City, LAMP_HEAD, STATION_FACADE_X, VAULT_START, VAULT_START_HEADING } from './city';
 import { Cutscene } from './cutscene';
+import { CUTAWAY } from './cutaway';
 import { Director } from './director';
 import { Effects } from './fx';
 import { BRIDGE_FOOT_POS, Gps, type Turn } from './gps';
 import { createGraphics } from './graphics';
+import { BEACONS, GroundFx } from './groundfx';
 import { Hud } from './hud';
 import { Input, type ControlState } from './input';
 import { BankJob, type MomentContext, SpikeStrip, ThePull } from './moments';
+import { OverheadCamera, OVERHEAD_YAW } from './overhead';
 import { type Obstacle, PartnerDriver } from './partner';
 import { curveSpeed, exits, lanePath, leftOf, nextIntersection, Path, roadDir, roadHalfWidth, routeExit, streetCenter } from './roads';
 import { BANK, BRIDGE, MAP, onBridge, SPIKES } from './roadmap';
@@ -78,6 +81,8 @@ async function start(): Promise<void> {
   scene.add(city.group);
   const fx = new Effects();
   scene.add(fx.group);
+  const groundFx = new GroundFx();
+  scene.add(groundFx.group);
   const sound = new Sound();
   const voice = new Voice();
 
@@ -418,6 +423,7 @@ async function start(): Promise<void> {
 
   function startGameplay(): void {
     cutscene = null;
+    overhead.reset();
     enter('breach');
     breach.shooting = true;
     hud.showHud(true);
@@ -454,7 +460,7 @@ async function start(): Promise<void> {
       );
     }
 
-    if (input.wasPressed('KeyC')) camFar = !camFar;
+    if (input.wasPressed('KeyC')) view = VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length];
     if (state === 'chase') {
       chaseTime += dt;
       if (input.wasPressed('KeyR')) resetConvoy();
@@ -604,6 +610,49 @@ async function start(): Promise<void> {
     return drag;
   }
 
+  /**
+   * Light and shade on the road (groundfx.ts): lamp pools, headlights, brake
+   * lights, police strobes, nitrous and vault sparks, and contact shadows.
+   */
+  function paintGround(drag: number): void {
+    groundFx.begin();
+    if (player && state !== 'select') {
+      for (const lamp of city.lamps) {
+        if (Math.abs(lamp.position.x - camLook.x) > 140 || Math.abs(lamp.position.z - camLook.z) > 140) continue;
+        const head = lamp.localToWorld(LAMP_HEAD.clone());
+        // Knocked over, it's out.
+        if (head.y > 5) groundFx.pool(head, 6, 0xffc27a, 0.38);
+      }
+      for (const c of police.cops) {
+        const p = c.v.position;
+        const f = c.v.forward;
+        groundFx.shadow(p, c.v.heading, 5.6, 2.9);
+        if (c.wrecked) continue;
+        groundFx.beam(p.clone().addScaledVector(f, 2.3), c.v.heading, 15, 7, 0xfff0d0, 0.3);
+        // The bar's red half is on the car's left (+x when it faces +z).
+        if (c.v.model.lightBar) groundFx.strobes(p, new THREE.Vector3(f.z, 0, -f.x), c.v.model.lightBar);
+      }
+      for (const b of BEACONS) {
+        const p = b.at.getWorldPosition(new THREE.Vector3());
+        if (Math.abs(p.x - camLook.x) > 140 || Math.abs(p.z - camLook.z) > 140) continue;
+        const left = new THREE.Vector3(1, 0, 0).applyQuaternion(b.at.getWorldQuaternion(new THREE.Quaternion())).setY(0).normalize();
+        groundFx.strobes(p, left, b.bar);
+      }
+      for (const car of [player, partner]) {
+        const p = car.position;
+        const f = car.forward;
+        groundFx.shadow(p, car.heading, 5.6, 2.9);
+        groundFx.beam(p.clone().addScaledVector(f, 2.3), car.heading, 17, 7.5, 0xfff0d0, 0.35);
+        if (car.controls.brake > 0) groundFx.pool(p.clone().addScaledVector(f, -2.7), 2.4, 0xff2a1a, 0.75);
+      }
+      if (player.nosActive) groundFx.pool(player.position.addScaledVector(player.forward, -3.2), 3.6, 0x3d6bff, 1.2 + Math.random() * 0.5);
+      const v = vault.position;
+      groundFx.shadow(v, 0, 4.6, 4.6);
+      if (drag > 4) groundFx.pool(v, 3.8, 0xff8a2a, Math.min(1.4, drag / 12) * (0.6 + Math.random() * 0.4));
+    }
+    groundFx.end();
+  }
+
   function nearestCopDistance(): number {
     if (!player) return Infinity;
     let best = Infinity;
@@ -615,10 +664,16 @@ async function start(): Promise<void> {
 
   const camPos = new THREE.Vector3(260, 120, 40);
   const camLook = new THREE.Vector3(180, 0, 150);
-  /** Chase camera state: smoothed yaw, how far out it may sit (walls pull it in), and far/near framing (C). */
+  /**
+   * Gameplay views, cycled with C: the bird's-eye view, then the chase camera behind the
+   * vault (far) or tight on the car (near). ?view=chase starts behind the car.
+   */
+  const VIEWS = ['overhead', 'far', 'near'] as const;
+  let view: (typeof VIEWS)[number] = new URL(location.href).searchParams.get('view') === 'chase' ? 'far' : 'overhead';
+  const overhead = new OverheadCamera();
+  /** Chase camera state: smoothed yaw and how far out it may sit (walls pull it in). */
   let camYaw = 0;
   let camPull = 1;
-  let camFar = true;
   const camRay = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
   const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 
@@ -649,16 +704,27 @@ async function start(): Promise<void> {
       look = new THREE.Vector3(debugCam[3], debugCam[4], debugCam[5]);
       k = 1;
     } else if (state === 'select') {
+      // A slow orbit high over the station: the city as you'll play it, from above.
       const t = performance.now() / 1000;
-      pos = new THREE.Vector3(186 + Math.cos(t * 0.12) * 60, 26, 150 + Math.sin(t * 0.12) * 60);
-      look = new THREE.Vector3(190, 4, 150);
+      pos = new THREE.Vector3(186 + Math.cos(t * 0.06) * 75, 78, 150 + Math.sin(t * 0.06) * 75);
+      look = new THREE.Vector3(195, 0, 158);
+      fov = 40;
       k = 1;
     } else if (state === 'outro') {
       const t = stateTime * 0.25;
       const c = player.position;
       pos = new THREE.Vector3(c.x + Math.cos(t) * 26, 10, c.z + Math.sin(t) * 26);
       look = c.clone().setY(1.5);
+    } else if (player && view === 'overhead') {
+      const v = player.body.linvel();
+      const f = overhead.update(dt, player.position, new THREE.Vector3(v.x, 0, v.z), player.nosActive);
+      // Shake has to be bigger from up here to read.
+      pos = f.pos.add(director.shakeOffset().multiplyScalar(4));
+      look = f.look;
+      fov = f.fov;
+      k = 1 - Math.exp(-10 * dt);
     } else if (player) {
+      const camFar = view === 'far';
       // Swing round toward where the car is going (its velocity) as much as where it points,
       // smoothed, so slides and vault yanks don't whip the view around.
       const v = player.body.linvel();
@@ -698,7 +764,25 @@ async function start(): Promise<void> {
     }
     camera.updateMatrixWorld();
     frustum.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
-    gfx.follow(state === 'cutscene' || !player ? camLook.clone().setY(0) : player.position);
+    // Shadows around what's on screen: the overhead view looks well ahead of the car.
+    gfx.follow(state === 'cutscene' || !player || view === 'overhead' ? camLook.clone().setY(0) : player.position);
+
+    // From overhead: see through buildings around the player, and keep the tilt-shift band on them.
+    const above = view === 'overhead' && !!player && !shot && state !== 'select' && state !== 'cutscene' && state !== 'outro';
+    CUTAWAY.radius.value = 0;
+    if (above) {
+      const at = player.position.setY(1);
+      const eye = at.clone().applyMatrix4(camera.matrixWorldInverse);
+      const ndc = at.clone().project(camera);
+      const buf = gfx.renderer.getDrawingBufferSize(new THREE.Vector2());
+      CUTAWAY.screen.value.set((ndc.x * 0.5 + 0.5) * buf.x, (ndc.y * 0.5 + 0.5) * buf.y);
+      CUTAWAY.radius.value = buf.y * 0.2;
+      CUTAWAY.depth.value = -eye.z;
+      gfx.overhead(true, ndc.y * 0.5 + 0.5);
+    } else {
+      // The title screen's orbit gets the same look.
+      gfx.overhead(state === 'select' && !debugCam);
+    }
   }
 
   window.addEventListener('resize', gfx.resize);
@@ -807,8 +891,10 @@ async function start(): Promise<void> {
     const p = player.position;
     const path = gps.path(p);
     const turn = gps.nextTurn(p, travelDir());
+    const ahead = path.at(Math.min(path.length, 40));
     return {
-      arrow: angleTo(player, path.at(Math.min(path.length, 40))),
+      // Relative to the screen from above; relative to the car's nose behind it.
+      arrow: view === 'overhead' ? overhead.screenAngle(p, ahead) : angleTo(player, ahead),
       distance: turn ? `${turn.side === 'left' ? 'LEFT' : 'RIGHT'} IN ${Math.round(turn.distance)} m` : `${Math.round(path.length)} m TO GO`,
     };
   }
@@ -854,6 +940,7 @@ async function start(): Promise<void> {
     city.render(camera);
     city.update(dt);
     updateCamera(dt);
+    paintGround(drag);
 
     if (state === 'breach' || state === 'chase') {
       sound.update(player.forwardSpeed, player.controls.throttle, nearestCopDistance(), drag);
@@ -876,6 +963,7 @@ async function start(): Promise<void> {
         ...navigation(),
         player: player.position,
         heading: player.heading,
+        up: view === 'overhead' ? OVERHEAD_YAW : player.heading,
         vault: vault.position,
         partner: partner.position,
         cops: police.cops.filter((c) => !c.wrecked).map((c) => c.v.position),

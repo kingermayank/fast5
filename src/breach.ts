@@ -4,6 +4,7 @@ import { buildArmoredTruck, buildCarModel } from './carModel';
 import { CAR_STARTS, type City, VAULT_START } from './city';
 import { type CameraFrame, ease, lerpFrame, type Shot } from './cutscene';
 import type { Effects } from './fx';
+import { BEACONS } from './groundfx';
 import { RAPIER, yawQuat } from './physics';
 import type { Vehicle } from './vehicle';
 
@@ -61,8 +62,11 @@ export class BreachScene {
     // Two cruisers parked out front, lights going. They're props: the vault can wreck them.
     for (const [x, z, h] of [[214, 176, -0.5], [191, 198, 0.35]] as const) {
       const m = buildCarModel({ body: 0xf4f4f4, trim: 0x15181d, rim: 0x9aa0a6, police: true });
-      if (m.lightBar) this.copBars.push(m.lightBar);
       const holder = new THREE.Group();
+      if (m.lightBar) {
+        this.copBars.push(m.lightBar);
+        BEACONS.push({ at: holder, bar: m.lightBar });
+      }
       m.group.position.y = -0.7;
       holder.add(m.group);
       city.addProp(holder, v3(x, 0.7, z), RAPIER.ColliderDesc.cuboid(1.0, 0.55, 2.5).setMass(1700).setFriction(0.8), 25000, h);

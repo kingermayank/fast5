@@ -6,27 +6,70 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
-/** Golden hour: a low sun (about 11 degrees up) from the west-southwest. */
-export const SUN_DIR = new THREE.Vector3(-0.62, 0.19, -0.72).normalize();
+/**
+ * Golden hour: a low sun from the west-southwest, about 24 degrees up. Any
+ * lower and, seen from above, nearly every street sits in shadow.
+ */
+export const SUN_DIR = new THREE.Vector3(-0.596, 0.407, -0.692).normalize();
 const HAZE = 0xd9a47c;
+/** Haze for the chase camera, and thicker for the overhead view, whose distances are short. */
+const FOG_CHASE = 0.0003;
+const FOG_OVERHEAD = 0.0018;
+
+/**
+ * Tilt-shift: a blur that grows toward the top and bottom of the screen around
+ * a sharp band, so the city reads as a miniature (as in the overhead reference).
+ * Run twice, across then down; `amount` is the widest blur radius in pixels.
+ */
+const TiltShiftShader = {
+  uniforms: { tDiffuse: { value: null }, delta: { value: new THREE.Vector2() }, focus: { value: 0.5 }, amount: { value: 0 } },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform vec2 delta;
+    uniform float focus;
+    uniform float amount;
+    varying vec2 vUv;
+    void main() {
+      // Sharp within 0.12 of the focus line, blurred all the way 0.5 from it.
+      float r = amount * smoothstep(0.12, 0.5, abs(vUv.y - focus));
+      if (r < 0.1) {
+        gl_FragColor = texture2D(tDiffuse, vUv);
+        return;
+      }
+      vec4 sum = vec4(0.0);
+      float total = 0.0;
+      for (int i = -6; i <= 6; i++) {
+        float t = float(i) / 6.0;
+        float w = exp(-3.0 * t * t);
+        sum += texture2D(tDiffuse, vUv + delta * (t * r)) * w;
+        total += w;
+      }
+      gl_FragColor = sum / total;
+    }`,
+};
 
 /** Warm grade + vignette, applied after tone mapping. */
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null }, vignette: { value: 0.35 } },
+  uniforms: { tDiffuse: { value: null }, vignette: { value: 0.35 }, saturation: { value: 1.12 }, contrast: { value: 1.06 } },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
     uniform float vignette;
+    uniform float saturation;
+    uniform float contrast;
     varying vec2 vUv;
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
       // Golden-hour grade: shadows toward teal, highlights toward amber, a touch more contrast.
       float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
       c.rgb += mix(vec3(-0.015, 0.012, 0.035), vec3(0.045, 0.015, -0.03), smoothstep(0.15, 0.85, l));
-      c.rgb = mix(vec3(l), c.rgb, 1.12);
-      c.rgb = (c.rgb - 0.5) * 1.06 + 0.5;
+      c.rgb = mix(vec3(l), c.rgb, saturation);
+      c.rgb = (c.rgb - 0.5) * contrast + 0.5;
       float d = distance(vUv, vec2(0.5));
       c.rgb *= 1.0 - vignette * smoothstep(0.35, 0.85, d);
       gl_FragColor = c;
@@ -44,6 +87,11 @@ export interface Graphics {
   resize(): void;
   /** Keep the shadow frustum centered on what the camera is looking at. */
   follow(focus: THREE.Vector3): void;
+  /**
+   * The overhead presentation: tilt-shift sharp around screen height `focus`
+   * (0 bottom, 1 top), thicker haze, deeper vignette. Off for the chase camera and cutscenes.
+   */
+  overhead(on: boolean, focus?: number): void;
 }
 
 export function createGraphics(canvas: HTMLCanvasElement): Graphics {
@@ -57,7 +105,8 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   renderer.info.autoReset = false;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(HAZE, 0.0003);
+  const fog = new THREE.FogExp2(HAZE, FOG_CHASE);
+  scene.fog = fog;
   const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 9000);
 
   // Physical sky, also baked into an environment map for reflections.
@@ -103,8 +152,14 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.5, 2.2);
   composer.addPass(bloom);
+  const tiltX = new ShaderPass(TiltShiftShader);
+  const tiltY = new ShaderPass(TiltShiftShader);
+  tiltX.enabled = tiltY.enabled = false;
+  composer.addPass(tiltX);
+  composer.addPass(tiltY);
   composer.addPass(new OutputPass());
-  composer.addPass(new ShaderPass(GradeShader));
+  const grade = new ShaderPass(GradeShader);
+  composer.addPass(grade);
 
   function resize(): void {
     const w = window.innerWidth;
@@ -113,6 +168,8 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
     composer.setSize(w, h);
     renderer.getDrawingBufferSize(size);
     bloom.resolution.set(size.x / 2, size.y / 2);
+    tiltX.uniforms.delta.value.set(1 / size.x, 0);
+    tiltY.uniforms.delta.value.set(0, 1 / size.y);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   }
@@ -131,6 +188,20 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
     follow(focus) {
       sun.position.copy(focus).addScaledVector(SUN_DIR, 250);
       sun.target.position.copy(focus);
+    },
+    overhead(on, focus = 0.5) {
+      for (const pass of [tiltX, tiltY]) {
+        pass.enabled = on;
+        pass.uniforms.focus.value = focus;
+        // About 9 px at 1080p, scaled with the drawing buffer.
+        pass.uniforms.amount.value = (9 * size.y) / 1080;
+      }
+      fog.density = on ? FOG_OVERHEAD : FOG_CHASE;
+      // From above there's no bright sky in shot, so open the exposure up and push the colour.
+      renderer.toneMappingExposure = on ? 0.98 : 0.8;
+      grade.uniforms.vignette.value = on ? 0.45 : 0.35;
+      grade.uniforms.saturation.value = on ? 1.28 : 1.12;
+      grade.uniforms.contrast.value = on ? 1.1 : 1.06;
     },
   };
 }

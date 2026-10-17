@@ -9,6 +9,11 @@ de León through Hato Rey's Golden Mile, and ended it on the Teodoro Moscoso Bri
 streets and buildings (with their real heights) from OpenStreetMap, dressed as Rio, with Christ the
 Redeemer on Corcovado at the end of the avenue and Sugarloaf out in the bay.
 
+You play it from above: a bird's-eye camera at a slant follows the convoy, looking ahead as you
+speed up, with tilt-shift blur and the street lamps, headlights and police strobes lighting the
+road. Buildings between the camera and your car dissolve so you never lose it. C switches to the
+chase camera behind the car.
+
 Built with [Three.js](https://threejs.org/), [Rapier](https://rapier.rs/) physics, TypeScript and Vite.
 Uses the film's character names; all models, dialogue, sound and cutscenes are made for this
 project (no footage, music, logos or likenesses from the film). See [`docs/DESIGN.md`](docs/DESIGN.md)
@@ -80,11 +85,11 @@ the other car, chained to the same vault.
 | Space | Handbrake (and swings the vault wide) |
 | Shift / N | Nitrous: refills from wrecks, dodges and big moments |
 | R | Reset the convoy to the middle of the street (if stuck) |
-| C | Camera: far (see the vault swing) or close |
+| C | Camera: overhead (the default), behind the vault, or close behind the car |
 | Enter | Start / skip cutscene / retry |
 
 **Gamepad** (standard mapping): left stick steers, right trigger accelerates, left trigger brakes
-and reverses, A or RB is the handbrake, B, X or LB fire nitrous, Y switches the camera, View/Back
+and reverses, A or RB is the handbrake, B, X or LB fire nitrous, Y cycles the camera, View/Back
 resets the convoy, Start skips and retries. It rumbles on hits.
 
 Sound and voiceover start after your first key press (browser rule). Voices use your
@@ -96,6 +101,7 @@ contributors, available under the [Open Database License](https://www.openstreet
 uses the Barlow Condensed and Inter typefaces (SIL Open Font License, in `ui/fonts/`).
 
 Debug URL flags: `?crew=dom|brian` skips the menu and cutscene (add `&intro` to watch it),
+`?view=chase` starts behind the car instead of overhead,
 `?autopilot` follows the GPS (`?autopilot=detour` disobeys it at random intersections to test
 rerouting, `?autopilot=wander` turns at random), `?nocops` disables police,
 `?timescale=4&renderEvery=8` runs the simulation faster for automated tests, `?cam=x,y,z,lookX,lookY,lookZ`
@@ -109,7 +115,10 @@ the GPS reroute log (`rerouteLog`).
 ## Code layout
 
 - `src/main.ts`: game setup, mission state machine, camera, effects and sound hookup
-- `src/graphics.ts`: renderer, sky, environment lighting, bloom and color grade, Rio's mountains
+- `src/overhead.ts`: the bird's-eye camera (fixed along the street grid, look-ahead, speed zoom)
+- `src/graphics.ts`: renderer, sky, environment lighting, bloom, tilt-shift and color grade, Rio's mountains
+- `src/cutaway.ts`: dissolves buildings that would hide the player from the overhead camera
+- `src/groundfx.ts`: light and shade painted on the road (lamp pools, headlights, strobes, contact shadows)
 - `src/breach.ts`: the opening set piece (armored truck, station cops, cutscene shots)
 - `src/cutscene.ts`, `src/voice.ts`, `src/videos.ts`: cutscene player, voiceover, optional video cutscenes
 - `src/partner.ts`: the AI partner: reads the streets and the live GPS route, predicts your turns, plans its own lane, slows for bends, steers around cops/props/the vault, steadies the vault's swing
@@ -127,7 +136,7 @@ the GPS reroute log (`rerouteLog`).
   `public/models/` from the downloads listed in [`assets-src/README.md`](assets-src/README.md)
 - `src/vault.ts`: the vault and the winch cables (damped springs with a slip clutch and a rope-joint hard stop)
 - `src/city.ts`: the city from the map: streets with Rio wave-mosaic sidewalks, real buildings with
-  rooftop water tanks, parks and trees, police HQ with breakable wall, the bank, props, the bridge and
+  rooftop water tanks and textured roofs, parks and trees, police HQ with breakable wall, the bank, props, the bridge and
   toll plaza, seawalls, the distant city
 - `tools/map/`: fetches OpenStreetMap data and builds the map (see "The map" above)
 - `ui/`: the Rive UI scenes (RML) and fonts; `src/riveui.ts` loads the built file over the game and `src/hud.ts` feeds it

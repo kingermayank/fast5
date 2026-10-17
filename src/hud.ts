@@ -19,6 +19,8 @@ export interface HudState {
   arrow: number | null;
   player: THREE.Vector3;
   heading: number;
+  /** The bearing drawn as up on the minimap: the car's heading, or the camera's from overhead. */
+  up: number;
   vault: THREE.Vector3;
   partner: THREE.Vector3;
   cops: THREE.Vector3[];
@@ -311,14 +313,15 @@ export class Hud {
   }
 
   /**
-   * Heading-up map centered on the player (like GTA's radar): the way you're
-   * facing is always up, so a turn on the map is the same turn on the road.
+   * Map centered on the player (like GTA's radar), turned so `up` is up: behind
+   * the car that's the way you're facing, so a turn on the map is the same turn
+   * on the road; from overhead it's the camera's up, so the map matches the screen.
    */
   private drawMap(s: HudState): void {
     const ctx = this.ctx;
     const c = MAP_SIZE / 2;
-    const sin = Math.sin(s.heading);
-    const cos = Math.cos(s.heading);
+    const sin = Math.sin(s.up);
+    const cos = Math.cos(s.up);
     const toMap = (p: THREE.Vector3): [number, number] => {
       const dx = p.x - s.player.x;
       const dz = p.z - s.player.z;
@@ -333,11 +336,11 @@ export class Hud {
     ctx.arc(c, c, c, 0, Math.PI * 2);
     ctx.clip();
 
-    // The map, turned so the way you're facing is up.
+    // The map, turned so `up` is up.
     const px = (s.player.x - BASE.origin.x) * MAP_SCALE;
     const pz = (s.player.z - BASE.origin.z) * MAP_SCALE;
     ctx.save();
-    // Screen = center + R * (map - player), with R taking +heading to up and left of the car to the left.
+    // Screen = center + R * (map - player), with R taking +up to up and its left to the left.
     const a = -cos;
     const b = -sin;
     const cc = sin;
@@ -386,6 +389,8 @@ export class Hud {
     dot(s.partner, '#7fd1ff', 3.5);
 
     ctx.translate(c, c);
+    // The player's arrow points the way the car faces.
+    ctx.rotate(s.up - s.heading);
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.moveTo(0, -7);

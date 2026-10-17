@@ -4,6 +4,7 @@ import { buildCarModel } from './carModel';
 import { type City, VAULT_START } from './city';
 import type { Director } from './director';
 import type { Effects } from './fx';
+import { BEACONS } from './groundfx';
 import type { Hud } from './hud';
 import type { Obstacle } from './partner';
 import { RAPIER } from './physics';
@@ -234,8 +235,11 @@ export class SpikeStrip {
     const blockedX = this.gapSide > 0 ? -half + 3 : half - 3;
     for (const [dz, h] of [[7, 0.5], [16, -0.4]]) {
       const model = buildCarModel({ body: 0xf4f4f4, trim: 0x15181d, rim: 0x9aa0a6, police: true });
-      if (model.lightBar) this.bars.push(model.lightBar);
       const holder = new THREE.Group();
+      if (model.lightBar) {
+        this.bars.push(model.lightBar);
+        BEACONS.push({ at: holder, bar: model.lightBar });
+      }
       model.group.position.y = -0.7;
       holder.add(model.group);
       city.addProp(holder, SPIKES.toWorld(blockedX, dz, 0.7), RAPIER.ColliderDesc.cuboid(1.0, 0.55, 2.5).setMass(1700).setFriction(0.8), 25000, SPIKES.heading + h);
