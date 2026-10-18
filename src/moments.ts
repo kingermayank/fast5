@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Sound } from './audio';
 import { buildCarModel } from './carModel';
-import { type City, VAULT_START } from './city';
+import { type City, type Prop, VAULT_START } from './city';
 import type { Director } from './director';
 import type { Effects } from './fx';
 import { NEWS } from './broadcast';
@@ -9,8 +9,8 @@ import { BEACONS } from './groundfx';
 import type { Hud } from './hud';
 import type { Obstacle } from './partner';
 import { RAPIER } from './physics';
-import { roadHalfWidth } from './roads';
-import { BANK, SPIKES } from './roadmap';
+import { leftOf, Path, roadHalfWidth } from './roads';
+import { BANK, BRIDGE, onBridge, SPIKES } from './roadmap';
 import type { Cable, Vault } from './vault';
 import type { Vehicle } from './vehicle';
 import type { Voice } from './voice';
@@ -328,6 +328,11 @@ export class BankJob {
     vault.body.setAngvel({ x: w.x, y: w.y * (1 - k), z: w.z }, true);
   }
 
+  /** The vault is in flight toward the lobby (leave it be). */
+  get flinging(): boolean {
+    return this.state === 'hinted' && this.time - this.swungAt < 1.6;
+  }
+
   /** Not pulled off yet (the bank shows on the minimap until then). */
   get pending(): boolean {
     return this.state !== 'done';
@@ -443,6 +448,159 @@ export class BankJob {
     hud.banner('BANK JOB', '+$2,500,000 DAMAGE  +1,000');
     setTimeout(() => say(this.ctx, 'BRIAN', 'Did we just drive a vault through a bank?'), 1600);
     setTimeout(() => hud.news(NEWS.bank), 2600);
+  }
+}
+
+// ---------------------------------------------------------------- Roadblocks
+
+/**
+ * A police roadblock: cruisers parked across the road, nose to tail and lights
+ * going. Ram it or swing the vault into it; when the line breaks, `onBust` gets
+ * the point of impact (the game makes the slow-motion moment of it).
+ */
+export class Roadblock {
+  state: 'idle' | 'set' | 'busted' = 'idle';
+  /** Its middle, and the way the convoy meets it. */
+  readonly at = new THREE.Vector3();
+  readonly dir = new THREE.Vector3();
+  private cars: Prop[] = [];
+  private bars: { red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
+  private time = 0;
+
+  constructor(
+    private ctx: MomentContext,
+    private onBust: (at: THREE.Vector3, cars: Prop[]) => void,
+  ) {}
+
+  /** Park `count` cruisers across a road `width` m wide at `at`, facing the convoy coming along `dir`. */
+  set(at: THREE.Vector3, dir: THREE.Vector3, width: number, count: number): void {
+    const { city } = this.ctx;
+    this.state = 'set';
+    this.at.copy(at).setY(0);
+    this.dir.copy(dir).setY(0).normalize();
+    const across = leftOf(this.dir);
+    const broadside = Math.atan2(this.dir.x, this.dir.z) + Math.PI / 2;
+    for (let i = 0; i < count; i++) {
+      const x = ((i + 0.5) / count - 0.5) * width;
+      // A shallow V, the middle furthest back, so it reads as a barricade from behind the convoy.
+      const pos = this.at.clone().addScaledVector(across, x).addScaledVector(this.dir, -Math.abs(x) * 0.18).setY(0.7);
+      const model = buildCarModel({ body: 0xf4f4f4, trim: 0x15181d, rim: 0x9aa0a6, police: true, asset: 'police' });
+      const holder = new THREE.Group();
+      model.group.position.y = -0.7;
+      holder.add(model.group);
+      if (model.lightBar) {
+        this.bars.push(model.lightBar);
+        BEACONS.push({ at: holder, bar: model.lightBar });
+      }
+      const heading = broadside + (i % 2 ? 0.25 : -0.2);
+      this.cars.push(city.addProp(holder, pos, RAPIER.ColliderDesc.cuboid(1.0, 0.55, 2.5).setMass(1500).setFriction(0.7), 25000, heading));
+    }
+  }
+
+  update(dt: number): void {
+    if (this.state !== 'set') return;
+    this.time += dt;
+    const flash = Math.floor(this.time * 6) % 2 === 0;
+    for (const b of this.bars) {
+      b.red.emissiveIntensity = flash ? 4 : 0.2;
+      b.blue.emissiveIntensity = flash ? 0.2 : 4;
+    }
+    // Broken: a cruiser in the line knocked loose.
+    for (const c of this.cars) {
+      if (c.body.isSleeping()) continue;
+      const v = c.body.linvel();
+      if (v.x * v.x + v.y * v.y + v.z * v.z < 25) continue;
+      this.state = 'busted';
+      for (const b of this.bars) b.red.emissiveIntensity = b.blue.emissiveIntensity = 0.2;
+      const t = c.body.translation();
+      this.onBust(new THREE.Vector3(t.x, 0, t.z), this.cars);
+      return;
+    }
+  }
+
+  /** How far the player is short of it along the convoy's way (negative once past). */
+  ahead(p: THREE.Vector3): number {
+    return this.at.clone().sub(p).dot(this.dir);
+  }
+}
+
+// ---------------------------------------------------------------- The bridge
+
+/**
+ * The finale. The police have walled off the far end of the bridge with
+ * cruisers. Partway across, the player tells their partner to unhook and takes
+ * the vault the rest of the way alone, on one cable, where it swings like a
+ * wrecking ball, and has to break the wall to reach the swap point.
+ */
+export class BridgeFinale {
+  state: 'idle' | 'set' | 'alone' | 'done' = 'idle';
+  readonly block: Roadblock;
+  private path = new Path(BRIDGE.pts);
+
+  constructor(
+    private ctx: MomentContext,
+    /** Who's driving: they do the talking. */
+    private playerName: 'DOM' | 'BRIAN',
+    /** Unhook the partner's cable and send them off. */
+    private cutLoose: () => void,
+    onBust: (at: THREE.Vector3, cars: Prop[]) => void,
+  ) {
+    this.block = new Roadblock(ctx, (at, cars) => {
+      this.state = 'done';
+      ctx.hud.hint('');
+      onBust(at, cars);
+    });
+  }
+
+  update(dt: number): void {
+    const { player, hud } = this.ctx;
+    const p = player.position;
+    if (this.state === 'done') return;
+    if (this.state === 'idle') {
+      // Out of sight at the far end, as soon as the convoy is on the bridge.
+      if (!onBridge(p)) return;
+      const s = BRIDGE.goalAlong - 75;
+      const width = (BRIDGE.hw - 1.2) * 2;
+      this.block.set(this.path.at(s), this.path.tangent(s), width, Math.max(5, Math.round(width / 3.6)));
+      this.state = 'set';
+      return;
+    }
+    this.block.update(dt);
+    if (this.state === 'set') {
+      const along = this.path.project(p);
+      if (onBridge(p) && along > Math.max(60, BRIDGE.goalAlong - 420)) this.unhook();
+      return;
+    }
+    // Alone: point them at the wall.
+    const ahead = this.block.ahead(p);
+    hud.hint(ahead > 0 && ahead < 260 ? 'SMASH THROUGH THE BLOCKADE  —  SPACE SWINGS THE VAULT' : '');
+  }
+
+  private unhook(): void {
+    const { director, player, partner, vault } = this.ctx;
+    this.state = 'alone';
+    const lines =
+      this.playerName === 'DOM'
+        ? [['DOM', 'Brian, unhook! I’ll take it the rest of the way.'], ['BRIAN', 'You’re crazy. Go!']]
+        : [['BRIAN', 'Dom, unhook! I’ve got the vault!'], ['DOM', 'Then bring it home, Brian.']];
+    say(this.ctx, lines[0][0], lines[0][1]);
+    // Side-on from the rail as the cable comes off.
+    const f = player.forward;
+    const side = leftOf(f).multiplyScalar(partner.position.sub(player.position).dot(leftOf(f)) >= 0 ? 1 : -1);
+    director.slowmo(0.45, 2.4);
+    director.play({
+      duration: 2.4,
+      frame: (k) => {
+        const mid = player.position.add(partner.position).multiplyScalar(0.5);
+        return {
+          pos: mid.clone().addScaledVector(side, 13 - k * 2).addScaledVector(f, 6 - k * 4).setY(2.4 + k),
+          look: mid.clone().lerp(vault.position, 0.3).setY(1),
+          fov: 46,
+        };
+      },
+    });
+    setTimeout(() => this.cutLoose(), 900);
+    setTimeout(() => say(this.ctx, lines[1][0], lines[1][1]), 2600);
   }
 }
 

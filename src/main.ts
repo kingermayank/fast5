@@ -16,10 +16,11 @@ import { createGraphics } from './graphics';
 import { BEACONS, GroundFx } from './groundfx';
 import { Hud } from './hud';
 import { Input, type ControlState } from './input';
-import { BankJob, type MomentContext, SpikeStrip, ThePull } from './moments';
-import { OverheadCamera, OVERHEAD_YAW } from './overhead';
-import { type Obstacle, PartnerDriver } from './partner';
-import { curveSpeed, exits, lanePath, leftOf, nextIntersection, Path, roadDir, roadHalfWidth, routeExit, streetCenter } from './roads';
+import type { Prop } from './city';
+import { BankJob, BridgeFinale, type MomentContext, Roadblock, SpikeStrip, ThePull } from './moments';
+import { OverheadCamera } from './overhead';
+import { PartnerDriver } from './partner';
+import { curveSpeed, exits, lanePath, leftOf, nextIntersection, Path, roadDir, routeExit } from './roads';
 import { BANK, BRIDGE, GOAL, MAP, onBridge, SPIKES } from './roadmap';
 import { FIXED_DT, initPhysics, RAPIER } from './physics';
 import { Police } from './police';
@@ -154,6 +155,8 @@ async function start(): Promise<void> {
   let pull: ThePull | null = null;
   let spikes: SpikeStrip | null = null;
   let bankJob: BankJob | null = null;
+  let bridge: BridgeFinale | null = null;
+  let roadblock: Roadblock | null = null;
 
   function createMoments(): void {
     const ctx: MomentContext = {
@@ -181,6 +184,8 @@ async function start(): Promise<void> {
     pull = new ThePull(ctx);
     spikes = new SpikeStrip(ctx);
     bankJob = new BankJob(ctx);
+    bridge = new BridgeFinale(ctx, character === 'dom' ? 'DOM' : 'BRIAN', cutLoose, (at, cars) => blockadeBust(at, cars, true));
+    roadblock = new Roadblock(ctx, (at, cars) => blockadeBust(at, cars, false));
   }
 
   function setupCrew(id: CharacterId): void {
@@ -194,7 +199,7 @@ async function start(): Promise<void> {
     player.makeHero();
     partner.makeHero();
     scene.add(player.model.group, partner.model.group);
-    partnerAi = new PartnerDriver(world, city, -me.side);
+    partnerAi = new PartnerDriver(world, -me.side);
     partnerAi.reset(player);
   }
 
@@ -220,18 +225,27 @@ async function start(): Promise<void> {
     // The nearest street, even from the middle of a parking lot.
     const fix = MAP.locate(p, undefined, 400);
     if (!fix) return;
-    const center = fix.point;
-    // Along the street, whichever way the route goes.
-    const ahead = gps.path(p).at(30).sub(center);
-    const f = fix.tangent.clone();
-    if (f.dot(ahead) < 0) f.negate();
+    // Along the street, whichever way the route goes; the vault behind the cars on the
+    // street itself (it may curve), with the cars moved up if it's too short behind them.
+    const street = new Path(fix.edge.pts);
+    const ahead = gps.path(p).at(30).sub(fix.point);
+    const sign = fix.tangent.dot(ahead) >= 0 ? 1 : -1;
+    const tow = CABLE_TOW_LENGTH + 2.5;
+    const s = THREE.MathUtils.clamp(fix.s, sign > 0 ? Math.min(tow, street.length) : 0, sign > 0 ? street.length : Math.max(0, street.length - tow));
+    const f = street.tangent(s).multiplyScalar(sign);
+    placeConvoy(street.at(s), f, street.at(THREE.MathUtils.clamp(s - sign * tow, 0, street.length)));
+  }
+
+  /** Line the crew up side by side at `center`, facing `f`, with the vault behind them (at `vaultAt`, if given). */
+  function placeConvoy(center: THREE.Vector3, f: THREE.Vector3, vaultAt = center.clone().addScaledVector(f, -CABLE_TOW_LENGTH - 2.5)): void {
     const heading = Math.atan2(f.x, f.z);
     const left = new THREE.Vector3(f.z, 0, -f.x);
     const side = CHARACTERS[character].side;
     player.place(center.clone().addScaledVector(left, side * 2.75), heading);
     partner.place(center.clone().addScaledVector(left, -side * 2.75), heading);
-    vault.place(center.clone().addScaledVector(f, -CABLE_TOW_LENGTH - 2.5), heading);
+    vault.place(vaultAt, heading);
     partnerAi.reset(player);
+    overhead.reset(heading);
   }
 
   /** Past the swap point on the bridge. */
@@ -271,6 +285,24 @@ async function start(): Promise<void> {
     impacts[cause]++;
     impacts.total++;
     impacts.perMin = +(impacts.total / Math.max(1, chaseTime / 60)).toFixed(1);
+  }
+
+  /**
+   * Getting stuck, for play-tests (seconds): the player pushing but not moving, the
+   * vault not moving while the cars pull on it, and the partner far from its place
+   * beside the player (plus its average distance from that place).
+   */
+  const stuck = { time: 0, player: 0, vault: 0, partnerFar: 0, partnerDist: 0 };
+  function measureStuck(dt: number): void {
+    stuck.time += dt;
+    const pushing = player.controls.throttle > 0.5;
+    if (pushing && Math.abs(player.forwardSpeed) < 1.5) stuck.player += dt;
+    if (pushing && vault.speed < 0.8 && cables.some((c) => c.tension > 20000)) stuck.vault += dt;
+    const f = player.forward;
+    const slot = player.position.addScaledVector(new THREE.Vector3(f.z, 0, -f.x), -CHARACTERS[character].side * 4.6);
+    const d = partner.position.distanceTo(slot);
+    stuck.partnerDist += d * dt;
+    if (d > 8) stuck.partnerFar += dt;
   }
 
   function measurePartner(dt: number): void {
@@ -350,44 +382,20 @@ async function start(): Promise<void> {
   }
   let playerStuck = 0;
 
-  /** Put the partner back beside the player (only ever done off-screen). */
+  /** Put the partner back in its place beside the player, in a puff of dust if it's on screen. */
   function recoverPartner(): void {
-    const d = roadDir(player.position, player.forward);
-    const center = streetCenter(player.position, d);
-    const playerOffset = player.position.clone().sub(center).dot(leftOf(d));
-    const half = roadHalfWidth(player.position) - 2.3;
-    const offset = THREE.MathUtils.clamp(playerOffset - CHARACTERS[character].side * 5, -half, half);
-    const slot = center.clone().addScaledVector(leftOf(d), offset);
-    if (!city.isStreet(slot.x, slot.z) || Math.abs(offset - playerOffset) < 3) return;
-    partner.place(slot, Math.atan2(d.x, d.z));
-    partner.body.setLinvel({ x: d.x * player.forwardSpeed, y: 0, z: d.z * player.forwardSpeed }, true);
-    partnerAi.reset(player);
+    const spot = partnerAi.recoveryPoint(player);
+    if (!spot) return;
+    if (isVisible(partner.position)) fx.puff(partner.position, 8);
+    partner.place(spot.pos, spot.heading);
+    const v = player.body.linvel();
+    partner.body.setLinvel({ x: v.x, y: 0, z: v.z }, true);
+    if (isVisible(spot.pos)) fx.puff(spot.pos, 8);
     partnerTeleports++;
   }
 
   const frustum = new THREE.Frustum();
   const isVisible = (p: THREE.Vector3) => camera.position.distanceTo(p) < 160 && frustum.containsPoint(p.clone().setY(1));
-
-  /** Everything the partner should steer around. */
-  function partnerObstacles(): Obstacle[] {
-    const list: Obstacle[] = [
-      { pos: player.position, radius: 1.8, soft: true },
-      { pos: vault.position.setY(0), radius: 2.4, soft: true },
-    ];
-    // Everything is "soft": the partner steers around it when there's a free lane but never
-    // brakes for it. It's chained to the vault, and the Chargers plow through in the film.
-    for (const c of police.cops) list.push({ pos: c.v.position, radius: 2.6, soft: true });
-    for (const t of traffic.cars) list.push({ pos: t.v.position, radius: 2.4, soft: true });
-    if (spikes) list.push(...spikes.obstacles());
-    const near = partner.position;
-    for (const prop of city.props) {
-      if (prop.value < 1500) continue; // bricks: drive through
-      const t = prop.body.translation();
-      if (Math.abs(t.x - near.x) > 45 || Math.abs(t.z - near.z) > 45) continue;
-      list.push({ pos: new THREE.Vector3(t.x, 0, t.z), radius: prop.value >= 15000 ? 2.5 : prop.value >= 6000 ? 2.2 : 0.7, soft: true });
-    }
-    return list;
-  }
 
   // ----------------------------------------------------------- physics
 
@@ -398,27 +406,20 @@ async function start(): Promise<void> {
     player.controls = driving ? (auto ?? input.controls()) : hold;
     // Keyboard steering eases in; an analog stick is already smooth, so it gets a quick response.
     player.steerRate = input.analog && !auto ? { in: 14, out: 14 } : { in: 5, out: 12 };
-    if (driving) {
-      const vv = vault.body.linvel();
-      partner.controls = partnerAi.controls(dt, {
-        player,
-        me: partner,
-        vault: vault.position,
-        vaultVel: new THREE.Vector3(vv.x, 0, vv.z),
-        route: state === 'chase' ? gps.path(player.position).points : [],
-        obstacles: partnerObstacles(),
-        visible: isVisible,
-      });
-      if (partnerAi.wantsRecovery && state === 'chase') recoverPartner();
-    } else {
-      partner.controls = hold;
-    }
     const nosOn = driving && !!player.controls.nos && nos > 0.02;
     player.nosActive = nosOn;
     if (nosOn) nos = Math.max(0, nos - dt * 0.3);
     else if (driving) nos = Math.min(1, nos + dt * 0.012);
     player.step(dt);
-    partner.step(dt);
+    if (state === 'chase') {
+      // The partner flies in formation beside the player (partner.ts).
+      partnerAi.drive(dt, { player, me: partner, hazards: spikes?.obstacles() ?? [] });
+      if (partnerAi.wantsRecovery) recoverPartner();
+    } else {
+      // Ripping the vault out of the station, the partner floors it with the player.
+      partner.controls = state === 'breach' ? { ...player.controls, nos: false } : hold;
+      partner.step(dt);
+    }
 
     if (state === 'chase' && !noCops) {
       police.step(dt, player, vault, heat, onBridge(player.position));
@@ -432,6 +433,14 @@ async function start(): Promise<void> {
       traffic.step(dt, player.position, player.forward, blockers, { pos: vault.position.setY(0), vel: new THREE.Vector3(vv.x, 0, vv.z) }, state === 'chase');
     }
 
+    // Swung on purpose (the handbrake, the throw at the bank): leave the vault be.
+    const swinging = player.controls.handbrake || !!bankJob?.flinging;
+    if ((state === 'chase' || state === 'outro') && !swinging) vault.overrun(dt, partnerAi.released ? [player] : [player, partner]);
+    if (state === 'chase') {
+      // The vault follows the road the cars drove (unless the player swings it), and never stays wedged.
+      const pulled = cables.some((c) => c.tension > 30000);
+      vault.followTrail(dt, partnerAi.playerTrail, partnerAi.released ? 0 : partnerAi.thoughts.beside * 0.5 * -CHARACTERS[character].side, swinging, pulled);
+    }
     if (state === 'chase' || state === 'outro') for (const c of cables) c.reel(CABLE_TOW_LENGTH, dt);
     for (const c of cables) c.step(dt);
     if (state === 'chase') bankJob?.step(dt);
@@ -439,6 +448,7 @@ async function start(): Promise<void> {
     if (state === 'chase') {
       measurePartner(dt);
       measureImpacts(dt);
+      measureStuck(dt);
     }
   }
 
@@ -446,7 +456,7 @@ async function start(): Promise<void> {
 
   function startGameplay(): void {
     cutscene = null;
-    overhead.reset();
+    overhead.reset(player.heading);
     enter('breach');
     breach.shooting = true;
     hud.showHud(true);
@@ -465,6 +475,9 @@ async function start(): Promise<void> {
     if (state === 'chase') {
       spikes?.update(dt);
       bankJob?.update(dt);
+      bridge?.update(dt);
+      roadblock?.update(dt);
+      placeRoadblock();
     }
 
     if (state === 'breach' && vault.position.x > STATION_FACADE_X + 3) {
@@ -473,6 +486,8 @@ async function start(): Promise<void> {
       heat = 1;
       say('MIA', 'It’s out! Every cop in Rio is coming. Follow my route, or find your own. I’ll guide you.');
       startChase();
+      // Debug: ?at=bridge skips to the foot of the bridge (for testing the finale).
+      if (params.get('at') === 'bridge') placeConvoy(BRIDGE_PATH.at(25), BRIDGE_PATH.tangent(25));
     }
 
     if ((state === 'breach' || state === 'chase') && inWater()) {
@@ -582,7 +597,8 @@ async function start(): Promise<void> {
     if (heat > lastHeat) {
       lastHeat = heat;
       const item = NEWS.heat[heat];
-      if (item) hud.news(item);
+      // On the bridge the story is the bridge.
+      if (item && !onBridge(player.position)) hud.news(item);
     }
     // The pull-out once the breakout's own slow-motion shot is over.
     if (establishPending && !director.busy && chaseTime > 0.6) {
@@ -597,6 +613,13 @@ async function start(): Promise<void> {
     stuckFor = Math.abs(player.forwardSpeed) < 1.5 ? stuckFor + dt : 0;
     const boxedIn = busted > 0.2;
     coach.update(dt, { boxedIn, stuck: !boxedIn && stuckFor > 3 });
+    // Still wedged after the tip: put the crew back on the road rather than leave the player stuck.
+    if (stuckFor > 5 && !boxedIn && (player.controls.throttle > 0 || player.controls.brake > 0)) {
+      stuckFor = 0;
+      fx.puff(player.position, 10);
+      resetConvoy();
+      fx.puff(player.position, 10);
+    }
   }
 
   /** The vault or either car has fallen off the bridge or the seawall. */
@@ -706,6 +729,93 @@ async function start(): Promise<void> {
     director.play({ duration: 2.6, frame: (k) => ({ pos: from.clone().lerp(to, k), look: player.position.add(vault.position).multiplyScalar(0.5).setY(1.5), fov: 42 }) });
   }
 
+  /** On the bridge: the partner's cable comes off and they peel away; the player tows the vault alone. */
+  function cutLoose(): void {
+    const i = cables.findIndex((c) => c.car === partner);
+    if (i < 0) return;
+    fx.burst(partner.towPoint(), 0.8);
+    sound.clank();
+    cables[i].dispose(scene);
+    cables.splice(i, 1);
+    partnerAi.released = true;
+    // One car on four tons now: enough extra power to keep the pace.
+    player.assist = 1.3;
+  }
+
+  /**
+   * A roadblock broken (mid-chase, or the wall on the bridge): slow motion, low at the
+   * impact as the cruisers go flying, then high over the wreckage; the vault, if it's
+   * what hit them, bounds over the top. Every cruiser in it counts as a takedown.
+   */
+  function blockadeBust(at: THREE.Vector3, cars: Prop[], finale: boolean): void {
+    const dir = player.forward;
+    const side = leftOf(dir);
+    const low = at.clone().addScaledVector(side, 11).addScaledVector(dir, 8).setY(1.6);
+    const high = at.clone().addScaledVector(dir, -16).addScaledVector(side, -9).setY(21);
+    director.slowmo(0.22, 2.7);
+    director.shake = 1.3;
+    director.playAll([
+      { duration: 1.2, frame: (k) => ({ pos: low.clone().addScaledVector(dir, -k * 2.5), look: at.clone().setY(1.1), fov: 44 }) },
+      { duration: 1.6, frame: (k) => ({ pos: high.clone().addScaledVector(dir, k * 7), look: at.clone().addScaledVector(dir, 5).setY(0.5), fov: 40 }) },
+    ]);
+    // The cruisers near the impact go flying, thrown on along the way the convoy was going.
+    for (const c of cars) {
+      const t = c.body.translation();
+      const away = new THREE.Vector3(t.x - at.x, 0, t.z - at.z);
+      const k = 1 - Math.min(1, away.length() / 14);
+      if (k <= 0) continue;
+      away.normalize();
+      const m = c.body.mass();
+      c.body.wakeUp();
+      c.body.applyImpulse({ x: (away.x * 6 + dir.x * 7) * m * k, y: m * (2.5 + 4.5 * k), z: (away.z * 6 + dir.z * 7) * m * k }, true);
+      c.body.applyTorqueImpulse({ x: (Math.random() - 0.5) * m * 7 * k, y: (Math.random() - 0.5) * m * 3, z: (Math.random() - 0.5) * m * 7 * k }, true);
+    }
+    sound.crash(1.5);
+    sound.bang();
+    fx.burst(at.clone().setY(1), 1.8);
+    fx.puff(at, 14);
+    if (vault.position.setY(0).distanceTo(at) < 9) {
+      const v = vault.body.linvel();
+      vault.body.setLinvel({ x: v.x, y: 4.5, z: v.z }, true);
+    }
+    police.wreckedCount += cars.length;
+    const bonus = finale ? 2500 : 1500;
+    style += bonus + cars.length * 100;
+    nos = Math.min(1, nos + 0.5);
+    input.rumble(1, 400);
+    hud.banner(finale ? 'BLOCKADE BUSTED' : 'ROADBLOCK BUSTED', `${cars.length} CRUISERS  +${bonus + cars.length * 100}`, 2.4);
+    setTimeout(() => hud.news(finale ? NEWS.blockade : NEWS.roadblock), 2200);
+    if (finale) setTimeout(() => say('MIA', 'You’re through! The swap point’s dead ahead!'), 3000);
+  }
+
+  /**
+   * Once the heat is up: a roadblock across Mia's route, set up out of sight at the
+   * end of a long straight (never near the spike strip, the bank or the bridge).
+   */
+  function placeRoadblock(): void {
+    if (!roadblock) return;
+    if (roadblock.state === 'set') {
+      const ahead = roadblock.ahead(player.position);
+      hud.hint(ahead > 0 && ahead < 200 ? 'RAM THE ROADBLOCK  —  OR SWING THE VAULT INTO IT (SPACE)' : '');
+      return;
+    }
+    if (roadblock.state !== 'idle' || heat < 2 || chaseTime < 50) return;
+    const p = player.position;
+    if (onBridge(p)) return;
+    const path = gps.path(p);
+    const s = 170;
+    const turn = gps.nextTurn(p, travelDir());
+    if (path.length < s + 120 || (turn && turn.distance < s + 30)) return;
+    const at = path.at(s);
+    const dir = path.tangent(s);
+    if (isVisible(at) || at.distanceTo(BANK.corner) < 160 || at.distanceTo(SPIKES.origin) < 160 || onBridge(at)) return;
+    const fix = MAP.locate(at, dir);
+    if (!fix || fix.edge.bridge) return;
+    const width = Math.max(8, fix.edge.hw * 2 - 1.5);
+    roadblock.set(fix.point, dir, width, THREE.MathUtils.clamp(Math.round(width / 3.6), 3, 6));
+    say('MIA', 'Roadblock dead ahead! Don’t stop, smash right through it!');
+  }
+
   /**
    * Takedowns: a banner for the first and for streaks (wrecks within a few seconds of
    * each other), slow motion for the big ones, the news at milestones.
@@ -736,6 +846,9 @@ async function start(): Promise<void> {
     if (due && !director.busy && isVisible(at)) {
       lastWreckShot = chaseTime;
       wreckShot(car);
+    } else if (!director.busy) {
+      // Hit-stop: the world all but freezes for a beat as it connects.
+      director.hitStop(0.07);
     }
   }
 
@@ -931,7 +1044,7 @@ async function start(): Promise<void> {
       look = c.clone().setY(1.5);
     } else if (player && view === 'overhead') {
       const v = player.body.linvel();
-      const f = overhead.update(dt, player.position, new THREE.Vector3(v.x, 0, v.z), player.nosActive);
+      const f = overhead.update(dt, player.position, new THREE.Vector3(v.x, 0, v.z), player.nosActive, player.heading, player.forwardSpeed);
       // Shake has to be bigger from up here to read.
       pos = f.pos.add(director.shakeOffset().multiplyScalar(4));
       look = f.look;
@@ -1043,7 +1156,7 @@ async function start(): Promise<void> {
   const capture = params.has('capture');
   let drawThisFrame = true;
   let frameCount = 0;
-  // Debug: ?nocops=1 disables police (for testing the route and ending).
+  // Debug: ?nocops=1 disables police (for testing the route and ending); ?at=bridge starts the chase on the bridge.
   const noCops = params.has('nocops');
   const preset = params.get('crew');
   if (preset === 'dom' || preset === 'brian') {
@@ -1061,6 +1174,13 @@ async function start(): Promise<void> {
     partnerGap: player ? +player.position.distanceTo(partner.position).toFixed(1) : 0,
     partnerTeleports,
     impacts,
+    stuck: {
+      seconds: Math.round(stuck.time),
+      player: +stuck.player.toFixed(1),
+      vault: +stuck.vault.toFixed(1),
+      partnerFar: +stuck.partnerFar.toFixed(1),
+      partnerAvg: +(stuck.partnerDist / Math.max(1, stuck.time)).toFixed(1),
+    },
     partnerThinks: partnerAi?.thoughts,
     partnerQuality: {
       seconds: Math.round(pq.time),
@@ -1076,6 +1196,16 @@ async function start(): Promise<void> {
     vault: vault.position.toArray().map(Math.round),
     truck: breach.truckPosition.toArray().map(Math.round),
     cables: cables.map((c) => +c.length.toFixed(1)),
+    tension: cables.map((c) => Math.round(c.tension / 1000)),
+    copsNear: player ? police.closeTo(player.position, 9) : 0,
+    bodies: player
+      ? {
+          player: [player.body.translation(), player.body.linvel()].map((v) => [v.x, v.y, v.z].map((n) => +n.toFixed(1))),
+          vault: [vault.body.translation(), vault.body.linvel(), vault.body.angvel()].map((v) => [v.x, v.y, v.z].map((n) => +n.toFixed(1))),
+          partner: [partner.body.translation()].map((v) => [v.x, v.y, v.z].map((n) => +n.toFixed(1))),
+        }
+      : null,
+    controls: player ? player.controls : null,
     heat,
     gpsNext: gps.nodes[0]?.toArray().filter((_, i) => i !== 1),
     reroutes: gps.reroutes,
@@ -1222,7 +1352,7 @@ async function start(): Promise<void> {
         ...navigation(),
         player: player.position,
         heading: player.heading,
-        up: view === 'overhead' ? OVERHEAD_YAW : player.heading,
+        up: view === 'overhead' ? overhead.yaw : player.heading,
         vault: vault.position,
         partner: partner.position,
         cops: police.cops.filter((c) => !c.wrecked).map((c) => c.v.position),

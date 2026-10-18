@@ -1,10 +1,22 @@
 import * as THREE from 'three';
 import { RAPIER, syncMesh, yawQuat } from './physics';
 import type { Vehicle } from './vehicle';
-import { DOMINANT, HERO_BIT, TOW_POINT } from './vehicle';
+import { DOMINANT, HERO_BIT, STREET_BIT, TOW_POINT } from './vehicle';
 
 const HALF = { x: 1.5, y: 1.25, z: 1.5 };
+/** Rounded edges on the collider, so the vault glances off a building's corner instead of hooking on it. */
+const ROUNDING = 0.35;
 export const VAULT_MASS = 4000;
+/** How far sideways it may stray from the cars' trail before it's steered back (m), and how hard (1/s). */
+const TRAIL_SLACK = 1.5;
+const TRAIL_PULL = 1.6;
+/** Wedged this long (s) while the cars pull, it's popped free along their trail. */
+const WEDGED_FOR = 0.8;
+/** It hits everything but thin street furniture (see STREET_BIT); ghosting, it misses the hero cars too. */
+const VAULT_GROUPS = (0xffff << 16) | (0xffff & ~STREET_BIT);
+const VAULT_GHOST_GROUPS = (0xffff << 16) | (0xffff & ~STREET_BIT & ~HERO_BIT);
+/** Fastest it may run up on a car that's ahead of it (m/s): an overrun brake, as trailers have. */
+const OVERRUN = 1.5;
 
 /** Steel vault: a heavy sliding box. Its local +z face is the door, where the cables attach. */
 export class Vault {
@@ -23,7 +35,11 @@ export class Vault {
         .setDominanceGroup(DOMINANT),
     );
     this.collider = world.createCollider(
-      RAPIER.ColliderDesc.cuboid(HALF.x, HALF.y, HALF.z).setMass(VAULT_MASS).setFriction(0.45).setRestitution(0.05),
+      RAPIER.ColliderDesc.roundCuboid(HALF.x - ROUNDING, HALF.y - ROUNDING, HALF.z - ROUNDING, ROUNDING)
+        .setMass(VAULT_MASS)
+        .setFriction(0.45)
+        .setRestitution(0.05)
+        .setCollisionGroups(VAULT_GROUPS),
       this.body,
     );
     this.buildMesh();
@@ -53,7 +69,7 @@ export class Vault {
 
   /** Pass through the hero cars (while it's flung at the bank, so it can't clip the partner). */
   ghostHeroes(on: boolean): void {
-    this.collider.setCollisionGroups(on ? (0xffff << 16) | (0xffff & ~HERO_BIT) : 0xffffffff);
+    this.collider.setCollisionGroups(on ? VAULT_GHOST_GROUPS : VAULT_GROUPS);
   }
 
   place(position: THREE.Vector3, heading: number): void {
@@ -61,6 +77,83 @@ export class Vault {
     this.body.setRotation(yawQuat(heading), true);
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  }
+
+  private wedged = 0;
+
+  /**
+   * Trailer behaviour, per physics step in the chase: keep the vault on the road the
+   * cars just drove. The further it strays sideways from their trail (cutting a corner
+   * toward a building), the more of its sideways speed is turned back toward it, but
+   * not while the player swings it on purpose. If it's wedged anyway while the cars
+   * pull, it's popped free along the trail. `trail` runs oldest first; `shift` is how
+   * far left of it the cars' midpoint runs (the partner's side).
+   */
+  followTrail(dt: number, trail: readonly THREE.Vector3[], shift: number, swinging: boolean, pulled: boolean): void {
+    if (trail.length < 3 || !this.body.isDynamic()) return;
+    const p = this.position.setY(0);
+    // The nearest point on the trail.
+    let best = 0;
+    let bestD = Infinity;
+    let bestT = 0;
+    for (let i = 0; i < trail.length - 1; i++) {
+      const a = trail[i];
+      const ab = trail[i + 1].clone().sub(a);
+      const len2 = ab.lengthSq();
+      if (len2 < 1e-6) continue;
+      const t = THREE.MathUtils.clamp(p.clone().sub(a).dot(ab) / len2, 0, 1);
+      const d = a.clone().addScaledVector(ab, t).distanceToSquared(p);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+        bestT = t;
+      }
+    }
+    const a = trail[best];
+    const tan = trail[best + 1].clone().sub(a).normalize();
+    const left = new THREE.Vector3(tan.z, 0, -tan.x);
+    const e = p.clone().sub(a.clone().addScaledVector(trail[best + 1].clone().sub(a), bestT)).dot(left) - shift;
+    const v = this.body.linvel();
+    if (!swinging && Math.abs(e) > TRAIL_SLACK) {
+      const vN = v.x * left.x + v.z * left.z;
+      const want = -Math.sign(e) * Math.min(6, (Math.abs(e) - TRAIL_SLACK) * TRAIL_PULL);
+      const dv = (want - vN) * Math.min(1, dt * 2.5);
+      this.body.setLinvel({ x: v.x + left.x * dv, y: v.y, z: v.z + left.z * dv }, true);
+    }
+    // Wedged on something while the cars strain: hop it free toward them along the trail.
+    const speed = Math.hypot(v.x, v.z);
+    this.wedged = pulled && speed < 0.8 ? this.wedged + dt : Math.min(this.wedged, 0);
+    if (this.wedged > WEDGED_FOR) {
+      this.wedged = -0.6;
+      let k = best + 1;
+      for (let s = 0; k < trail.length - 1 && s < 8; k++) s += trail[k].distanceTo(trail[k - 1]);
+      const to = trail[k].clone().addScaledVector(left, shift).sub(p).setY(0);
+      if (to.lengthSq() > 1e-4) to.setLength(5);
+      this.body.setLinvel({ x: to.x, y: 2, z: to.z }, true);
+    }
+  }
+
+  /**
+   * Overrun brake: when the cars stop short, the vault mustn't slide on into them and
+   * pin them (it would climb onto a car and wedge it). Running up on a car ahead of it,
+   * it's held to a crawl toward that car.
+   */
+  overrun(dt: number, cars: Vehicle[]): void {
+    if (!this.body.isDynamic()) return;
+    const p = this.position.setY(0);
+    for (const car of cars) {
+      const rel = car.position.sub(p);
+      const dist = rel.length();
+      if (dist > 9 || dist < 1e-3) continue;
+      rel.divideScalar(dist);
+      const v = this.body.linvel();
+      const cv = car.body.linvel();
+      // Only the vault's own run at the car counts (a car backing onto a still vault doesn't shove it).
+      const closing = v.x * rel.x + v.z * rel.z - Math.max(0, cv.x * rel.x + cv.z * rel.z);
+      if (closing <= OVERRUN) continue;
+      const dv = (closing - OVERRUN) * Math.min(1, dt * 8);
+      this.body.setLinvel({ x: v.x - rel.x * dv, y: v.y, z: v.z - rel.z * dv }, true);
+    }
   }
 
   render(): void {

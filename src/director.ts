@@ -23,6 +23,8 @@ export class Director {
   private slowLeft = 0;
   private shot: DirectorShot | null = null;
   private shotTime = 0;
+  /** Shots still to come in a sequence. */
+  private queue: DirectorShot[] = [];
 
   /** Slow time to `scale` for `seconds` of real time. */
   slowmo(scale: number, seconds: number): void {
@@ -30,9 +32,23 @@ export class Director {
     this.slowLeft = Math.max(this.slowLeft, seconds);
   }
 
+  /** A hit-stop: time all but stops at once for `seconds` (real time), then picks back up. */
+  hitStop(seconds: number): void {
+    this.timeScale = Math.min(this.timeScale, 0.1);
+    this.slowmo(0.1, seconds);
+  }
+
   play(shot: DirectorShot): void {
     this.shot = shot;
     this.shotTime = 0;
+    this.queue = [];
+  }
+
+  /** Several shots, cutting from one to the next. */
+  playAll(shots: DirectorShot[]): void {
+    if (!shots.length) return;
+    this.play(shots[0]);
+    this.queue = shots.slice(1);
   }
 
   get busy(): boolean {
@@ -52,7 +68,10 @@ export class Director {
     this.shake = Math.max(0, this.shake - realDt * 2);
     if (this.shot) {
       this.shotTime += realDt;
-      if (this.shotTime >= this.shot.duration) this.shot = null;
+      if (this.shotTime >= this.shot.duration) {
+        this.shot = this.queue.shift() ?? null;
+        this.shotTime = 0;
+      }
     }
   }
 

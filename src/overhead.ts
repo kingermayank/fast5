@@ -3,9 +3,10 @@ import { GOAL, MAP, PLAN } from './roadmap';
 
 /**
  * Bird's-eye camera for the chase: high and angled rather than straight down,
- * with a fixed yaw so the city doesn't swing round as you steer (screen-up is
- * always the same way). It looks ahead of the car along its velocity and pulls
- * back with speed, so there's always road to read.
+ * and behind the car, so forward is always up the screen. It swings round
+ * after the car smoothly (a slide or a yank from the vault doesn't whip it),
+ * looks ahead along the car's velocity and pulls back with speed, so there's
+ * always road to read.
  */
 
 /**
@@ -38,10 +39,9 @@ function gridBearing(): number {
 }
 
 /**
- * The bearing that is up on screen: along the street grid (so streets run
- * straight across and up the screen), in whichever of the four directions
- * faces most toward the bridge from the station. The drive then goes across
- * and up the screen, never down it.
+ * A bearing along the street grid (so streets run straight across and up the
+ * screen), in whichever of the four directions faces most toward the bridge
+ * from the station: the title screen's view, and where the camera starts.
  */
 export const OVERHEAD_YAW = (() => {
   const grid = gridBearing();
@@ -61,20 +61,37 @@ export interface OverheadFrame {
   fov: number;
 }
 
+/** Signed smallest angle from bearing `a` to bearing `b`. */
+const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+
 export class OverheadCamera {
-  /** Screen-up, on the ground. */
-  readonly forward = new THREE.Vector3(Math.sin(OVERHEAD_YAW), 0, Math.cos(OVERHEAD_YAW));
+  /** The bearing that is up on screen: behind the car. */
+  yaw = OVERHEAD_YAW;
   private lead = new THREE.Vector3();
   private dist = NEAR;
 
-  /** Forget the look-ahead and zoom (when gameplay starts). */
-  reset(): void {
-    this.lead.set(0, 0, 0);
-    this.dist = NEAR;
+  /** Screen-up, on the ground. */
+  get forward(): THREE.Vector3 {
+    return new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
   }
 
-  update(dt: number, at: THREE.Vector3, vel: THREE.Vector3, boost: boolean): OverheadFrame {
+  /** Forget the look-ahead and zoom, and swing straight round behind a car facing `heading` (when gameplay starts). */
+  reset(heading = this.yaw): void {
+    this.lead.set(0, 0, 0);
+    this.dist = NEAR;
+    this.yaw = heading;
+  }
+
+  /** `heading` is where the car points; `forwardSpeed` is negative when it reverses. */
+  update(dt: number, at: THREE.Vector3, vel: THREE.Vector3, boost: boolean, heading: number, forwardSpeed: number): OverheadFrame {
     const speed = Math.hypot(vel.x, vel.z);
+    // Behind the car: where it's going as much as where it points (a drift aims the nose
+    // off line), but only where it points when reversing. Slow to swing when nearly
+    // stopped, so turning on the spot doesn't spin the city round.
+    let target = heading;
+    if (speed > 6 && forwardSpeed > 3) target += angleDiff(heading, Math.atan2(vel.x, vel.z)) * 0.5;
+    const rate = 2.4 * THREE.MathUtils.clamp(speed / 8, 0.25, 1);
+    this.yaw += angleDiff(this.yaw, target) * (1 - Math.exp(-rate * dt));
     // About two thirds of a second ahead, at most 30 m; eased, so a slide doesn't whip the view.
     const ahead = new THREE.Vector3(vel.x, 0, vel.z).multiplyScalar(Math.min(0.65, 30 / Math.max(speed, 1)));
     this.lead.lerp(ahead, 1 - Math.exp(-1.8 * dt));

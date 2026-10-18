@@ -9,8 +9,8 @@ de León through Hato Rey's Golden Mile, and ended it on the Teodoro Moscoso Bri
 streets and buildings (with their real heights) from OpenStreetMap, dressed as Rio, with Christ the
 Redeemer on Corcovado at the end of the avenue and Sugarloaf out in the bay.
 
-You play it from above, at dusk: a 2.5D camera at a steep slant follows the convoy like a
-diorama, looking ahead as you speed up, with tilt-shift blur, wet streets that mirror the street
+You play it from above, at dusk: a 2.5D camera at a steep slant rides behind the convoy like a
+diorama (forward is always up the screen), looking ahead as you speed up, with tilt-shift blur, wet streets that mirror the street
 lamps, headlights and police strobes, and civilian traffic in the lanes. Buildings between the
 camera and your car dissolve so you never lose it. C switches to the chase camera behind the car.
 
@@ -77,8 +77,9 @@ our streets are wider than the real ones, and places the bank on the corner wher
 
 ## How to play
 
-Pick **Dom Toretto** (heavy, powerful) or **Brian O'Conner** (light, sharp). Your AI partner drives
-the other car, chained to the same vault.
+Pick **Dom Toretto** (heavy, powerful) or **Brian O'Conner** (light, sharp). Your partner drives
+the other car, chained to the same vault, as your wingman: it holds its place beside you and goes
+wherever you go, tucking in behind you where there's no room.
 
 0. **Cutscene:** Hobbs and Elena ram the station wall in an armored truck; you back in and hook up.
 1. **The Pull:** hold the throttle to fill the STRAIN meter until the vault tears out through the wall.
@@ -89,10 +90,14 @@ the other car, chained to the same vault.
    another street; columns of light mark the bank and the swap point. Swing the vault into cop
    cars to wreck them: wrecks in quick succession are streaks worth more, and every wreck refills
    nitrous. Watch for civilian traffic. Heat rises with time and destruction, and the news follows.
+   Once the heat is up, the police throw a roadblock across your route: ram it or swing the vault
+   through it.
 3. **Don't get boxed in:** if cops pin you at low speed, the BUSTED meter fills (a tip tells you
    how to break out).
 4. **Bridge:** Mia's route runs down Ponce de León, left onto the Piñero expressway, through the toll
-   plaza and onto the Moscoso bridge: reach the yellow gantry out over the lagoon.
+   plaza and onto the Moscoso bridge. The police have walled off the far end with cruisers. Partway
+   across you cut your partner loose and take the vault on alone, on one cable, where it swings like
+   a wrecking ball: break the wall and reach the yellow gantry out over the lagoon.
 5. **Rank:** the end screen grades the run (S, A, B or C) on style, takedowns, damage, time and
    challenges, and shows your best. The first runs coach you through the controls; every run starts
    by listing its three challenges.
@@ -123,13 +128,15 @@ uses the Barlow Condensed and Inter typefaces (SIL Open Font License, in `ui/fon
 Debug URL flags: `?crew=dom|brian` skips the menu and cutscene (add `&intro` to watch it),
 `?view=chase` starts behind the car instead of overhead,
 `?autopilot` follows the GPS (`?autopilot=detour` disobeys it at random intersections to test
-rerouting, `?autopilot=wander` turns at random), `?nocops` disables police,
+rerouting, `?autopilot=wander` turns at random), `?nocops` disables police, `?at=bridge` starts the
+chase at the foot of the bridge (for the finale),
 `?timescale=4&renderEvery=8` runs the simulation faster for automated tests, `?cam=x,y,z,lookX,lookY,lookZ`
 holds the title-screen camera at a point (for looking round the map), and `?capture` steps the
 game only when `window.fast5Frame(n)` is called (fixed 1/30 s frames) for recording smooth clips
 headlessly. `window.fast5()` in the
 console returns a state snapshot, including partner-quality stats (`partnerQuality`) and what the
-partner is currently thinking (`partnerThinks`), hard hits on the player's car (`impacts`) and
+partner is currently doing (`partnerThinks`), hard hits on the player's car (`impacts`), time spent
+stuck (`stuck`: the player pushing but not moving, the vault wedged, the partner out of place) and
 the GPS reroute log (`rerouteLog`).
 
 ## Code layout
@@ -141,7 +148,7 @@ the GPS reroute log (`rerouteLog`).
 - `src/groundfx.ts`: light and shade painted on the road (lamp pools, headlights, strobes, contact shadows)
 - `src/breach.ts`: the opening set piece (armored truck, station cops, cutscene shots)
 - `src/cutscene.ts`, `src/voice.ts`, `src/videos.ts`: cutscene player, voiceover, optional video cutscenes
-- `src/partner.ts`: the AI partner: reads the streets and the live GPS route, predicts your turns, plans its own lane, slows for bends, steers around cops/props/the vault, steadies the vault's swing
+- `src/partner.ts`: the partner as a wingman: holds a place beside you (in from walls, single file where it's tight or a spike strip is in its lane), catches up along your trail, and is put back if wedged
 - `src/roadmap.ts`: the map (`src/map/sanjuan.json`): street graph, "where am I on the road" queries, set-piece frames
 - `src/roads.ts`: the street network as the AI sees it (lanes along curved streets, intersections, route turns, bend speeds)
 - `src/gps.ts`: GTA-style navigation: shortest route over the street graph, live rerouting

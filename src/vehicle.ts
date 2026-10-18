@@ -27,9 +27,17 @@ const LATERAL_GRIP = 19;
 /** With the handbrake on, the tail steps out and the car can rotate faster (a drift). */
 const DRIFT_GRIP = 30;
 
-/** Collision group bits: the hero cars ghost through each other, but hit everything else. */
+/**
+ * Collision group bits. The hero cars ghost through each other. They (and the vault)
+ * also go straight through thin street furniture that can't be knocked over (signal
+ * poles, tree trunks), which would otherwise stop four tons dead mid-chase; cops and
+ * traffic still hit it.
+ */
 export const HERO_BIT = 0x0002;
-export const HERO_GROUPS = (HERO_BIT << 16) | (0xffff & ~HERO_BIT);
+export const STREET_BIT = 0x0004;
+export const HERO_GROUPS = (HERO_BIT << 16) | (0xffff & ~HERO_BIT & ~STREET_BIT);
+/** For signal poles and tree trunks. */
+export const STREET_GROUPS = (STREET_BIT << 16) | 0xffff;
 /**
  * Dominance groups: in a contact, the higher group acts as if infinitely heavy.
  * Hero cars, the vault and parked cars outrank cruisers and street furniture,
@@ -185,6 +193,34 @@ export class Vehicle {
     // Throttle on but barely moving: the rear tires are spinning against the load.
     const straining = c.throttle > 0.5 && Math.abs(vF) < 3;
     this.wheelspin += ((straining ? c.throttle : 0) - this.wheelspin) * Math.min(1, dt * 6);
+  }
+
+  /**
+   * Puppet driving, for the AI partner: ease the car toward a velocity and a heading
+   * instead of working the pedals, so it can hold its place beside the player exactly.
+   * It's still a physical body (collisions and the tow cable act on it); `grip` is how
+   * fast (1/s) it takes up a change. Sets the speeds, steering and pedals the model
+   * and the effects read.
+   */
+  follow(dt: number, vel: THREE.Vector3, heading: number, grip = 5): void {
+    const v = this.body.linvel();
+    const k = Math.min(1, grip * dt);
+    const vx = v.x + (vel.x - v.x) * k;
+    const vz = v.z + (vel.z - v.z) * k;
+    this.body.setLinvel({ x: vx, y: v.y, z: vz }, true);
+    const err = Math.atan2(Math.sin(heading - this.heading), Math.cos(heading - this.heading));
+    const w = this.body.angvel();
+    const yawRate = THREE.MathUtils.clamp(err * 5, -3.5, 3.5);
+    this.body.setAngvel({ x: w.x, y: w.y + (yawRate - w.y) * Math.min(1, 10 * dt), z: w.z }, true);
+    const f = this.forward;
+    const vF = vx * f.x + vz * f.z;
+    const accel = dt > 0 ? (vF - this.forwardSpeed) / dt : 0;
+    this.steer += (THREE.MathUtils.clamp(err * 2.5, -1, 1) - this.steer) * Math.min(1, 8 * dt);
+    this.controls = { throttle: accel > 0.5 ? 1 : 0, brake: accel < -3 ? 1 : 0, steer: this.steer, handbrake: false };
+    this.forwardSpeed = vF;
+    this.lateralSpeed = vx * f.z - vz * f.x;
+    this.wheelspin = 0;
+    if (this.tireBlown > 0) this.tireBlown = Math.max(0, this.tireBlown - dt);
   }
 
   /** World positions of the rear tire contact patches (for smoke and skid marks). */

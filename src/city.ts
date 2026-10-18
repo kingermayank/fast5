@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { awning, balcony, orientedRect, parapet, pitchedRoof } from './architecture';
 import type { CarModel } from './carModel';
+import { STREET_GROUPS } from './vehicle';
 import { seeThrough } from './cutaway';
 import { RAPIER, syncMesh } from './physics';
 import { BANK, BRIDGE, GOAL, MAP, type MapEdge, PLAN, points, RAW } from './roadmap';
@@ -305,7 +306,7 @@ export class City {
     this.batch(tint(box, new THREE.Color(0x1d2024)), this.balconyMat);
     for (let k = 0; k < 3; k++) this.signalLampAt.push(head.clone().addScaledVector(dir, -0.22).setY(5.55 - k * 0.42));
     this.signals.push({ offset: axis.offset, group });
-    this.world.createCollider(RAPIER.ColliderDesc.cylinder(3, 0.14).setTranslation(pole.x, 3, pole.z), this.ground);
+    this.world.createCollider(RAPIER.ColliderDesc.cylinder(3, 0.14).setTranslation(pole.x, 3, pole.z).setCollisionGroups(STREET_GROUPS), this.ground);
   }
 
   /** The signal lamps, one instanced draw (call after the roads are built). */
@@ -583,10 +584,13 @@ export class City {
     }
   }
 
-  /** A tree that stops cars: instanced for drawing, with a fixed trunk collider. */
+  /** A tree that stops cops and traffic (not the crew, see STREET_BIT): instanced for drawing, with a fixed trunk collider. */
   private plantTree(p: THREE.Vector3, size: number): void {
     this.trees.tree(p, size);
-    this.world.createCollider(RAPIER.ColliderDesc.cylinder(1.6, 0.25 * size + 0.08).setTranslation(p.x, 1.6, p.z).setFriction(0.6), this.ground);
+    this.world.createCollider(
+      RAPIER.ColliderDesc.cylinder(1.6, 0.25 * size + 0.08).setTranslation(p.x, 1.6, p.z).setFriction(0.6).setCollisionGroups(STREET_GROUPS),
+      this.ground,
+    );
   }
 
   /** Middle of the map (for the water plane and the distant scenery). */

@@ -23,6 +23,8 @@ export const NEWS = {
   spikesDodged: ['LIVE', 'SPIKE STRIP FAILS TO STOP THE SAFE', 'Both cars threaded a gap in the police stinger  •  The convoy is still on the move'],
   tireBlown: ['LIVE', 'POLICE STINGER SHREDS A TIRE', 'One of the getaway cars is running on a rim  •  Sparks seen for blocks'],
   bridge: ['LIVE', 'THE CHASE REACHES THE BRIDGE', 'The convoy is crossing the water  •  Police are closing the far end'],
+  roadblock: ['LIVE', 'SAFE SMASHES THROUGH A ROADBLOCK', 'Police cruisers scattered across the avenue  •  The convoy did not even slow down'],
+  blockade: ['BREAKING', 'THE BRIDGE BLOCKADE IS DOWN', 'One car and a ten-ton safe just broke a wall of police cruisers  •  The second car has broken away'],
   finish: ['BREAKING', 'POLICE SURROUND THE SAFE ON THE BRIDGE', 'Officers have the vault  •  Both drivers still at large  •  More at the top of the hour'],
 } satisfies Record<string, NewsBreak | (NewsBreak | null)[]>;
 
