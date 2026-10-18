@@ -2,16 +2,18 @@ import * as THREE from 'three';
 import type { Sound } from './audio';
 import { buildCarModel } from './carModel';
 import { type City, type Prop, VAULT_START } from './city';
+import { ease, type Shot } from './cutscene';
 import type { Director } from './director';
 import type { Effects } from './fx';
 import { NEWS } from './broadcast';
 import { BEACONS } from './groundfx';
 import type { Hud } from './hud';
-import type { Obstacle } from './partner';
+import type { Obstacle, PartnerDriver } from './partner';
 import { RAPIER } from './physics';
+import type { Police } from './police';
 import { leftOf, Path, roadHalfWidth } from './roads';
 import { BANK, BRIDGE, onBridge, SPIKES } from './roadmap';
-import type { Cable, Vault } from './vault';
+import { type Cable, CABLE_TOW_LENGTH, type Vault } from './vault';
 import type { Vehicle } from './vehicle';
 import type { Voice } from './voice';
 
@@ -25,15 +27,30 @@ export interface MomentContext {
   hud: Hud;
   voice: Voice;
   director: Director;
+  police: Police;
   player: Vehicle;
   partner: Vehicle;
+  partnerDriver: PartnerDriver;
   vault: Vault;
   cables: Cable[];
+  /** Who's driving and who's alongside (for their lines), and the side the player's car runs on (+1 left). */
+  crew: { player: string; partner: string; side: number };
   /** The GPS route: intersections still to drive through, next first. */
   route(): THREE.Vector3[];
   /** Award style points and nitrous (0..1). */
   reward(style: number, nos: number): void;
   addDamage(amount: number): void;
+  /** Play shots as an in-engine cutscene mid-chase; `finish` leaves the world in the scene's end state (on a skip too). */
+  cutscene(shots: Shot[], finish: () => void): void;
+  /** Line the crew up side by side at `center`, facing `f`, with the vault at `vaultAt`. */
+  placeConvoy(center: THREE.Vector3, f: THREE.Vector3, vaultAt: THREE.Vector3): void;
+  /** Cables from both cars onto the vault; every cable off. */
+  hook(): void;
+  unhook(): void;
+  /** Keep the police off the road (every cruiser gone, none coming) until let go. */
+  holdPolice(hold: boolean): void;
+  /** Take cops and traffic off the road where `where` says (everywhere if it's left out). */
+  clearStreets(where?: (p: THREE.Vector3) => boolean): void;
 }
 
 const v3 = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
@@ -480,28 +497,34 @@ export class Roadblock {
     private onBust: (at: THREE.Vector3, cars: Prop[]) => void,
   ) {}
 
-  /** Park `count` cruisers across a road `width` m wide at `at`, facing the convoy coming along `dir`. */
-  set(at: THREE.Vector3, dir: THREE.Vector3, width: number, count: number): void {
+  /**
+   * Park `count` cruisers across a road `width` m wide at `at`, facing the convoy coming
+   * along `dir`; with `rows` 2, a second line 9 m further on, staggered into the gaps.
+   */
+  set(at: THREE.Vector3, dir: THREE.Vector3, width: number, count: number, rows = 1): void {
     const { city } = this.ctx;
     this.state = 'set';
     this.at.copy(at).setY(0);
     this.dir.copy(dir).setY(0).normalize();
     const across = leftOf(this.dir);
     const broadside = Math.atan2(this.dir.x, this.dir.z) + Math.PI / 2;
-    for (let i = 0; i < count; i++) {
-      const x = ((i + 0.5) / count - 0.5) * width;
-      // A shallow V, the middle furthest back, so it reads as a barricade from behind the convoy.
-      const pos = this.at.clone().addScaledVector(across, x).addScaledVector(this.dir, -Math.abs(x) * 0.18).setY(0.7);
-      const model = buildCarModel({ body: 0xf4f4f4, trim: 0x15181d, rim: 0x9aa0a6, police: true, asset: 'police' });
-      const holder = new THREE.Group();
-      model.group.position.y = -0.7;
-      holder.add(model.group);
-      if (model.lightBar) {
-        this.bars.push(model.lightBar);
-        BEACONS.push({ at: holder, bar: model.lightBar });
+    for (let r = 0; r < rows; r++) {
+      for (let i = 0; i < count; i++) {
+        const x = ((i + 0.5 + (r % 2) * 0.5) / count - 0.5) * width;
+        if (Math.abs(x) > width / 2 - 1) continue;
+        // A shallow V, the middle furthest back, so it reads as a barricade from behind the convoy.
+        const pos = this.at.clone().addScaledVector(across, x).addScaledVector(this.dir, -Math.abs(x) * 0.18 + r * 9).setY(0.7);
+        const model = buildCarModel({ body: 0xf4f4f4, trim: 0x15181d, rim: 0x9aa0a6, police: true, asset: 'police' });
+        const holder = new THREE.Group();
+        model.group.position.y = -0.7;
+        holder.add(model.group);
+        if (model.lightBar) {
+          this.bars.push(model.lightBar);
+          BEACONS.push({ at: holder, bar: model.lightBar });
+        }
+        const heading = broadside + ((i + r) % 2 ? 0.25 : -0.2);
+        this.cars.push(city.addProp(holder, pos, RAPIER.ColliderDesc.cuboid(1.0, 0.55, 2.5).setMass(1500).setFriction(0.7), 25000, heading));
       }
-      const heading = broadside + (i % 2 ? 0.25 : -0.2);
-      this.cars.push(city.addProp(holder, pos, RAPIER.ColliderDesc.cuboid(1.0, 0.55, 2.5).setMass(1500).setFriction(0.7), 25000, heading));
     }
   }
 
@@ -545,22 +568,48 @@ export class Roadblock {
 
 // ---------------------------------------------------------------- The bridge
 
+/** How far along the bridge the crew splits up (m): well short of the blockade. */
+export const SPLIT_AT = Math.max(80, BRIDGE.goalAlong - 500);
+/** Car centres to the vault's centre, half the gap between the cars, and the vault's ride height. */
+const TOW = CABLE_TOW_LENGTH + 2.5;
+const BESIDE = 2.75;
+const VAULT_Y = 1.27;
+
+/** One of the cruisers coming up the bridge behind the crew, driven by the split scene. */
+interface PackCar {
+  v: Vehicle;
+  /** Along the bridge and across it (m), speed along it (m/s), and how far round it has turned to chase the partner (0..1). */
+  s: number;
+  x: number;
+  speed: number;
+  turn: number;
+}
+
 /**
- * The finale. The police have walled off the far end of the bridge with
- * cruisers. Partway across, the player tells their partner to unhook and takes
- * the vault the rest of the way alone, on one cable, where it swings like a
- * wrecking ball, and has to break the wall to reach the swap point.
+ * The finale. The police have walled off the far end of the bridge with two rows
+ * of cruisers, and more are coming up behind. Partway across, the partner calls it:
+ * there are too many, they have to split up. The cars stop; the partner unhooks,
+ * spins round and charges back at the pack to lead it away. The player is left with
+ * the vault on one cable, stopped dead, and only the nitrous will get ten tons
+ * rolling again (the solo pull). From there it swings like a wrecking ball, and the
+ * wall has to be broken to reach the gantry.
  */
 export class BridgeFinale {
-  state: 'idle' | 'set' | 'alone' | 'done' = 'idle';
+  state: 'idle' | 'set' | 'split' | 'pull' | 'alone' | 'done' = 'idle';
   readonly block: Roadblock;
+  /** The solo pull: how close the vault is to rolling (0..1). */
+  strain = 0;
   private path = new Path(BRIDGE.pts);
+  private pullTime = 0;
+  private creak = 0;
+  /** Where the convoy stopped for the split: along the bridge, and its line across it. */
+  private stopAt = 0;
+  private lane = 0;
+  private pack: PackCar[] = [];
 
   constructor(
     private ctx: MomentContext,
-    /** Who's driving: they do the talking. */
-    private playerName: 'DOM' | 'BRIAN',
-    /** Unhook the partner's cable and send them off. */
+    /** Unhook the partner's cable (the player tows alone from then on). */
     private cutLoose: () => void,
     onBust: (at: THREE.Vector3, cars: Prop[]) => void,
   ) {
@@ -571,23 +620,31 @@ export class BridgeFinale {
     });
   }
 
+  /** The player is pulling the vault off the mark on their own (nitrous needed). */
+  get pulling(): boolean {
+    return this.state === 'pull';
+  }
+
   update(dt: number): void {
-    const { player, hud } = this.ctx;
+    const { player, hud, director } = this.ctx;
     const p = player.position;
-    if (this.state === 'done') return;
+    if (this.state === 'done' || this.state === 'split') return;
     if (this.state === 'idle') {
       // Out of sight at the far end, as soon as the convoy is on the bridge.
       if (!onBridge(p)) return;
       const s = BRIDGE.goalAlong - 75;
       const width = (BRIDGE.hw - 1.2) * 2;
-      this.block.set(this.path.at(s), this.path.tangent(s), width, Math.max(5, Math.round(width / 3.6)));
+      this.block.set(this.path.at(s), this.path.tangent(s), width, Math.max(5, Math.round(width / 3.6)), 2);
       this.state = 'set';
       return;
     }
     this.block.update(dt);
     if (this.state === 'set') {
-      const along = this.path.project(p);
-      if (onBridge(p) && along > Math.max(60, BRIDGE.goalAlong - 420)) this.unhook();
+      if (onBridge(p) && this.path.project(p) > SPLIT_AT && !director.busy) this.split();
+      return;
+    }
+    if (this.state === 'pull') {
+      this.strainPull(dt);
       return;
     }
     // Alone: point them at the wall.
@@ -595,33 +652,284 @@ export class BridgeFinale {
     hud.hint(ahead > 0 && ahead < 260 ? 'SMASH THROUGH THE BLOCKADE  —  SPACE SWINGS THE VAULT' : '');
   }
 
-  private unhook(): void {
-    const { director, player, partner, vault } = this.ctx;
-    this.state = 'alone';
-    const lines =
-      this.playerName === 'DOM'
-        ? [['DOM', 'Brian, unhook! I’ll take it the rest of the way.'], ['BRIAN', 'You’re crazy. Go!']]
-        : [['BRIAN', 'Dom, unhook! I’ve got the vault!'], ['DOM', 'Then bring it home, Brian.']];
-    say(this.ctx, lines[0][0], lines[0][1]);
-    // Side-on from the rail as the cable comes off.
-    const f = player.forward;
-    const side = leftOf(f).multiplyScalar(partner.position.sub(player.position).dot(leftOf(f)) >= 0 ? 1 : -1);
-    director.slowmo(0.45, 2.4);
-    director.play({
-      duration: 2.4,
-      frame: (k) => {
-        const mid = player.position.add(partner.position).multiplyScalar(0.5);
-        return {
-          pos: mid.clone().addScaledVector(side, 13 - k * 2).addScaledVector(f, 6 - k * 4).setY(2.4 + k),
-          look: mid.clone().lerp(vault.position, 0.3).setY(1),
+  private split(): void {
+    const { ctx } = this;
+    this.state = 'split';
+    ctx.hud.hint('');
+    ctx.holdPolice(true);
+    ctx.cutscene(this.splitShots(), () => this.afterSplit());
+  }
+
+  /** A point on the bridge `s` m along it and `x` m left of its middle. */
+  private at(s: number, x: number, y = 0): THREE.Vector3 {
+    return this.path.at(s).addScaledVector(leftOf(this.path.tangent(s)), x).setY(y);
+  }
+
+  private heading(s: number): number {
+    const t = this.path.tangent(s);
+    return Math.atan2(t.x, t.z);
+  }
+
+  /** Put a car on the bridge, moving along it at `speed` (negative: back toward the city). */
+  private drive(car: Vehicle, s: number, x: number, heading: number, speed: number): void {
+    const t = this.path.tangent(s);
+    car.place(this.at(s, x), heading);
+    car.body.setLinvel({ x: t.x * speed, y: 0, z: t.z * speed }, true);
+  }
+
+  private splitShots(): Shot[] {
+    const { player, partner, vault, crew, fx, sound, police } = this.ctx;
+    const side = crew.side;
+    // The convoy's line: its middle, along the bridge and across it.
+    const centre = player.position.addScaledVector(leftOf(player.forward), -side * BESIDE);
+    const s0 = this.path.project(centre);
+    const x0 = centre.clone().sub(this.path.at(s0)).dot(leftOf(this.path.tangent(s0)));
+    const lane = (this.lane = THREE.MathUtils.clamp(x0, -(BRIDGE.hw - 5), BRIDGE.hw - 5));
+    // Braking to a stop from whatever speed they're doing.
+    const v0 = Math.max(6, player.forwardSpeed);
+    const dz = THREE.MathUtils.clamp(v0 * 1.5, 22, 55);
+    const T = THREE.MathUtils.clamp((2 * dz) / v0, 2.8, 4.2);
+    const m = THREE.MathUtils.clamp((v0 * T) / dz, 0, 2.6);
+    const H = (k: number) => (k ** 3 - 2 * k ** 2 + k) * m + (-2 * k ** 3 + 3 * k ** 2);
+    const dH = (k: number) => (3 * k ** 2 - 4 * k + 1) * m + (-6 * k ** 2 + 6 * k);
+    const s1 = (this.stopAt = s0 + dz);
+    const along = (k: number) => s1 - dz + dz * H(k);
+    const pX = lane - side * BESIDE;
+    // Where each of them is now, off its place in the line-up (eased away as they stop).
+    const ideal = (k: number) => ({ player: this.at(along(k), lane + side * BESIDE), partner: this.at(along(k), pX), vault: this.at(along(k) - TOW, lane, VAULT_Y) });
+    const start = ideal(0);
+    const off = { player: player.position.sub(start.player), partner: partner.position.sub(start.partner), vault: vault.position.sub(start.vault) };
+    const turn = { player: angleDiff(this.heading(s0), player.heading), partner: angleDiff(this.heading(s0), partner.heading), vault: vault.mesh.quaternion.clone() };
+    const stop = (k: number) => {
+      const s = along(k);
+      const p = ideal(k);
+      const fade = 1 - ease(Math.min(1, k / 0.6));
+      const h = this.heading(s);
+      const speed = (dz * dH(k)) / T;
+      player.place(p.player.addScaledVector(off.player, fade), h + turn.player * fade);
+      partner.place(p.partner.addScaledVector(off.partner, fade), h + turn.partner * fade);
+      const t = this.path.tangent(s);
+      for (const car of [player, partner]) car.body.setLinvel({ x: t.x * speed, y: 0, z: t.z * speed }, true);
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.heading(s - TOW)).slerp(turn.vault, fade);
+      const at = p.vault.addScaledVector(off.vault, fade);
+      vault.body.setTranslation({ x: at.x, y: at.y, z: at.z }, true);
+      vault.body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+    };
+
+    // The pack coming up the bridge behind them, in every lane but the partner's: timed to be
+    // 50 m behind the cars when the partner turns back, so they meet on screen.
+    this.pack = [];
+    const PACK_SPEED = 18;
+    const untilPeel = T + 3.2 + 4.6 + 3.6;
+    [-11, -7.5, -4, -0.5, 3, 6.5, 10]
+      .filter((x) => Math.abs(x - pX) > 3.5)
+      .forEach((x, i) => {
+        const s = s1 - 50 - PACK_SPEED * untilPeel - (i % 2) * 16 - Math.random() * 6;
+        this.pack.push({ v: police.spawnAt(this.at(s, x), this.heading(s)), s, x, speed: PACK_SPEED, turn: 0 });
+      });
+    // The partner's peel-off: a reverse 180 out of the line, then flat out back down the bridge.
+    const spin = -side;
+    let partnerS: number | null = null;
+    const peel = (t: number) => {
+      const out = pX - side * 1.5;
+      if (t < 1.3) {
+        const e = ease(t / 1.3);
+        partnerS = s1 - 9 * e;
+        this.drive(partner, partnerS, pX - side * 1.5 * e, this.heading(partnerS) + spin * Math.PI * ease(Math.min(1, t / 1.1)), -7);
+      } else {
+        // Accelerating away from 5 m/s up to 26.
+        const u = t - 1.3;
+        const r = Math.min(u, 3.5);
+        partnerS = s1 - 9 - (5 * r + 3 * r * r + 26 * (u - r));
+        this.drive(partner, partnerS, out, this.heading(partnerS) + spin * Math.PI, -(5 + 6 * r));
+      }
+      if (t < 1.9) for (const w of partner.rearWheels()) if (Math.random() < 0.6) fx.tireSmoke(w, 0.9);
+      sound.tires(t < 1.6 ? 0.9 : 0, false);
+    };
+    // Per frame, all through the scene: the pack closes in, and swings round after the partner once it's gone by.
+    const movePack = (dt: number) => {
+      for (const c of this.pack) {
+        if (c.turn === 0 && partnerS !== null && c.s > partnerS - 4) c.turn = 1e-4;
+        if (c.turn > 0) c.turn = Math.min(1, c.turn + dt / 0.8);
+        const want = c.turn > 0 ? -22 : PACK_SPEED;
+        c.speed += (want - c.speed) * Math.min(1, dt * (c.turn > 0 ? 2.5 : 1));
+        c.s += c.speed * dt;
+        const yaw = this.heading(c.s) + Math.PI * ease(c.turn) * (c.x > pX ? 1 : -1);
+        this.drive(c.v, c.s, c.x, yaw, c.speed);
+        if (c.turn > 0 && c.turn < 1) for (const w of c.v.rearWheels()) if (Math.random() < 0.4) fx.tireSmoke(w, 0.7);
+      }
+    };
+    const me = crew.player;
+    const other = crew.partner;
+
+    return [
+      {
+        // Ahead of them, low on the deck: both cars stand on the brakes and the vault slides up behind.
+        duration: T,
+        start: () => vault.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true),
+        update: (t, dt) => {
+          const k = Math.min(1, t / T);
+          stop(k);
+          movePack(dt);
+          if (k > 0.2 && k < 0.95) for (const car of [player, partner]) for (const w of car.rearWheels()) if (Math.random() < 0.5) fx.tireSmoke(w, 0.6);
+        },
+        camera: (k) => ({ pos: this.at(s1 + 17, lane - side * 8, 1.5), look: this.at(along(k) - 4, lane, 1), fov: 50 }),
+        lines: [[0.2, other, 'Hold up! Look at the end of the bridge!']],
+      },
+      {
+        // Long lens down the bridge: the wall of cruisers, lights going.
+        duration: 3.2,
+        start: () => stop(1),
+        update: (_t, dt) => {
+          movePack(dt);
+          this.block.update(dt);
+        },
+        camera: (k) => ({ pos: this.at(s1 - 2, lane + 0.8, 3.2 + k * 0.2), look: this.at(BRIDGE.goalAlong - 75, 0, 1.2), fov: 7 - k }),
+        lines: [[0.3, other, 'That’s every cruiser they’ve got left.']],
+      },
+      {
+        // Over the vault, looking back: the pack is coming up behind.
+        duration: 4.6,
+        update: (_t, dt) => movePack(dt),
+        camera: (k) => ({ pos: this.at(s1 + 4, lane + side, 4.6 - k * 0.4), look: this.at(s1 - 120 + k * 20, lane, 1), fov: 24 }),
+        lines: [[0.3, other, 'And more behind us. There’s too many of them. We’ll need to split up!']],
+      },
+      {
+        // Down by the partner's cable as it comes off.
+        duration: 3.6,
+        update: (t, dt) => {
+          movePack(dt);
+          if (t > 2.6 && this.ctx.cables.some((c) => c.car === partner)) {
+            fx.burst(partner.towPoint(), 0.7);
+            this.cutLoose();
+          }
+        },
+        camera: (k) => ({ pos: this.at(s1 - TOW + 4.5 + k * 0.5, pX - side * 3.2, 1 + k * 0.2), look: this.at(s1 - 2.6, pX, 0.7), fov: 50 }),
+        lines: [[0.3, me, 'Then unhook. I’ll take it from here.']],
+      },
+      {
+        // High over the rail, looking down on the deck (the skyline out of shot): the partner spins
+        // round and charges the pack, and it turns to give chase.
+        duration: 4.2,
+        update: (t, dt) => {
+          peel(t);
+          movePack(dt);
+        },
+        camera: (k) => ({ pos: this.at(s1 - 20 - k * 6, pX - side * 20, 15), look: this.at(s1 - 28 - k * 10, pX * 0.5, 0), fov: 50 }),
+        lines: [[0.3, other, 'It’s all yours. I’ll pull these guys off your back!']],
+      },
+      {
+        // Low in front of the player's car, looking back at it, the one cable and the vault: alone
+        // now, with the partner and the cops going away down the bridge behind.
+        duration: 4.4,
+        start: () => sound.tires(0, false),
+        update: (t, dt) => {
+          peel(4.2 + t);
+          movePack(dt);
+        },
+        camera: (k) => ({
+          pos: this.at(s1 + 9 - k * 1.5, lane + side * (BESIDE + 3.2), 1.05 + k * 0.15),
+          look: this.at(s1 - 5, lane + side * 1.2, 0.9),
           fov: 46,
+        }),
+        lines: [[0.3, other, 'One car won’t move ten tons from a standstill. Hit your nitrous!']],
+      },
+    ];
+  }
+
+  /** The end of the split, however far the scene got: the player alone at the stop, the vault pinned, the partner gone. */
+  private afterSplit(): void {
+    if (this.state !== 'split') return;
+    const { ctx } = this;
+    const { vault, partner, crew, hud, sound } = ctx;
+    this.state = 'pull';
+    sound.tires(0, false);
+    this.cutLoose();
+    // The pack went after the partner, who's on the way back down the bridge.
+    ctx.clearStreets();
+    this.pack = [];
+    const s1 = this.stopAt;
+    ctx.placeConvoy(this.at(s1, this.lane), this.path.tangent(s1), this.at(s1 - TOW, this.lane));
+    vault.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true);
+    // The winch holds: the car strains against the vault instead of paying out cable.
+    for (const c of ctx.cables) c.clutch = false;
+    // Wherever the scene left it, but at least out of the way behind.
+    const away = Math.max(45, Math.min(s1 - 60, this.path.project(partner.position)));
+    this.drive(partner, away, this.lane - crew.side * (BESIDE + 1.5), this.heading(away) + Math.PI, -22);
+    ctx.partnerDriver.leave(this.path);
+    // A full tank for the pull.
+    ctx.reward(0, 1);
+    this.strain = 0;
+    this.pullTime = 0;
+    setTimeout(() => hud.news(NEWS.split), 1200);
+  }
+
+  /**
+   * The solo pull: the vault won't move until the STRAIN meter fills. Gas alone only
+   * gets it creaking (unless they keep at it a long while); the nitrous does the rest,
+   * and it comes back fast between bursts, so it can't be wasted here.
+   */
+  private strainPull(dt: number): void {
+    const { player, hud, director, sound } = this.ctx;
+    this.pullTime += dt;
+    const lit = player.nosActive;
+    const gas = player.controls.throttle;
+    const cap = this.pullTime > 15 ? 1 : 0.3;
+    if (lit) this.strain += dt * 0.45;
+    else if (gas > 0.1 && this.strain < cap) this.strain = Math.min(cap, this.strain + dt * (this.pullTime > 15 ? 0.04 : 0.12) * gas);
+    else if (gas <= 0.1) this.strain -= dt * 0.3;
+    this.strain = THREE.MathUtils.clamp(this.strain, 0, 1);
+    if (!lit) this.ctx.reward(0, dt * 0.2);
+    director.shake = Math.max(director.shake, this.strain * 0.6);
+    this.creak -= dt;
+    if (this.strain > 0.2 && this.creak <= 0) {
+      this.creak = 0.45 + Math.random() * 0.5;
+      sound.clank();
+    }
+    const prompt =
+      this.strain < 0.05 ? 'HOLD SHIFT FOR NITROUS  —  PULL IT ALONE' : !lit && this.strain >= cap - 0.01 ? 'TOO HEAVY  —  HIT THE NITROUS (SHIFT)!' : this.strain < 0.75 ? 'KEEP IT LIT!' : 'ALMOST…';
+    hud.meter('SOLO PULL', this.strain, prompt);
+    if (this.strain >= 1) this.rollFree();
+  }
+
+  /** It's moving: slow motion from beside the cable as ten tons lurch forward, and the police come on again. */
+  private rollFree(): void {
+    const { ctx } = this;
+    const { vault, player, director, sound, fx, hud } = ctx;
+    this.state = 'alone';
+    hud.meter(null);
+    for (const c of ctx.cables) c.clutch = true;
+    vault.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+    const dir = player.position.sub(vault.position.setY(0)).setY(0).normalize();
+    const m = vault.body.mass();
+    vault.body.applyImpulse({ x: dir.x * m * 6, y: m * 0.5, z: dir.z * m * 6 }, true);
+    // Low behind the vault on the open side of the deck (where the partner's car was), looking
+    // up the cable past the car to the wall at the far end.
+    const open = leftOf(dir).multiplyScalar(-ctx.crew.side);
+    director.slowmo(0.3, 1.6);
+    director.shake = 1.2;
+    director.play({
+      duration: 1.6,
+      frame: (k) => {
+        const v = vault.position.setY(0);
+        return {
+          pos: v.clone().addScaledVector(dir, -6 + k).addScaledVector(open, 3.5).setY(1.3 + k * 0.3),
+          look: v.clone().lerp(player.position, 0.6).setY(1.1),
+          fov: 50,
         };
       },
     });
-    setTimeout(() => this.cutLoose(), 900);
-    setTimeout(() => say(this.ctx, lines[1][0], lines[1][1]), 2600);
+    sound.crash(1);
+    fx.burst(vault.position.addScaledVector(dir, 1.6).setY(0.4), 1);
+    fx.puff(vault.position.setY(0), 10);
+    hud.banner('SOLO PULL', 'TEN TONS, ONE CAR  +750');
+    ctx.reward(750, 0.4);
+    ctx.holdPolice(false);
+    say(ctx, 'MIA', 'It’s moving! Now break through that wall!');
   }
 }
+
+const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 
 /** Yellow and black diagonal hazard stripes, one repeat per meter. */
 function hazardTexture(length: number): THREE.CanvasTexture {

@@ -51,6 +51,14 @@ export class Director {
     this.queue = shots.slice(1);
   }
 
+  /** Drop any shot and slow motion at once (a cutscene is taking over). */
+  cut(): void {
+    this.shot = null;
+    this.queue = [];
+    this.slowTarget = this.timeScale = 1;
+    this.slowLeft = 0;
+  }
+
   get busy(): boolean {
     return !!this.shot;
   }

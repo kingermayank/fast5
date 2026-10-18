@@ -121,22 +121,22 @@ export class Trees {
     return new THREE.Color(GREENS[Math.floor(this.rand() * GREENS.length)]);
   }
 
-  /** A tree on the ground at `pos`; `size` about 1 (6 m across). */
-  tree(pos: THREE.Vector3, size: number): void {
+  /** A tree standing at `pos` on ground `base` m up (a roof garden); `size` about 1 (6 m across). */
+  tree(pos: THREE.Vector3, size: number, base = 0): void {
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.rand() * Math.PI * 2);
     const s = new THREE.Vector3(size * (0.85 + this.rand() * 0.3), size * (0.8 + this.rand() * 0.35), size * (0.85 + this.rand() * 0.3));
-    const m = new THREE.Matrix4().compose(pos.clone().setY(0), q, s);
+    const m = new THREE.Matrix4().compose(pos.clone().setY(base), q, s);
     const cell = this.cell(pos);
     cell.canopies.push({ m, c: this.species() });
     cell.trunks.push(m);
   }
 
-  /** A shrub: a small canopy sitting on the ground, about `size` x 6 m across. */
-  shrub(pos: THREE.Vector3, size: number): void {
+  /** A shrub: a small canopy sitting on ground `base` m up, about `size` x 6 m across. */
+  shrub(pos: THREE.Vector3, size: number, base = 0): void {
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.rand() * Math.PI * 2);
     const s = new THREE.Vector3(size, size * 0.8, size);
     // Drop it so the bottom of the canopy is on the ground.
-    const m = new THREE.Matrix4().compose(pos.clone().setY(-(CANOPY_BOTTOM - 0.3) * size * 0.8), q, s);
+    const m = new THREE.Matrix4().compose(pos.clone().setY(base - (CANOPY_BOTTOM - 0.3) * size * 0.8), q, s);
     // Now and then a bougainvillea in flower.
     this.cell(pos).canopies.push({ m, c: new THREE.Color(this.rand() < 0.12 ? 0xc0307a : SHRUBS[Math.floor(this.rand() * SHRUBS.length)]) });
   }

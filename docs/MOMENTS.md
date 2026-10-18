@@ -26,9 +26,9 @@ Every moment follows the same shape:
 | 5 | **The Alley** | Cops follow into an alley and get crushed | Take the alley shortcut Mia offers | Rear cam: the vault scrapes both walls and flattens the cruisers behind | — |
 | 6 | **Bike Cops** | Motorcycle police flank the cars | Swing the vault to sweep bikes off | Bikes and riders tumble; combo counter | Bikes shoot, heat rises |
 | 7 | **Roman & Han** | Two "cop" cars turn on the police | Survive to the checkpoint; then they take out the pursuit | Allied cruisers ram cops; banter | — |
-| 8 | **The Swap** | Vault moved into a garbage truck, decoy hooked up | Drive into the garbage-truck convoy's gap under an overpass, matching speed | Quick cut and fade; Mia: "Swap's done. You're dragging an empty box." | Too fast or slow: they wave you around for another pass |
-| 9 | **Cut Loose** | Dom unhooks Brian on the bridge | As Dom: you're alone with the vault. As Brian: you're cut free and must turn back | Cable snaps (sparks, recoil), music drop | — |
-| 10 | **Solo NOS Drag** | One car hauling four tonnes alone | Fire NOS to keep the vault moving; NOS meter fed by wrecks and near misses | Exhaust flames, FOV punch, engine scream | Out of NOS: crawling speed, cops close in |
+| 8 | **The Swap** | Vault swapped for a decoy out of the cops' sight | Drive into the expressway tunnel past the bank, where Han and Roman wait with a box truck and the decoy | Cutscene: Han drops the gate behind the convoy, the cables come off, the real vault is winched up a ramp into the truck, the cars hook onto the decoy and roll out; the helicopter loses the vault in there, and the cops come through the gate after it | Skip the tunnel and the swap happens off screen (the old ending) |
+| 9 | **The Split** | The crew splits up on the bridge | Your partner sees the wall of cruisers ahead and the pack behind: "There's too many of them. We'll need to split up!" | Cutscene: both cars stop, the partner unhooks, spins round and charges the pack, which turns and follows them off | — |
+| 10 | **Solo NOS Pull** | One car hauling the vault alone | Stopped dead on one cable, hold Shift: nitrous fills the SOLO PULL meter (gas alone stalls at a third) | Slow-mo from beside the cable as it lurches free, +750, the cops come again | Nitrous comes back fast between bursts, and gas alone finishes it eventually |
 | 11 | **Wrecking Ball** | Dom spins and smashes Reyes's convoy | Handbrake 180° to swing the vault through the convoy | Chain wrecks in slow motion; final slam launches the Charger onto Reyes's car (cutscene) | — |
 | 12 | **Brian's Return** | Brian comes back and stops Zizi | (If playing Brian) race back to Dom before the timer runs out | Cutscene | — |
 | 13 | **24 Hours** | Hobbs's deal; empty vault reveal | Cutscene | Score screen, medals per moment | — |
@@ -52,9 +52,12 @@ Every moment follows the same shape:
 1. **Foundation**: slow motion, camera director, NOS, tire smoke and skid marks, banners. ✅ done
 2. **The Pull**, **Spike Strip** and **Bank Job**. ✅ done (the bank swing pays out cable and flings the
    vault at the lobby so a well-timed handbrake reliably connects)
-3. Roadblocks mid-chase and the bridge finale. ✅ done: partway across the bridge you tell your partner
-   to unhook (slow-mo side shot, radio exchange) and take the vault on alone on one cable, then smash
-   the police blockade at the far end (the roadblock's replay, bigger). Still to come: The Swap,
-   Wrecking Ball, Brian's Return, 24 Hours (the swap should happen *before* the bridge).
+3. Roadblocks mid-chase and the bridge finale. ✅ done: the police blockade at the far end of the
+   bridge (two rows; the roadblock's replay, bigger).
+3b. **The Swap**, **The Split** and the **Solo NOS Pull**. ✅ done: the tunnel (`src/tunnel.ts`, built
+   by `City.buildTunnel`), the decoy and the truck; the split and the pull are the bridge finale in
+   `src/moments.ts`. Both cutscenes play in-engine mid-chase (`playScene` in main.ts holds the
+   police and the chase clock) and can be skipped. Still to come: Wrecking Ball, Brian's Return,
+   24 Hours.
 4. The Alley, Bike Cops, Roman & Han, Pillar Slam.
 5. Polish: music layers, medals, AI video cutscenes, tuning from playtests.

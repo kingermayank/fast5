@@ -4,6 +4,8 @@ import type { Vehicle } from './vehicle';
 import { CAUGHT_BIT, HERO_BIT, STREET_BIT, TOW_POINT } from './vehicle';
 
 const HALF = { x: 1.5, y: 1.25, z: 1.5 };
+/** Cable the winches keep between each car and the vault (m). */
+export const CABLE_TOW_LENGTH = 10;
 /** Rounded edges on the collider, so the vault glances off a building's corner instead of hooking on it. */
 const ROUNDING = 0.35;
 export const VAULT_MASS = 4000;
@@ -220,9 +222,17 @@ export class Vault {
     syncMesh(this.mesh, this.body);
   }
 
+  /** The warm light its steel catches from the tunnel's sodium lamps (0..1); copies of its mesh share it. */
+  glow(k: number): void {
+    for (const m of this.steel) m.emissiveIntensity = k;
+  }
+
+  private steel: THREE.MeshStandardMaterial[] = [];
+
   private buildMesh(): void {
-    const steel = new THREE.MeshStandardMaterial({ color: 0x8a8f96, metalness: 0.85, roughness: 0.45 });
-    const dark = new THREE.MeshStandardMaterial({ color: 0x3a3e44, metalness: 0.8, roughness: 0.5 });
+    const steel = new THREE.MeshStandardMaterial({ color: 0x8a8f96, metalness: 0.85, roughness: 0.45, emissive: 0x47301a, emissiveIntensity: 0 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x3a3e44, metalness: 0.8, roughness: 0.5, emissive: 0x2a1c10, emissiveIntensity: 0 });
+    this.steel = [steel, dark];
     const box = new THREE.Mesh(new THREE.BoxGeometry(HALF.x * 2, HALF.y * 2, HALF.z * 2), steel);
     box.castShadow = box.receiveShadow = true;
     this.mesh.add(box);
@@ -288,6 +298,8 @@ export class Cable {
   length: number;
   /** Current tension (N), for effects. */
   tension = 0;
+  /** The slip clutch can pay out cable; off, the cable holds however hard the car pulls (a pull off the mark). */
+  clutch = true;
 
   constructor(
     private world: RAPIER.World,
@@ -346,7 +358,7 @@ export class Cable {
     const opening = pointVelocity(this.vault.body, b).sub(pointVelocity(this.car.body, a)).dot(n);
     let f = Math.min(MAX_PULL, STIFFNESS * stretch + DAMPING * opening);
     if (f <= 0) return; // a cable can only pull
-    if (f > SLIP_TENSION && opening > 2) {
+    if (this.clutch && f > SLIP_TENSION && opening > 2) {
       // Snatched hard: the clutch slips, letting out cable at the rate the ends are parting.
       this.length += opening * dt;
       this.syncJoint();

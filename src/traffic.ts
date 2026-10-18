@@ -3,7 +3,7 @@ import { angleTo } from './ai';
 import { City } from './city';
 import { RAPIER } from './physics';
 import { offsetLine, Path } from './roads';
-import { BANK, MAP, type MapEdge, type MapNode, SPIKES } from './roadmap';
+import { BANK, inTunnel, MAP, type MapEdge, type MapNode, SPIKES } from './roadmap';
 import { Vehicle, type VehicleSpec } from './vehicle';
 
 /**
@@ -158,6 +158,15 @@ export class Traffic {
     }
   }
 
+  /** Take the cars `where` picks off the road (a set piece needs it clear). */
+  remove(where: (p: THREE.Vector3) => boolean): void {
+    for (let i = this.cars.length - 1; i >= 0; i--) {
+      if (!where(this.cars[i].v.position)) continue;
+      this.cars[i].v.dispose(this.scene);
+      this.cars.splice(i, 1);
+    }
+  }
+
   /** Wreck a car; hit by something at `from`, it's knocked away from it. */
   wreck(c: Civilian, from: THREE.Vector3 | null): void {
     c.loose = true;
@@ -195,7 +204,7 @@ export class Traffic {
       const at = lane.at(s);
       // Mostly where the chase is heading.
       if (at.clone().sub(player).normalize().dot(fwd) < -0.3 && Math.random() < 0.7) continue;
-      if (at.distanceTo(player) < SPAWN_MIN || this.visible(at)) continue;
+      if (at.distanceTo(player) < SPAWN_MIN || this.visible(at) || inTunnel(at, 30)) continue;
       if (this.cars.some((c) => c.v.position.distanceTo(at) < 14)) continue;
       const t = lane.tangent(s);
       const color = COLORS[Math.floor(Math.random() * COLORS.length)];

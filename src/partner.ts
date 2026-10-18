@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RAPIER } from './physics';
-import { leftOf } from './roads';
+import { leftOf, type Path } from './roads';
 import type { Vehicle } from './vehicle';
 
 /**
@@ -68,6 +68,8 @@ export class PartnerDriver {
   readonly slot = new THREE.Vector3();
   /** Cut loose from the vault (the bridge finale): it falls back and follows at a distance. */
   released = false;
+  /** Gone to lead the cops away (the bridge finale): it drives back down this road to its start. */
+  private leaving: Path | null = null;
   private trail: THREE.Vector3[] = [];
   private beside = SPACING;
   private behind = 0;
@@ -91,11 +93,21 @@ export class PartnerDriver {
     return this.trail;
   }
 
+  /** Cut loose and sent back along `path` (toward its start) to draw the cops off. */
+  leave(path: Path): void {
+    this.leaving = path;
+    this.released = true;
+  }
+
   /** Per physics step, instead of the partner's pedals: hold the place beside the player. */
   drive(dt: number, ctx: PartnerContext): void {
     const { player, me } = ctx;
     this.recordTrail(player);
     this.wantsRecovery = false;
+    if (this.leaving) {
+      this.driveAway(dt, me, this.leaving);
+      return;
+    }
     const at = player.position;
     const f = player.forward;
     const out = leftOf(f).multiplyScalar(this.side);
@@ -167,6 +179,18 @@ export class PartnerDriver {
       if (this.clear(p, heading)) return { pos: p.clone(), heading };
     }
     return null;
+  }
+
+  /** Flat out back along the road it was sent down, then parked at its far end out of the way. */
+  private driveAway(dt: number, me: Vehicle, path: Path): void {
+    this.thoughts.mode = 'released';
+    const s = path.project(me.position);
+    if (s < 40) {
+      me.follow(dt, new THREE.Vector3(), me.heading);
+      return;
+    }
+    const dir = path.at(s - 25).sub(me.position).setY(0).normalize();
+    me.follow(dt, dir.clone().multiplyScalar(24), Math.atan2(dir.x, dir.z));
   }
 
   /** Distance to the nearest wall (fixed geometry) from `at` along `dir`, up to a few meters past the spacing. */

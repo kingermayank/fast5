@@ -24,8 +24,11 @@ export const NEWS = {
   tireBlown: ['LIVE', 'POLICE STINGER SHREDS A TIRE', 'One of the getaway cars is running on a rim  •  Sparks seen for blocks'],
   bridge: ['LIVE', 'THE CHASE REACHES THE BRIDGE', 'The convoy is crossing the water  •  Police are closing the far end'],
   roadblock: ['LIVE', 'SAFE SMASHES THROUGH A ROADBLOCK', 'Police cruisers scattered across the avenue  •  The convoy did not even slow down'],
+  tunnel: ['LIVE', 'THE SAFE VANISHES INTO A TUNNEL', 'Gates came down behind the convoy on the expressway  •  For a minute nobody could see it  •  It is out again and still running'],
+  split: ['LIVE', 'THE GETAWAY CARS SPLIT UP', 'One car has turned back into the pursuit  •  The other is dragging the safe on its own'],
   blockade: ['BREAKING', 'THE BRIDGE BLOCKADE IS DOWN', 'One car and a ten-ton safe just broke a wall of police cruisers  •  The second car has broken away'],
   finish: ['BREAKING', 'POLICE SURROUND THE SAFE ON THE BRIDGE', 'Officers have the vault  •  Both drivers still at large  •  More at the top of the hour'],
+  empty: ['BREAKING', 'THE SAFE IS EMPTY', 'Police stopped the vault on the bridge and opened it: there is nothing inside  •  Both drivers still at large'],
 } satisfies Record<string, NewsBreak | (NewsBreak | null)[]>;
 
 /** A milestone in police cars wrecked, e.g. 10, 25, 50. */

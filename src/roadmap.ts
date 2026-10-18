@@ -333,5 +333,40 @@ export const BANK = (() => {
   return { frame: f, w: c[0].distanceTo(c[1]), d: c[0].distanceTo(c[3]), lobbyH: 6, h: 28, corner: MAP.node(RAW.poi.bank.corner).pos };
 })();
 
+/**
+ * The tunnel on the expressway between the bank and the bridge, where Roman and
+ * Han swap the real vault for the decoy: a frame at its entrance (x across, left
+ * of forward; z along it), its length, the road's half-width in it, and the road
+ * it's on (from the bank's corner). It's centred on the first long straight past
+ * the bank, well clear of the corner.
+ */
+export const TUNNEL = (() => {
+  const k = PLAN.findIndex((n) => n.pos.distanceTo(BANK.corner) < 5);
+  const edge = MAP.between(PLAN[k], PLAN[k + 1])!;
+  const pts = MAP.from(edge, PLAN[k]);
+  let along = 0;
+  let pick = pts.length - 2;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const len = pts[i].distanceTo(pts[i + 1]);
+    if (along >= 250 && len >= 180) {
+      pick = i;
+      break;
+    }
+    along += len;
+  }
+  const a = pts[pick];
+  const b = pts[pick + 1];
+  const run = a.distanceTo(b);
+  const length = Math.min(150, run - 40);
+  const dir = b.clone().sub(a).normalize();
+  return { frame: frame(a.clone().addScaledVector(dir, (run - length) / 2), dir), length, hw: edge.hw, road: pts };
+})();
+
+/** Inside the tunnel (with `margin` m to spare all round). */
+export function inTunnel(p: THREE.Vector3, margin = 0): boolean {
+  const l = TUNNEL.frame.toLocal(p);
+  return l.z > -margin && l.z < TUNNEL.length + margin && Math.abs(l.x) < TUNNEL.hw + margin;
+}
+
 /** Where the cops lay the spike strip: on Mia's route, facing the way she sends you. */
 export const SPIKES = frame(new THREE.Vector3(RAW.poi.spikes.p[0], 0, RAW.poi.spikes.p[1]), new THREE.Vector3(RAW.poi.spikes.d[0], 0, RAW.poi.spikes.d[1]));

@@ -184,8 +184,11 @@ export class Chopper {
     return this.pos;
   }
 
-  /** `away` is the camera's view direction along the ground: the helicopter stays out that way. */
-  update(dt: number, target: THREE.Vector3, targetVel: THREE.Vector3, away: THREE.Vector3): void {
+  /**
+   * `away` is the camera's view direction along the ground: the helicopter stays out that way.
+   * `lost`: it can't see the target (it's in the tunnel), so the searchlight goes off till it's out.
+   */
+  update(dt: number, target: THREE.Vector3, targetVel: THREE.Vector3, away: THREE.Vector3, lost = false): void {
     if (!this.active || dt <= 0) return;
     this.time += dt;
     // Station a little ahead of the convoy and beyond it, sweeping slowly from side to side.
@@ -201,7 +204,7 @@ export class Chopper {
     this.vel.addScaledVector(acc, dt);
     if (this.vel.length() > 85) this.vel.setLength(85);
     this.pos.addScaledVector(this.vel, dt);
-    this.on = Math.min(1, this.on + dt * 0.5);
+    this.on = lost ? Math.max(0, this.on - dt * 1.5) : Math.min(1, this.on + dt * 0.5);
 
     // Nose into the wind of its own motion, banked into turns and dipped when it speeds up.
     const ground = Math.hypot(this.vel.x, this.vel.z);

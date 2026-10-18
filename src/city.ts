@@ -5,7 +5,7 @@ import type { CarModel } from './carModel';
 import { STREET_GROUPS } from './vehicle';
 import { seeThrough } from './cutaway';
 import { RAPIER, syncMesh } from './physics';
-import { BANK, BRIDGE, GOAL, MAP, type MapEdge, PLAN, points, RAW } from './roadmap';
+import { BANK, BRIDGE, GOAL, inTunnel, MAP, type MapEdge, PLAN, points, RAW, TUNNEL } from './roadmap';
 import { leftOf } from './roads';
 import {
   arrowTexture, asphaltTexture, asphaltWetTexture, awningTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, helipadTexture, mosaicTexture, roofTexture, sidewalkTexture, signTexture,
@@ -252,6 +252,7 @@ export class City {
     this.buildStation();
     this.buildBank();
     this.buildBridge();
+    this.buildTunnel();
     this.buildWalls();
     this.buildProps();
     this.buildFiller();
@@ -980,7 +981,7 @@ export class City {
           const t = MAP.tangentAt(e, s);
           const l = leftOf(t).multiplyScalar(side);
           const curb = p.clone().addScaledVector(l, e.hw + (important ? 1.2 : 0.8));
-          if (MAP.onRoad(curb, 0.5) || this.inBuilding(curb.x, curb.z, 0.8)) continue;
+          if (MAP.onRoad(curb, 0.5) || this.inBuilding(curb.x, curb.z, 0.8) || inTunnel(curb, 8)) continue;
           const out = { along: t, out: l };
           const roll = this.rand();
           if (roll < (important ? 0.3 : 0.4)) this.addPalm(curb);
@@ -1395,6 +1396,102 @@ export class City {
       beam.position.copy(GOAL.pos.clone().setY(8));
       beam.rotation.y = yaw;
       this.group.add(beam);
+    }
+  }
+
+  /** Where the tunnel's sodium lamps light the road (for the pools groundfx.ts paints). */
+  readonly tunnelLamps: THREE.Vector3[] = [];
+
+  /**
+   * The tunnel on the expressway (TUNNEL in roadmap.ts), cut and covered: concrete
+   * walls along the curbs under a roof with a lawn and a few trees on it, banked up
+   * with grass on both sides, portals with name signs, and sodium lamps down the
+   * walls and the ceiling. The walls and the roof are solid, so the chase camera
+   * pulls in under it; from overhead the roof is cut away round the player.
+   */
+  private buildTunnel(): void {
+    const f = TUNNEL.frame;
+    const len = TUNNEL.length;
+    const yaw = f.heading;
+    const wallIn = TUNNEL.hw + 0.7;
+    const wallOut = wallIn + 1.2;
+    const roofTop = 7.4;
+    // Banks of earth either side, from the roof's edge down to the ground.
+    const bank = 15;
+    const concrete = this.concreteMat;
+    const toWorld = new THREE.Matrix4().makeRotationY(yaw).setPosition(f.origin);
+    const mid = f.toWorld(0, len / 2);
+    for (const side of [-1, 1]) {
+      const c = f.toWorld(side * (wallIn + 0.6), len / 2);
+      this.fixedBox(c.x, 3.25, c.z, 0.6, 3.25, len / 2, concrete, yaw);
+    }
+    this.fixedBox(mid.x, 6.95, mid.z, wallOut, 0.45, len / 2, concrete, yaw);
+
+    // Portals: a deep header over the opening between two pilasters, and the name over the way in.
+    for (const z of [0, len]) {
+      const h = f.toWorld(0, z);
+      this.fixedBox(h.x, 7.4, h.z, wallOut + 0.4, 1.2, 0.6, concrete, yaw);
+      for (const side of [-1, 1]) {
+        const p = f.toWorld(side * (wallIn + 0.8), z);
+        this.fixedBox(p.x, 4.3, p.z, 0.8, 4.3, 0.8, concrete, yaw);
+      }
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshBasicMaterial({ map: signTexture('TÚNEL', '#1f6b3a', '#ffffff') }));
+      const out = z === 0 ? -1 : 1;
+      sign.position.copy(f.toWorld(0, z + out * 0.62, 7.5));
+      sign.rotation.y = out < 0 ? yaw + Math.PI : yaw;
+      this.group.add(sign);
+    }
+
+    // The lawn on the roof and the grass banks, in the frame's local space (x across, z along).
+    const lawn = seeThrough(new THREE.MeshStandardMaterial({ map: grassTexture(), roughness: 1 }));
+    /** A flat polygon facing `facing` (corners wound either way), mapped from above, 8 m per texture repeat. */
+    const face = (corners: number[][], facing: THREE.Vector3, mat: THREE.Material) => {
+      const [a, b, c] = corners.map((p) => new THREE.Vector3(...p));
+      const pts = b.sub(a).cross(c.sub(a)).dot(facing) < 0 ? [corners[0], ...corners.slice(1).reverse()] : corners;
+      const tris = pts.slice(1, -1).flatMap((p, i) => [pts[0], p, pts[i + 2]]);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(tris.flat(), 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(tris.flatMap((p) => [(p[0] + p[1]) / 8, p[2] / 8]), 2));
+      geo.computeVertexNormals();
+      this.batch(geo.applyMatrix4(toWorld), mat);
+    };
+    const up = new THREE.Vector3(0, 1, 0);
+    face([[-wallOut, roofTop + 0.02, 0], [wallOut, roofTop + 0.02, 0], [wallOut, roofTop + 0.02, len], [-wallOut, roofTop + 0.02, len]], up, lawn);
+    for (const side of [-1, 1]) {
+      const top = side * wallOut;
+      const foot = side * (wallOut + bank);
+      face([[top, roofTop, 0], [foot, 0.03, 0], [foot, 0.03, len], [top, roofTop, len]], up, lawn);
+      // The banks' ends: concrete retaining walls beside the portals.
+      for (const z of [0, len]) face([[top, 0, z], [top, roofTop + 1.2, z], [foot, 0, z]], new THREE.Vector3(0, 0, z === 0 ? -1 : 1), concrete);
+    }
+
+    // Sodium lamps: strips high on both walls, and two rows down the ceiling over the lanes.
+    const sodium = new THREE.MeshStandardMaterial({ color: 0x3a2410, emissive: 0xff9440, emissiveIntensity: 3.5 });
+    for (let z = 4; z < len - 2; z += 7.5) {
+      for (const side of [-1, 1]) {
+        const strip = new THREE.BoxGeometry(0.16, 0.22, 1.4).translate(side * (wallIn - 0.08), 5.6, z);
+        this.batch(strip.applyMatrix4(toWorld), sodium);
+      }
+    }
+    for (let z = 6; z < len - 4; z += 10) {
+      for (const x of [-0.45, 0.45]) {
+        const lamp = new THREE.BoxGeometry(0.4, 0.12, 2.2).translate(x * TUNNEL.hw, 6.44, z);
+        this.batch(lamp.applyMatrix4(toWorld), sodium);
+        this.tunnelLamps.push(f.toWorld(x * TUNNEL.hw, z));
+      }
+    }
+
+    // A small park on the roof, and shrubs down the banks.
+    for (let n = 0; n < 7; n++) {
+      const p = f.toWorld((this.rand() - 0.5) * 2 * (TUNNEL.hw - 2), 14 + this.rand() * (len - 28));
+      this.trees.tree(p, 0.8 + this.rand() * 0.45, roofTop);
+    }
+    for (const side of [-1, 1]) {
+      for (let n = 0; n < 6; n++) {
+        const d = 2 + this.rand() * (bank - 5);
+        const p = f.toWorld(side * (wallOut + d), 8 + this.rand() * (len - 16));
+        this.trees.shrub(p, 0.25 + this.rand() * 0.15, roofTop * (1 - d / bank));
+      }
     }
   }
 

@@ -127,6 +127,29 @@ export class Police {
   }
 
   /**
+   * Take cruisers off the road (those `where` picks, or all of them) without counting
+   * them as wrecked: they've lost the convoy, or gone after someone else. The next
+   * ones come a few seconds after the chase picks up again.
+   */
+  dismiss(where?: (p: THREE.Vector3) => boolean): void {
+    for (let i = this.cops.length - 1; i >= 0; i--) {
+      const c = this.cops[i];
+      if (where && !where(c.v.position)) continue;
+      c.v.dispose(this.scene);
+      this.cops.splice(i, 1);
+    }
+    this.spawnTimer = Math.max(this.spawnTimer, 3);
+  }
+
+  /** A cruiser at `at` facing `heading`, for a cutscene to drive (it isn't stepped while the scene runs). */
+  spawnAt(at: THREE.Vector3, heading: number): Vehicle {
+    const v = new Vehicle(this.world, COP_SPEC, at, heading);
+    this.scene.add(v.model.group);
+    this.cops.push({ v, wrecked: false, lastSpeed: 0, stuck: 0, reversing: 0, wreckedFor: 0, closing: 0, touching: false });
+    return v;
+  }
+
+  /**
    * A cruiser ramming the player. The hero cars shrug off most of a hit in the
    * physics (main.ts) so it can't spin you out; instead you get a shove you can
    * feel and drive through, with a crunch and a camera kick.

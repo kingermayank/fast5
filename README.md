@@ -1,7 +1,7 @@
 # Fast5 — The Vault
 
 A browser fan game recreating the vault-heist finale of *Fast Five*: Dom's black Charger and
-Brian's blue Skyline chained to a four-ton vault, ripping it out of a Rio police station and dragging it through the
+Brian's blue Skyline chained to a ten-ton vault, ripping it out of a Rio police station and dragging it through the
 city with every cop on Reyes's payroll in pursuit.
 
 The city is real: the film shot its "Rio" vault chase in San Juan, Puerto Rico, on Avenida Ponce
@@ -90,18 +90,25 @@ burnout. If the crew still gets nowhere for a few seconds, it's lined back up on
    turn to throw the vault into the lobby). See [`docs/MOMENTS.md`](docs/MOMENTS.md) for all set pieces.
 2. **Chase:** get to the bridge by any road. The GPS (arrow, minimap line and gold chevrons on
    the road) shows Mia's route, which passes the set pieces, and reroutes the moment you take
-   another street; columns of light mark the bank and the swap point. Swing the vault into cop
+   another street; columns of light mark the bank, the tunnel and the swap point. Swing the vault into cop
    cars to wreck them (handbrake, then let the vault fly wide): a swing that connects is worth
    extra and now and then gets a slow-motion replay, wrecks in quick succession are streaks worth
    more, and every wreck refills nitrous. Watch for civilian traffic. Heat rises with time and destruction, and the news follows.
    Once the heat is up, the police throw a roadblock across your route, and another a while after
    each one: ram it or swing the vault through it.
+   **The swap:** past the bank, the expressway dives into a tunnel where Han and Roman wait with a
+   box truck and a decoy. Drive in: Han drops the gate behind you, the real vault is winched up into
+   the truck and your cables go onto the decoy (a cutscene; Enter skips it). From there you're
+   dragging an empty safe, and the cops come through the gate after it.
 3. **Don't get boxed in:** if cops pin you at low speed, the BUSTED meter fills (a tip tells you
    how to break out).
-4. **Bridge:** Mia's route runs down Ponce de León, left onto the Piñero expressway, through the toll
-   plaza and onto the Moscoso bridge. The police have walled off the far end with cruisers. Partway
-   across you cut your partner loose and take the vault on alone, on one cable, where it swings like
-   a wrecking ball: break the wall and reach the yellow gantry out over the lagoon.
+4. **Bridge:** Mia's route runs down Ponce de León, left onto the Piñero expressway, through the
+   tunnel and the toll plaza and onto the Moscoso bridge. The police have walled off the far end with
+   two rows of cruisers, and more are coming up behind. Partway across your partner calls it: too
+   many, you have to split up. They unhook, spin round and lead the pack away, and you're left with
+   the vault stopped dead on one cable: hold **Shift** for nitrous to fill the SOLO PULL meter and get
+   it rolling (gas alone won't do it). Then it swings like a wrecking ball: break the wall and reach
+   the yellow gantry out over the lagoon.
 5. **Rank:** the end screen grades the run (S, A, B or C) on style, takedowns, damage, time and
    challenges, and shows your best. The first runs coach you through the controls; every run starts
    by listing its three challenges.
@@ -132,8 +139,10 @@ uses the Barlow Condensed and Inter typefaces (SIL Open Font License, in `ui/fon
 Debug URL flags: `?crew=dom|brian` skips the menu and cutscene (add `&intro` to watch it),
 `?view=chase` starts behind the car instead of overhead,
 `?autopilot` follows the GPS (`?autopilot=detour` disobeys it at random intersections to test
-rerouting, `?autopilot=wander` turns at random), `?nocops` disables police, `?at=bridge` starts the
-chase at the foot of the bridge (for the finale),
+rerouting, `?autopilot=wander` turns at random), `?nocops` disables police, `?at=bank`, `?at=tunnel`,
+`?at=bridge` and `?at=split` start the chase short of the bank, short of the tunnel, at the foot of
+the bridge, and just short of where the crew splits up (the last two with the swap done), `?roadblock`
+sets up a roadblock as soon as there's a straight for it,
 `?timescale=4&renderEvery=8` runs the simulation faster for automated tests, `?cam=x,y,z,lookX,lookY,lookZ`
 holds the title-screen camera at a point (for looking round the map), and `?capture` steps the
 game only when `window.fast5Frame(n)` is called (fixed 1/30 s frames) for recording smooth clips
@@ -141,7 +150,8 @@ headlessly. `window.fast5()` in the
 console returns a state snapshot, including partner-quality stats (`partnerQuality`) and what the
 partner is currently doing (`partnerThinks`), hard hits on the player's car (`impacts`), time spent
 stuck (`stuck`: the player pushing but not moving, the vault wedged, the partner out of place), cars
-thrown out of the rig (`rigThrows`), automatic resets after getting stuck (`resets`) and the GPS
+thrown out of the rig (`rigThrows`), automatic resets after getting stuck (`resets`), the set pieces'
+state (`bank`, `roadblock`, `swap`, `finale` with the solo pull's strain, `policeHeld`) and the GPS
 reroute log (`rerouteLog`).
 
 ## Code layout
@@ -158,7 +168,8 @@ reroute log (`rerouteLog`).
 - `src/roadmap.ts`: the map (`src/map/sanjuan.json`): street graph, "where am I on the road" queries, set-piece frames
 - `src/roads.ts`: the street network as the AI sees it (lanes along curved streets, intersections, route turns, bend speeds)
 - `src/gps.ts`: GTA-style navigation: shortest route over the street graph, live rerouting
-- `src/moments.ts`: the set pieces (The Pull, Spike Strip, Bank Job, roadblocks, the bridge finale)
+- `src/moments.ts`: the set pieces (The Pull, Spike Strip, Bank Job, roadblocks, the bridge finale: the split and the solo pull)
+- `src/tunnel.ts`: the swap in the tunnel (Han and Roman's truck, the decoy, the gate, the cutscene)
 - `src/director.ts`: slow motion and cinematic camera shots for big moments
 - `src/broadcast.ts`, `src/chopper.ts`: RIO 24H's news breaks, and its helicopter and searchlight
 - `src/traffic.ts`: civilian cars driving the lanes round the chase
@@ -175,7 +186,8 @@ reroute log (`rerouteLog`).
 - `src/city.ts`: the city from the map: streets with Rio wave-mosaic sidewalks, lane lines, stop lines,
   turn arrows and working traffic lights; real buildings (tiled pitched roofs on the houses, balconies,
   shop awnings, rooftop tanks, penthouses, pools and masts), parks, police HQ with breakable wall, the bank,
-  props (palms, lamps, benches, bins, kiosks, parked cars), the bridge and toll plaza, seawalls, the distant city
+  props (palms, lamps, benches, bins, kiosks, parked cars), the expressway tunnel, the bridge and toll plaza,
+  seawalls, the distant city
 - `src/architecture.ts`: building parts from footprints (pitched roofs, parapets, balconies, awnings)
 - `src/vegetation.ts`: soft rounded trees in Rio's colours, shrubs and palms
 - `tools/map/`: fetches OpenStreetMap data and builds the map (see "The map" above)

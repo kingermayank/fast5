@@ -6,7 +6,7 @@ import { BreachScene } from './breach';
 import { NEWS, wreckNews } from './broadcast';
 import { Chopper, SPOT_RADIUS } from './chopper';
 import { CAR_STARTS, City, LAMP_HEAD, STATION_FACADE_X, VAULT_START, VAULT_START_HEADING } from './city';
-import { Cutscene } from './cutscene';
+import { Cutscene, type Shot } from './cutscene';
 import { Coach } from './coach';
 import { CUTAWAY } from './cutaway';
 import { Director } from './director';
@@ -17,18 +17,19 @@ import { BEACONS, GroundFx } from './groundfx';
 import { Hud } from './hud';
 import { Input, type ControlState } from './input';
 import type { Prop } from './city';
-import { BankJob, BridgeFinale, type MomentContext, Roadblock, SpikeStrip, ThePull } from './moments';
+import { BankJob, BridgeFinale, type MomentContext, Roadblock, SpikeStrip, SPLIT_AT, ThePull } from './moments';
 import { OverheadCamera } from './overhead';
 import { PartnerDriver } from './partner';
 import { curveSpeed, exits, lanePath, leftOf, nextIntersection, Path, roadDir, routeExit } from './roads';
-import { BANK, BRIDGE, GOAL, MAP, onBridge, PLAN, SPIKES } from './roadmap';
+import { BANK, BRIDGE, GOAL, inTunnel, MAP, onBridge, PLAN, SPIKES, TUNNEL } from './roadmap';
 import { FIXED_DT, initPhysics, RAPIER } from './physics';
 import { Police } from './police';
 import { Rig } from './rig';
 import { RiveUi } from './riveui';
 import { Run } from './run';
 import { Traffic } from './traffic';
-import { Cable, Vault } from './vault';
+import { TunnelSwap } from './tunnel';
+import { Cable, CABLE_TOW_LENGTH, Vault } from './vault';
 import { Vehicle, type VehicleSpec } from './vehicle';
 import { CUTSCENE_VIDEOS } from './videos';
 import { Voice } from './voice';
@@ -58,8 +59,6 @@ export const CHARACTERS: Record<CharacterId, { name: string; spec: VehicleSpec; 
 };
 
 type State = 'select' | 'cutscene' | 'breach' | 'chase' | 'outro' | 'busted' | 'lost';
-
-const CABLE_TOW_LENGTH = 10;
 
 /** Swap the procedural Christ the Redeemer for the downloaded model, if it loaded. */
 function useStatueModel(statue: THREE.Group): void {
@@ -159,7 +158,10 @@ async function start(): Promise<void> {
   let bankJob: BankJob | null = null;
   let bridge: BridgeFinale | null = null;
   let roadblock: Roadblock | null = null;
+  let swap: TunnelSwap | null = null;
   let momentCtx: MomentContext | null = null;
+  /** A set piece has the police off the road (the tunnel swap, the split on the bridge). */
+  let policeHeld = false;
 
   function createMoments(): void {
     const ctx: MomentContext = (momentCtx = {
@@ -171,10 +173,13 @@ async function start(): Promise<void> {
       hud,
       voice,
       director,
+      police,
       player,
       partner,
+      partnerDriver: partnerAi,
       vault,
       cables,
+      crew: { player: character === 'dom' ? 'DOM' : 'BRIAN', partner: character === 'dom' ? 'BRIAN' : 'DOM', side: CHARACTERS[character].side },
       route: () => gps.nodes,
       reward: (points, refill) => {
         style += points;
@@ -183,11 +188,24 @@ async function start(): Promise<void> {
       addDamage: (amount) => {
         damage += amount;
       },
+      cutscene: playScene,
+      placeConvoy,
+      hook: hookCables,
+      unhook: unhookCables,
+      holdPolice: (hold) => {
+        policeHeld = hold;
+        if (hold) police.dismiss();
+      },
+      clearStreets: (where) => {
+        police.dismiss(where);
+        traffic.remove(where ?? (() => true));
+      },
     });
     pull = new ThePull(ctx);
     spikes = new SpikeStrip(ctx);
     bankJob = new BankJob(ctx);
-    bridge = new BridgeFinale(ctx, character === 'dom' ? 'DOM' : 'BRIAN', cutLoose, (at, cars) => blockadeBust(at, cars, true));
+    swap = new TunnelSwap(ctx);
+    bridge = new BridgeFinale(ctx, cutLoose, (at, cars) => blockadeBust(at, cars, true));
     roadblock = new Roadblock(ctx, (at, cars) => blockadeBust(at, cars, false));
   }
 
@@ -214,6 +232,30 @@ async function start(): Promise<void> {
       const len = car.towPoint().distanceTo(vault.anchorWorld(side)) + 0.6;
       cables.push(new Cable(world, scene, car, vault, side, len));
     }
+  }
+
+  /** Every cable off the vault. */
+  function unhookCables(): void {
+    for (const c of cables) c.dispose(scene);
+    cables.length = 0;
+  }
+
+  /**
+   * A cutscene in the middle of the chase (the tunnel swap, the split on the bridge):
+   * the chase clock, the cops and the HUD wait, and the scene's `finish` leaves the
+   * world as it ends, skipped or not; then the chase picks up again.
+   */
+  function playScene(shots: Shot[], finish: () => void): void {
+    director.cut();
+    hud.hint('');
+    hud.meter(null);
+    enter('cutscene');
+    cutscene = new Cutscene(shots, hud, voice, () => {
+      cutscene = null;
+      finish();
+      enter('chase');
+      hud.showHud(true);
+    });
   }
 
   function enter(next: State): void {
@@ -352,6 +394,7 @@ async function start(): Promise<void> {
    */
   let autoPlan: { corner: THREE.Vector3; exit: THREE.Vector3 | null; detour: boolean } | null = null;
   function autopilotControls(dt: number): ControlState {
+    if (bridge?.pulling) return { throttle: 1, brake: 0, steer: 0, handbrake: false, nos: true };
     const p = player.position;
     const d = roadDir(p, player.forward);
     const side = CHARACTERS[character].side;
@@ -525,7 +568,7 @@ async function start(): Promise<void> {
       partner.step(dt);
     }
 
-    if (state === 'chase' && !noCops) {
+    if (state === 'chase' && !noCops && !policeHeld) {
       police.step(dt, player, vault, heat, onBridge(player.position));
     } else if (state === 'outro' || state === 'busted' || state === 'lost') {
       police.step(dt, player, vault, heat, onBridge(player.position));
@@ -583,6 +626,7 @@ async function start(): Promise<void> {
     if (state === 'chase') {
       spikes?.update(dt);
       bankJob?.update(dt);
+      swap?.update(dt);
       bridge?.update(dt);
       roadblock?.update(dt);
       placeRoadblock();
@@ -594,10 +638,21 @@ async function start(): Promise<void> {
       heat = 1;
       say('MIA', 'It’s out! Every cop in Rio is coming. Follow my route, or find your own. I’ll guide you.');
       startChase();
-      // Debug: ?at=bridge skips to the foot of the bridge (for testing the finale), ?at=bank to the
-      // avenue 150 m short of the bank's corner.
-      if (params.get('at') === 'bridge') placeConvoy(BRIDGE_PATH.at(25), BRIDGE_PATH.tangent(25));
-      if (params.get('at') === 'bank') {
+      // Debug: ?at=bridge skips to the foot of the bridge (for testing the finale), ?at=split to 60 m
+      // short of where the crew splits up on it, ?at=tunnel to 130 m short of the tunnel, ?at=bank to
+      // the avenue 150 m short of the bank's corner. Past the tunnel, the swap has happened.
+      const at = params.get('at');
+      if (at === 'bridge' || at === 'split') {
+        const s = at === 'bridge' ? 25 : SPLIT_AT - 60;
+        placeConvoy(BRIDGE_PATH.at(s), BRIDGE_PATH.tangent(s));
+        swap?.skipAhead();
+      }
+      if (at === 'tunnel') {
+        const road = new Path(TUNNEL.road);
+        const s = road.project(TUNNEL.frame.origin) - 130;
+        placeConvoy(road.at(s), road.tangent(s));
+      }
+      if (at === 'bank') {
         const k = PLAN.findIndex((n) => n.pos.distanceTo(BANK.corner) < 5);
         const edge = k > 0 ? MAP.between(PLAN[k - 1], PLAN[k]) : null;
         if (edge) {
@@ -649,19 +704,28 @@ async function start(): Promise<void> {
         run.stats.finished = true;
         coach.stop();
         director.slowmo(0.35, 1.6);
-        hud.radio('MIA', 'You made it. Kill the engines.');
-        setTimeout(() => hud.news(NEWS.finish), 1400);
+        hud.radio('MIA', swap?.done ? 'That’s far enough. Leave it for them. It’s empty anyway.' : 'You made it. Kill the engines.');
+        setTimeout(() => hud.news(swap?.done ? NEWS.empty : NEWS.finish), 1400);
       }
     }
 
     if (state === 'outro' && stateTime > 4 && stateTime - dt <= 4) {
-      hud.showOverlay(
-        'THE SWAP',
-        'While every cop in Rio chased that vault, Roman and Han swapped it for an empty decoy.\n' +
-          'Reyes’s money was already gone.\n\n' +
-          `Time ${Hud.time(chaseTime)}   Cops wrecked ${police.wreckedCount}   Property damage ${Hud.money(damage)}   Style ${style.toLocaleString('en-US')}`,
-        'Press Enter to play again',
-      );
+      const stats = `Time ${Hud.time(chaseTime)}   Cops wrecked ${police.wreckedCount}   Property damage ${Hud.money(damage)}   Style ${style.toLocaleString('en-US')}`;
+      if (swap?.done) {
+        hud.showOverlay(
+          'THE DECOY',
+          'Every cop in Rio chased that vault across the bridge, and it was empty.\n' +
+            'Han and Roman had the real one in their truck, back in the tunnel, while the whole city watched the chase.\n\n' +
+            stats,
+          'Press Enter to play again',
+        );
+      } else {
+        hud.showOverlay(
+          'THE SWAP',
+          'While every cop in Rio chased that vault, Roman and Han swapped it for an empty decoy.\nReyes’s money was already gone.\n\n' + stats,
+          'Press Enter to play again',
+        );
+      }
       hud.result(run.finish());
     }
     if ((state === 'busted' || state === 'lost' || (state === 'outro' && stateTime > 4)) && input.wasPressed('Enter')) {
@@ -732,7 +796,7 @@ async function start(): Promise<void> {
     if (p.distanceTo(stuckAt) > STUCK_RADIUS) {
       stuckAt.copy(p);
       stuckFor = 0;
-    } else if (player.controls.throttle > 0.3 || player.controls.brake > 0.3) {
+    } else if ((player.controls.throttle > 0.3 || player.controls.brake > 0.3) && !bridge?.pulling) {
       stuckFor += dt;
     }
     const boxedIn = busted > 0.2;
@@ -910,7 +974,7 @@ async function start(): Promise<void> {
     input.rumble(1, 400);
     hud.banner(finale ? 'BLOCKADE BUSTED' : 'ROADBLOCK BUSTED', `${cars.length} CRUISERS  +${bonus + cars.length * 100}`, 2.4);
     setTimeout(() => hud.news(finale ? NEWS.blockade : NEWS.roadblock), 2200);
-    if (finale) setTimeout(() => say('MIA', 'You’re through! The swap point’s dead ahead!'), 3000);
+    if (finale) setTimeout(() => say('MIA', 'You’re through! The gantry’s dead ahead!'), 3000);
   }
 
   /**
@@ -920,6 +984,7 @@ async function start(): Promise<void> {
    */
   const ROADBLOCK_EVERY = 70;
   let roadblockDone = -Infinity;
+  let roadblockHinted = false;
   function placeRoadblock(): void {
     if (!roadblock || !momentCtx) return;
     if (roadblock.state === 'set') {
@@ -928,13 +993,17 @@ async function start(): Promise<void> {
       if (ahead < -60 || roadblock.at.distanceTo(player.position) > 400) {
         roadblock.clear();
         roadblockDone = chaseTime;
-        hud.hint('');
+        if (roadblockHinted) hud.hint('');
+        roadblockHinted = false;
         return;
       }
-      hud.hint(ahead > 0 && ahead < 200 ? 'RAM THE ROADBLOCK  —  OR SWING THE VAULT INTO IT (SPACE)' : '');
+      // Only on a change, so other set pieces' hints aren't wiped every frame.
+      const near = ahead > 0 && ahead < 200;
+      if (near !== roadblockHinted) hud.hint(near ? 'RAM THE ROADBLOCK  —  OR SWING THE VAULT INTO IT (SPACE)' : '');
+      roadblockHinted = near;
       return;
     }
-    if (chaseTime - roadblockDone < ROADBLOCK_EVERY) return;
+    if (chaseTime - roadblockDone < ROADBLOCK_EVERY || policeHeld) return;
     // The last one's wreckage stays where it is; the next is a new one.
     if (roadblock.state === 'busted') roadblock = new Roadblock(momentCtx, (at, cars) => blockadeBust(at, cars, false));
     // Debug: ?roadblock sets one up as soon as there's a straight for it.
@@ -947,7 +1016,7 @@ async function start(): Promise<void> {
     if (path.length < s + 120 || (turn && turn.distance < s + 30)) return;
     const at = path.at(s);
     const dir = path.tangent(s);
-    if (isVisible(at) || at.distanceTo(BANK.corner) < 160 || at.distanceTo(SPIKES.origin) < 160 || onBridge(at)) return;
+    if (isVisible(at) || at.distanceTo(BANK.corner) < 160 || at.distanceTo(SPIKES.origin) < 160 || onBridge(at) || inTunnel(at, 150)) return;
     const fix = MAP.locate(at, dir);
     if (!fix || fix.edge.bridge) return;
     const width = Math.max(8, fix.edge.hw * 2 - 1.5);
@@ -1072,6 +1141,11 @@ async function start(): Promise<void> {
           groundFx.pool(head, 6.5, 0xffc27a, 0.5);
           groundFx.reflect(head, head.y, 0xffc27a, 0.55, 1.1);
         }
+      }
+      // The tunnel's sodium lamps.
+      for (const p of city.tunnelLamps) {
+        if (Math.abs(p.x - camLook.x) > 140 || Math.abs(p.z - camLook.z) > 140) continue;
+        groundFx.pool(p, 6, 0xff9440, 0.4);
       }
       for (const c of police.cops) {
         const p = c.v.position;
@@ -1335,6 +1409,9 @@ async function start(): Promise<void> {
     resets: convoyResets,
     vaultRescues,
     bank: bankJob ? (bankJob.smashed ? 'smashed' : !bankJob.pending ? 'missed' : bankJob.flinging ? 'flinging' : 'pending') : null,
+    swap: swap?.state ?? null,
+    finale: bridge ? { state: bridge.state, strain: +bridge.strain.toFixed(2) } : null,
+    policeHeld,
     roadblock: roadblock && player ? { state: roadblock.state, at: roadblock.at.toArray().map(Math.round), ahead: Math.round(roadblock.ahead(player.position)), fastest: +roadblock.fastest.toFixed(1) } : null,
     partnerQuality: {
       seconds: Math.round(pq.time),
@@ -1409,6 +1486,9 @@ async function start(): Promise<void> {
   }
   const bankBeacon = beaconColumn(0x3ddc84);
   bankBeacon.position.copy(BANK_BLIP).setY(0);
+  const TUNNEL_BLIP = TUNNEL.frame.toWorld(0, 0);
+  const tunnelBeacon = beaconColumn(0xff9440);
+  tunnelBeacon.position.copy(TUNNEL_BLIP);
   const goalBeacon = beaconColumn(0xffc23a);
   goalBeacon.position.copy(GOAL.pos).setY(0);
 
@@ -1416,9 +1496,20 @@ async function start(): Promise<void> {
   function updateBeacons(time: number): void {
     const pulse = 0.7 + 0.3 * Math.sin(time * 2.6);
     bankBeacon.visible = state === 'chase' && !!bankJob?.pending;
+    tunnelBeacon.visible = state === 'chase' && !!swap?.pending;
     goalBeacon.visible = state === 'chase' || state === 'outro';
     (bankBeacon.material as THREE.MeshBasicMaterial).opacity = pulse;
+    (tunnelBeacon.material as THREE.MeshBasicMaterial).opacity = pulse;
     (goalBeacon.material as THREE.MeshBasicMaterial).opacity = pulse;
+  }
+
+  /** What the HUD says to do now. */
+  function objective(): string {
+    if (state === 'breach') return 'Rip the vault out of the station';
+    if (bridge?.pulling) return 'Get the vault rolling on your own';
+    const decoy = !!swap?.done;
+    if (onBridge(player.position)) return decoy ? 'Get the decoy to the gantry' : 'Reach the swap point';
+    return decoy ? 'Drag the decoy to the bridge' : 'Get the vault to the tunnel';
   }
 
   /** HUD guidance: an arrow toward the route 40 m ahead, and the next turn or the distance left. */
@@ -1466,7 +1557,7 @@ async function start(): Promise<void> {
       updateGame(dt);
       if (chopper.flying) {
         const vv = vault.body.linvel();
-        chopper.update(dt, vault.position, new THREE.Vector3(vv.x, 0, vv.z), camLook.clone().sub(camPos).setY(0).normalize());
+        chopper.update(dt, vault.position, new THREE.Vector3(vv.x, 0, vv.z), camLook.clone().sub(camPos).setY(0).normalize(), inTunnel(vault.position, 3));
       }
       player.render(dt);
       partner.render(dt);
@@ -1502,7 +1593,7 @@ async function start(): Promise<void> {
         busted,
         damage,
         wrecked: police.wreckedCount,
-        objective: state === 'breach' ? 'Rip the vault out of the station' : onBridge(player.position) ? 'Reach the swap point' : 'Drag the vault to the bridge',
+        objective: objective(),
         ...navigation(),
         player: player.position,
         heading: player.heading,
@@ -1511,7 +1602,10 @@ async function start(): Promise<void> {
         partner: partner.position,
         cops: police.cops.filter((c) => !c.wrecked).map((c) => c.v.position),
         route: state === 'chase' ? gps.nodes : [],
-        blips: bankJob?.pending ? [{ pos: BANK_BLIP, color: '#3ddc84', label: '$' }] : [],
+        blips: [
+          ...(bankJob?.pending ? [{ pos: BANK_BLIP, color: '#3ddc84', label: '$' }] : []),
+          ...(swap?.pending ? [{ pos: TUNNEL_BLIP, color: '#ff9440', label: 'T' }] : []),
+        ],
       });
     } else {
       hud.update(dt, null);

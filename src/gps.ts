@@ -221,7 +221,9 @@ export class Gps {
     for (let i = near; i < pts.length && len < 300; i++, prefixEnd = i) len += pts[i].distanceTo(pts[i - 1]);
     const s = new Path(pts.slice(0, Math.max(2, prefixEnd))).project(here);
     const full = new Path(pts);
-    const out = [here];
+    // From the middle of the street abreast of us (not from the car itself, so an offset
+    // from the route is an offset from the street).
+    const out = [full.at(s)];
     let acc = 0;
     for (let i = 1; i < pts.length; i++) {
       acc += pts[i].distanceTo(pts[i - 1]);
