@@ -385,7 +385,10 @@ async function start(): Promise<void> {
     // Otherwise keep to our side of the street, nearer the middle where it's narrow.
     const street = MAP.locate(p, d)?.edge;
     const gap = spikes?.gapOffset() ?? null;
-    const lane = gap !== null && d.dot(SPIKES.z) > 0.9 ? gap : side * THREE.MathUtils.clamp((street?.hw ?? 5) - 2.4, 0, 3);
+    const want = gap !== null && d.dot(SPIKES.z) > 0.9 ? gap : side * THREE.MathUtils.clamp((street?.hw ?? 5) - 2.4, 0, 3);
+    // Change lanes gradually, as a driver would with four tons behind them.
+    autoLane += THREE.MathUtils.clamp(want - autoLane, -2.5 * dt, 2.5 * dt);
+    const lane = autoLane;
     const bankSwing = autopilot !== 'wander' && p.distanceTo(BANK.corner) < 24 && player.forward.dot(BANK.frame.z) > 0.3;
     const s0 = path.project(p);
     const speed = player.forwardSpeed;
@@ -418,6 +421,7 @@ async function start(): Promise<void> {
   let autoBlocked = 0;
   let autoReverse = 0;
   let autoReverseSteer = 1;
+  let autoLane = 0;
 
   /** Put the partner back in its place beside the player, in a puff of dust if it's on screen. */
   function recoverPartner(): void {
