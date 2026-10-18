@@ -98,8 +98,17 @@ export class MapData {
   plan: Array<i32> = [];
   foot: i32 = 0;
   goal: i32 = 0;
+  /** Where the police lay the spike strip on Mia's route, and the way she sends you over it. */
+  spikesX: f64 = 0;
+  spikesZ: f64 = 0;
+  spikesDX: f64 = 0;
+  spikesDZ: f64 = 1;
+  /** The bank's footprint (its near corner first), which way it faces, and the intersection it stands on. */
   bank: StaticArray<f64> = new StaticArray<f64>(0);
   bankHeading: f64 = 0;
+  bankCorner: i32 = 0;
+  /** The toll gantries on the bridge, as x z pairs. */
+  tolls: StaticArray<f64> = new StaticArray<f64>(0);
 
   nodeX(i: i32): f64 {
     return this.nodes[i * 2];
@@ -167,9 +176,14 @@ export class MapLoader {
       for (let k = 0; k < plan; k++) m.plan.push(r.int());
       m.foot = r.int();
       m.goal = r.int();
-      r.num(); r.num(); r.num(); r.num(); // spikes
+      m.spikesX = r.num();
+      m.spikesZ = r.num();
+      m.spikesDX = r.num();
+      m.spikesDZ = r.num();
       m.bank = r.points();
       m.bankHeading = r.num();
+      m.bankCorner = r.int();
+      m.tolls = r.points();
       this.done = true;
     }
   }

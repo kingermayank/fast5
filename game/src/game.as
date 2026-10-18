@@ -21,6 +21,7 @@ import { Model } from "./models";
 import { GameRenderer, GpuMesh, Look } from "./render";
 import { Hud, money, thousands } from "./hud";
 import { Minimap } from "./minimap";
+import { Roads, Gps } from "./roads";
 import { M4, MeshBuilder, VERTEX_BYTES, clamp, ease, fmt } from "./util";
 
 const STEP: f64 = 1.0 / 120.0;
@@ -59,6 +60,9 @@ const INTRO_LENGTH: f64 = 4.4;
 /** Where the convoy starts: outside the station on Avenida Juan Ponce de León, heading north. */
 const START_X: f64 = 200;
 const START_Z: f64 = 160;
+
+/** Mia's lines when the player leaves her route (from the original game). */
+const REROUTE_LINES: StaticArray<string> = ["Okay, new route.", "That works too. Rerouting.", "Not my way, but fine. Rerouting.", "Change of plan. Recalculating."];
 
 /** What the tuning panel can change. */
 const TUNE_NAMES: StaticArray<string> = ["Cable stiffness", "Cable damping", "Break strength", "Winch slips at", "Stringiness", "Tow length", "Vault mass", "Vault friction"];
@@ -145,6 +149,14 @@ export class Game extends Layout {
   wrecked: i32 = 0;
   heat: f64 = 0;
   busted: f64 = 0;
+
+  // The streets and the route.
+  roads: Roads? = null;
+  gps: Gps? = null;
+  /** The turn Mia last called (its intersection), when she last rerouted, and the bridge call. */
+  calledTurn: i32 = -1;
+  lastReroute: f64 = -10;
+  bridgeCalled: bool = false;
 
   // The world.
   world: StaticWorld? = null;
@@ -273,6 +285,9 @@ export class Game extends Layout {
     let physics = new PhysicsWorld(world);
     this.physics = physics;
     this.minimap = new Minimap(map);
+    let roads = new Roads(map);
+    this.roads = roads;
+    this.gps = new Gps(roads, map);
 
     let vault = new Vault(this.vaultParams);
     physics.add(vault.body);
@@ -458,6 +473,49 @@ export class Game extends Layout {
     c.nos = this.key(KEY_LSHIFT) || this.key(KEY_RSHIFT) || this.padNos;
     if (this.autopilot == 1) this.drive(c, this.phaseTime);
     if (this.autopilot == 2) this.yankTest(c, dt);
+    if (this.autopilot == 3) this.followRoute(c);
+  }
+
+  /**
+   * Drives Mia's route for tests (view model `autopilot` = 3): its own lane,
+   * steering for the route a little ahead, slowing for the turns.
+   */
+  private followRoute(c: Controls): void {
+    let gps = this.gps!;
+    let p = this.player!;
+    let b = p.body;
+    c.handbrake = false;
+    c.nos = false;
+    if (gps.pathLength < 1) {
+      c.throttle = 0;
+      c.brake = 1;
+      return;
+    }
+    let speed = p.forwardSpeed;
+    let look = 10 + Math.abs(speed) * 0.4;
+    gps.pointAlong(Math.min(gps.pathLength, look));
+    let ax = gps.atX, az = gps.atZ;
+    gps.pointAlong(Math.min(gps.pathLength, look + 2));
+    let tx = gps.atX - ax, tz = gps.atZ - az;
+    let tl = Math.sqrt(tx * tx + tz * tz) + 1e-9;
+    // Keep to our side of the road: Dom left of the line, Brian right.
+    let lane: f64 = this.crew == 0 ? 2.8 : -2.8;
+    let gx = ax + (tz / tl) * lane, gz = az + (-tx / tl) * lane;
+    let want = Math.atan2(gx - b.x, gz - b.z);
+    let err = want - b.a;
+    while (err > 3.14159) err -= 6.28318;
+    while (err < -3.14159) err += 6.28318;
+    c.steer = clamp(err * 2.4, -1, 1);
+    // Slow for the bend ahead: how far the route turns over the next 60 m.
+    gps.pointAlong(Math.min(gps.pathLength, 12));
+    let h0x = gps.atX - b.x, h0z = gps.atZ - b.z;
+    gps.pointAlong(Math.min(gps.pathLength, 60));
+    let h1x = gps.atX - b.x, h1z = gps.atZ - b.z;
+    let cosTurn = (h0x * h1x + h0z * h1z) / (Math.sqrt(h0x * h0x + h0z * h0z) * Math.sqrt(h1x * h1x + h1z * h1z) + 1e-9);
+    let target = cosTurn > 0.97 ? 26 : cosTurn > 0.85 ? 16 : 10;
+    let e = target - speed;
+    c.throttle = clamp(e * 0.3, 0, 1);
+    c.brake = e < -2 ? clamp(-e * 0.07, 0, 1) : 0;
   }
 
   /**
@@ -586,8 +644,67 @@ export class Game extends Layout {
     this.effects(dt);
     this.fx.update(dt);
     this.follow(dt);
+    if (this.phase == PHASE_DRIVE) this.navigate(dt);
     this.publish();
     return true;
+  }
+
+  /** Where the player is actually going: their velocity when driving forward, else where they point. */
+  private travelX(): f64 {
+    let p = this.player!;
+    let b = p.body;
+    let v = b.speed();
+    return v > 4 && p.forwardSpeed > 2 ? b.vx / v : b.fwdX();
+  }
+
+  private travelZ(): f64 {
+    let p = this.player!;
+    let b = p.body;
+    let v = b.speed();
+    return v > 4 && p.forwardSpeed > 2 ? b.vz / v : b.fwdZ();
+  }
+
+  /**
+   * The route to the bridge: keeps the GPS up to date, points the HUD's arrow
+   * 40 m down it, and has Mia call the turns (and grumble when you leave it).
+   */
+  private navigate(dt: f64): void {
+    let gps = this.gps!;
+    let hud = this.hud;
+    let b = this.player!.body;
+    let rerouted = gps.update(dt, b.x, b.z, this.travelX(), this.travelZ());
+    if (hud == null) return;
+    // The arrow, turned the way the screen is.
+    gps.pointAlong(Math.min(gps.pathLength, 40));
+    let dx = gps.atX - b.x, dz = gps.atZ - b.z;
+    let yaw = this.camera.bearing();
+    let c = Math.cos(yaw), sn = Math.sin(yaw);
+    hud.arrowAngle.set(Math.atan2(-dx * c + dz * sn, dx * sn + dz * c));
+    hud.arrowOn.set(gps.pathLength > 1);
+    hud.guidance.set(gps.turnSide != 0 ? (gps.turnSide < 0 ? "LEFT" : "RIGHT") + " IN " + fmt(gps.turnDistance, 0) + " m" : fmt(gps.pathLength, 0) + " m TO GO");
+    hud.objective.set(this.roads!.onBridge(b.x, b.z) ? "Reach the swap point" : "Drag the vault to the bridge");
+
+    // Mia, on the radio.
+    let r = this.roads!;
+    if (!this.bridgeCalled && gps.nextIsGoal()) {
+      let fx = r.nx[gps.foot] - b.x, fz = r.nz[gps.foot] - b.z;
+      if (Math.sqrt(fx * fx + fz * fz) < 110) {
+        this.bridgeCalled = true;
+        hud.radio("MIA", "Bridge ahead. Get to the yellow gantry at the far end.");
+        return;
+      }
+    }
+    if (rerouted && this.runTime - this.lastReroute >= 8) {
+      this.lastReroute = this.runTime;
+      if (gps.turnSide != 0 && gps.turnDistance <= 130) this.calledTurn = gps.turnNode;
+      let next = gps.turnSide == 0 ? "Straight on to the bridge." : gps.turnDistance > 130 ? "Stay on this street for now." : gps.turnSide < 0 ? "Hang a left at the next corner!" : "Go right at the next corner!";
+      hud.radio("MIA", REROUTE_LINES[gps.reroutes % REROUTE_LINES.length] + " " + next);
+      return;
+    }
+    if (gps.turnSide != 0 && gps.turnNode == gps.ids[0] && gps.turnDistance <= 100 && gps.turnDistance >= 25 && gps.turnNode != this.calledTurn) {
+      this.calledTurn = gps.turnNode;
+      hud.radio("MIA", gps.turnSide < 0 ? "Next intersection, hang a left!" : "Next intersection, go right!");
+    }
   }
 
   /** The crew select: pick with the keys or the mouse, start once the city's ready. */
@@ -624,6 +741,10 @@ export class Game extends Layout {
     this.heat = 0;
     this.busted = 0;
     this.nos = 1;
+    this.gps!.reset();
+    this.calledTurn = -1;
+    this.lastReroute = -10;
+    this.bridgeCalled = false;
     let cam = this.camera;
     this.fromEyeX = cam.eyeX;
     this.fromEyeY = cam.eyeY;
@@ -813,8 +934,7 @@ export class Game extends Layout {
     hud.style.set(thousands(this.style));
     hud.damage.set(money(this.damage));
     hud.wrecked.set(this.wrecked.toString());
-    hud.arrowOn.set(false);
-    hud.guidance.set("");
+    if (this.phase != PHASE_DRIVE) hud.arrowOn.set(false);
     hud.meterOn.set(false);
 
     // The cables: pull against strength, coloured as it nears breaking, and what's left of them.
@@ -994,6 +1114,14 @@ export class Game extends Layout {
     if (mm == null) return;
     let p = this.player!.body;
     let cx: f64 = 120, cy = this.height - 120;
+    // The route ahead, as far as the bezel reaches.
+    let route = mm.routePts;
+    route.length = 0;
+    let gps = this.gps!;
+    for (let i = 0; i < gps.pathCum.length && (i < 2 || gps.pathCum[i - 1] < 700); i++) {
+      route.push(gps.path[i * 2]);
+      route.push(gps.path[i * 2 + 1]);
+    }
     mm.begin(renderer, cx, cy, 100, p.x, p.z, this.camera.bearing());
     let v = this.vault!.body;
     mm.box(renderer, v.x, v.z, 4, v.a, 0xffffb547, 0xff0a0e16);
