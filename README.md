@@ -1,7 +1,7 @@
 # Fast5 — The Vault
 
-A browser fan game recreating the vault-heist finale of *Fast Five*: Dom and Brian's Chargers
-chained to a four-ton vault, ripping it out of a Rio police station and dragging it through the
+A browser fan game recreating the vault-heist finale of *Fast Five*: Dom's black Charger and
+Brian's blue Skyline chained to a four-ton vault, ripping it out of a Rio police station and dragging it through the
 city with every cop on Reyes's payroll in pursuit.
 
 The city is real: the film shot its "Rio" vault chase in San Juan, Puerto Rico, on Avenida Ponce
@@ -54,7 +54,7 @@ values the game sends it. Without the file (or with `?htmlhud`) the game falls b
 
 ### The Rive build (in progress)
 
-`game/` is the game being rebuilt entirely in Rive: the city, the Chargers, the vault and its cables
+`game/` is the game being rebuilt entirely in Rive: the city, Dom's Charger and Brian's Skyline, the vault and its cables
 (elastic, fraying, snapping) run as AnimaScript inside one Rive file, drawn through Rive's GPU API.
 So far it's the tow: drag the vault up Avenida Ponce de León without snapping the cables. With the
 [Rive CLI](https://rive.app/docs/cli/overview) installed, `rive game` from the repo root opens it in

@@ -30,7 +30,7 @@ export interface BreachCast {
 /**
  * The opening set piece, as in the film: Hobbs and Elena ram the station in an
  * armored truck while the cops open fire, the truck breaks the vault-room wall
- * and backs out, Dom and Brian reverse their Chargers up to the hole, and the
+ * and backs out, Dom and Brian reverse their cars up to the hole, and the
  * cables go on the vault.
  */
 export class BreachScene {
