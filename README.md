@@ -9,10 +9,16 @@ de León through Hato Rey's Golden Mile, and ended it on the Teodoro Moscoso Bri
 streets and buildings (with their real heights) from OpenStreetMap, dressed as Rio, with Christ the
 Redeemer on Corcovado at the end of the avenue and Sugarloaf out in the bay.
 
-You play it from above: a bird's-eye camera at a slant follows the convoy, looking ahead as you
-speed up, with tilt-shift blur and the street lamps, headlights and police strobes lighting the
-road. Buildings between the camera and your car dissolve so you never lose it. C switches to the
-chase camera behind the car.
+You play it from above, at dusk: a 2.5D camera at a steep slant follows the convoy like a
+diorama, looking ahead as you speed up, with tilt-shift blur, wet streets that mirror the street
+lamps, headlights and police strobes, and civilian traffic in the lanes. Buildings between the
+camera and your car dissolve so you never lose it. C switches to the chase camera behind the car.
+
+A made-up TV channel, RIO 24H, covers the chase live: its helicopter holds a searchlight on the
+vault, and breaking-news headlines roll in the corner of the screen as the heat rises. The big
+beats get the camera's attention: a pull-out as the vault escapes, slow-motion takedowns from the
+street, a side-on shot as you hit the bridge. Every finished run gets a rank, a score and three
+challenges (which favour ones you haven't done yet), and your best is remembered.
 
 Built with [Three.js](https://threejs.org/), [Rapier](https://rapier.rs/) physics, TypeScript and Vite.
 Uses the film's character names; all models, dialogue, sound and cutscenes are made for this
@@ -78,12 +84,18 @@ the other car, chained to the same vault.
 1. **The Pull:** hold the throttle to fill the STRAIN meter until the vault tears out through the wall.
    Watch for the spike strip (take the gap Mia calls) and the bank on the corner (handbrake through the
    turn to throw the vault into the lobby). See [`docs/MOMENTS.md`](docs/MOMENTS.md) for all set pieces.
-2. **Chase:** get to the bridge by any road. The GPS (yellow arrow and minimap line) shows Mia's
-   route, which passes the set pieces, and reroutes the moment you take another street. Swing the
-   vault into cop cars to wreck them. Heat rises with time and destruction.
-3. **Don't get boxed in:** if cops pin you at low speed, the BUSTED meter fills.
+2. **Chase:** get to the bridge by any road. The GPS (arrow, minimap line and gold chevrons on
+   the road) shows Mia's route, which passes the set pieces, and reroutes the moment you take
+   another street; columns of light mark the bank and the swap point. Swing the vault into cop
+   cars to wreck them: wrecks in quick succession are streaks worth more, and every wreck refills
+   nitrous. Watch for civilian traffic. Heat rises with time and destruction, and the news follows.
+3. **Don't get boxed in:** if cops pin you at low speed, the BUSTED meter fills (a tip tells you
+   how to break out).
 4. **Bridge:** Mia's route runs down Ponce de León, left onto the Piñero expressway, through the toll
    plaza and onto the Moscoso bridge: reach the yellow gantry out over the lagoon.
+5. **Rank:** the end screen grades the run (S, A, B or C) on style, takedowns, damage, time and
+   challenges, and shows your best. The first runs coach you through the controls; every run starts
+   by listing its three challenges.
 
 | Key | Action |
 | --- | --- |
@@ -135,6 +147,10 @@ the GPS reroute log (`rerouteLog`).
 - `src/gps.ts`: GTA-style navigation: shortest route over the street graph, live rerouting
 - `src/moments.ts`: the set pieces (The Pull, Spike Strip, Bank Job)
 - `src/director.ts`: slow motion and cinematic camera shots for big moments
+- `src/broadcast.ts`, `src/chopper.ts`: RIO 24H's news breaks, and its helicopter and searchlight
+- `src/traffic.ts`: civilian cars driving the lanes round the chase
+- `src/coach.ts`: tips on the first runs, the run's challenges, nudges when boxed in or stuck
+- `src/run.ts`: score, rank, challenges and the records kept in the browser
 - `src/fx.ts`, `src/audio.ts`: sparks, dust, tire smoke, skid marks, glass, banknotes, nitrous flames;
   synthesized engine, sirens, crashes, screech, alarm
 - `src/vehicle.ts`: rigid-body car with arcade handling

@@ -86,10 +86,11 @@ export function fmtTime(t: number): string {
   return `${m}:${Math.floor(t - m * 60).toString().padStart(2, '0')}`;
 }
 
+/** A clean, steady run to the bridge is an A; an S takes speed, nitrous and a lot of wrecked cruisers. */
 const GRADES = [
-  ['S', 42000],
-  ['A', 30000],
-  ['B', 20000],
+  ['S', 58000],
+  ['A', 42000],
+  ['B', 28000],
   ['C', 0],
 ] as const;
 
