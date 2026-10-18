@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   const r: Rive = new Rive({
     buffer,
     canvas,
-    stateMachine: 'Game',
+    stateMachine: 'UI',
     autoplay: true,
     autoBind: true,
     enableGPUCanvas: true,

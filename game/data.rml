@@ -1,0 +1,145 @@
+<Rive version="1" kind="fragment">
+    <!--
+      The view model the game script (src/game.as) drives. The first part is the
+      UI contract of the original game (ui/CONTRACT.md), so the screens and HUD
+      in ui.rml carry over unchanged; the rest is the Rive build's own: the
+      cables, the tuning panel, sound cues for the page, and test switches.
+    -->
+
+    <DataEnumCustom name="Screen" id="2:1">
+        <DataEnumValue key="off" value="off" id="2:2"/>
+        <DataEnumValue key="select" value="select" id="2:3"/>
+        <DataEnumValue key="drive" value="drive" id="2:4"/>
+        <DataEnumValue key="cinematic" value="cinematic" id="2:5"/>
+        <DataEnumValue key="result" value="result" id="2:6"/>
+    </DataEnumCustom>
+
+    <ViewModel defaultInstanceId="2:11" name="Game" id="2:10">
+        <ViewModelPropertyEnumCustom enumId="2:1" name="screen" id="2:20"/>
+        <ViewModelPropertyNumber name="speed" id="2:21"/>
+        <ViewModelPropertyString name="speedText" id="2:22"/>
+        <ViewModelPropertyNumber name="nos" id="2:23"/>
+        <ViewModelPropertyNumber name="heat" id="2:24"/>
+        <ViewModelPropertyNumber name="busted" id="2:25"/>
+        <ViewModelPropertyString name="style" id="2:26"/>
+        <ViewModelPropertyString name="damage" id="2:27"/>
+        <ViewModelPropertyString name="wrecked" id="2:28"/>
+        <ViewModelPropertyString name="objective" id="2:29"/>
+        <ViewModelPropertyString name="guidance" id="2:30"/>
+        <ViewModelPropertyBoolean name="arrowOn" id="2:31"/>
+        <ViewModelPropertyNumber name="arrowAngle" id="2:32"/>
+        <ViewModelPropertyBoolean name="meterOn" id="2:33"/>
+        <ViewModelPropertyString name="meterLabel" id="2:34"/>
+        <ViewModelPropertyNumber name="meterValue" id="2:35"/>
+        <ViewModelPropertyString name="meterPrompt" id="2:36"/>
+        <ViewModelPropertyString name="hint" id="2:37"/>
+        <ViewModelPropertyNumber name="crew" id="2:40"/>
+        <ViewModelPropertyTrigger name="confirm" id="2:41"/>
+        <ViewModelPropertyString name="bannerTitle" id="2:42"/>
+        <ViewModelPropertyString name="bannerSub" id="2:43"/>
+        <ViewModelPropertyBoolean name="bannerOn" id="2:44"/>
+        <ViewModelPropertyTrigger name="banner" id="2:45"/>
+        <ViewModelPropertyString name="radioWho" id="2:46"/>
+        <ViewModelPropertyString name="radioText" id="2:47"/>
+        <ViewModelPropertyBoolean name="radioOn" id="2:48"/>
+        <ViewModelPropertyTrigger name="radio" id="2:49"/>
+        <ViewModelPropertyString name="subtitleWho" id="2:50"/>
+        <ViewModelPropertyString name="subtitleText" id="2:51"/>
+        <ViewModelPropertyString name="titleCard" id="2:52"/>
+        <ViewModelPropertyString name="resultTitle" id="2:53"/>
+        <ViewModelPropertyString name="resultBody" id="2:54"/>
+        <ViewModelPropertyString name="resultPrompt" id="2:55"/>
+
+        <!-- The Rive build's own. -->
+        <ViewModelPropertyString name="cableAName" id="2:60"/>
+        <ViewModelPropertyNumber name="cableABar" id="2:61"/>
+        <ViewModelPropertyColor name="cableAColor" id="2:62"/>
+        <ViewModelPropertyNumber name="cableAHp" id="2:63"/>
+        <ViewModelPropertyString name="cableAText" id="2:64"/>
+        <ViewModelPropertyString name="cableBName" id="2:65"/>
+        <ViewModelPropertyNumber name="cableBBar" id="2:66"/>
+        <ViewModelPropertyColor name="cableBColor" id="2:67"/>
+        <ViewModelPropertyNumber name="cableBHp" id="2:68"/>
+        <ViewModelPropertyString name="cableBText" id="2:69"/>
+        <ViewModelPropertyNumber name="cablesAlpha" id="2:70"/>
+        <ViewModelPropertyString name="tuneText" id="2:71"/>
+        <ViewModelPropertyNumber name="tuneAlpha" id="2:72"/>
+        <ViewModelPropertyNumber name="vaultSpeed" id="2:73"/>
+        <ViewModelPropertyNumber name="vaultGrind" id="2:74"/>
+        <ViewModelPropertyNumber name="throttle" id="2:75"/>
+        <ViewModelPropertyNumber name="slip" id="2:76"/>
+        <ViewModelPropertyNumber name="nosOn" id="2:77"/>
+        <ViewModelPropertyNumber name="crashCount" id="2:78"/>
+        <ViewModelPropertyNumber name="crashPower" id="2:79"/>
+        <ViewModelPropertyNumber name="snapCount" id="2:80"/>
+        <ViewModelPropertyNumber name="jerkCount" id="2:81"/>
+        <ViewModelPropertyNumber name="siren" id="2:82"/>
+        <ViewModelPropertyNumber name="autopilot" id="2:83"/>
+        <ViewModelPropertyNumber name="headless" id="2:84"/>
+        <ViewModelPropertyString name="selectPrompt" id="2:85"/>
+
+        <!-- Starting values: the crew select, over the city as it loads. -->
+        <ViewModelInstance exports="true" name="Default" id="2:11">
+            <ViewModelInstanceEnum propertyValue="2:3" viewModelPropertyId="2:20"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:21"/>
+            <ViewModelInstanceString propertyValue="0" viewModelPropertyId="2:22"/>
+            <ViewModelInstanceNumber propertyValue="1" viewModelPropertyId="2:23"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:24"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:25"/>
+            <ViewModelInstanceString propertyValue="0" viewModelPropertyId="2:26"/>
+            <ViewModelInstanceString propertyValue="$0" viewModelPropertyId="2:27"/>
+            <ViewModelInstanceString propertyValue="0" viewModelPropertyId="2:28"/>
+            <ViewModelInstanceString propertyValue="Drag the vault to the bridge" viewModelPropertyId="2:29"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:30"/>
+            <ViewModelInstanceBoolean propertyValue="false" viewModelPropertyId="2:31"/>
+            <ViewModelInstanceNumber propertyValue="-0.6" viewModelPropertyId="2:32"/>
+            <ViewModelInstanceBoolean propertyValue="false" viewModelPropertyId="2:33"/>
+            <ViewModelInstanceString propertyValue="STRAIN" viewModelPropertyId="2:34"/>
+            <ViewModelInstanceNumber propertyValue="0.45" viewModelPropertyId="2:35"/>
+            <ViewModelInstanceString propertyValue="HOLD W TO PULL" viewModelPropertyId="2:36"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:37"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:40"/>
+            <ViewModelInstanceTrigger viewModelPropertyId="2:41"/>
+            <ViewModelInstanceString propertyValue="BANK JOB" viewModelPropertyId="2:42"/>
+            <ViewModelInstanceString propertyValue="+$2,500,000 DAMAGE  +1,000" viewModelPropertyId="2:43"/>
+            <ViewModelInstanceBoolean propertyValue="false" viewModelPropertyId="2:44"/>
+            <ViewModelInstanceTrigger viewModelPropertyId="2:45"/>
+            <ViewModelInstanceString propertyValue="MIA" viewModelPropertyId="2:46"/>
+            <ViewModelInstanceString propertyValue="It’s out! Every cop in Rio is coming. Follow my route, or find your own. I’ll guide you." viewModelPropertyId="2:47"/>
+            <ViewModelInstanceBoolean propertyValue="false" viewModelPropertyId="2:48"/>
+            <ViewModelInstanceTrigger viewModelPropertyId="2:49"/>
+            <ViewModelInstanceString propertyValue="HOBBS" viewModelPropertyId="2:50"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:51"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:52"/>
+            <ViewModelInstanceString propertyValue="THE SWAP" viewModelPropertyId="2:53"/>
+            <ViewModelInstanceString propertyValue="While every cop in Rio chased that vault, Roman and Han swapped it for an empty decoy.&#10;Reyes’s money was already gone.&#10;&#10;Time 3:58.2   Cops wrecked 61   Property damage $2,664,300   Style 6,900" viewModelPropertyId="2:54"/>
+            <ViewModelInstanceString propertyValue="Press Enter to play again" viewModelPropertyId="2:55"/>
+            <ViewModelInstanceString propertyValue="DOM" viewModelPropertyId="2:60"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:61"/>
+            <ViewModelInstanceColor propertyValue="FF5BD27A" viewModelPropertyId="2:62"/>
+            <ViewModelInstanceNumber propertyValue="150" viewModelPropertyId="2:63"/>
+            <ViewModelInstanceString propertyValue="0 kN" viewModelPropertyId="2:64"/>
+            <ViewModelInstanceString propertyValue="BRIAN" viewModelPropertyId="2:65"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:66"/>
+            <ViewModelInstanceColor propertyValue="FF5BD27A" viewModelPropertyId="2:67"/>
+            <ViewModelInstanceNumber propertyValue="150" viewModelPropertyId="2:68"/>
+            <ViewModelInstanceString propertyValue="0 kN" viewModelPropertyId="2:69"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:70"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:71"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:72"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:73"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:74"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:75"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:76"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:77"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:78"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:79"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:80"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:81"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:82"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:83"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:84"/>
+            <ViewModelInstanceString propertyValue="LOADING THE CITY" viewModelPropertyId="2:85"/>
+        </ViewModelInstance>
+    </ViewModel>
+</Rive>

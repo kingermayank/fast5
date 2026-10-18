@@ -1,5 +1,5 @@
 name: fast5-game
-main: Game
+main: UI
 scripting: wasm
 logs:
   file: build/rive.log

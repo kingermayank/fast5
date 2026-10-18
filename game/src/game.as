@@ -1,13 +1,10 @@
-// Fast5 in Rive: the game loop. Owns the world, the physics, the camera and
-// the renderer, reads the keyboard and gamepad, and publishes its state to the
-// view model for the HUD and the page.
+// Fast5 in Rive: the game. Owns the world, the physics, the camera and the
+// renderer, reads the keyboard and gamepad, runs the story from the crew
+// select to the end screens, and drives the screens and HUD (ui.rml) through
+// the view model.
 import { Layout, Context } from "rive/host";
 import { Renderer } from "rive/renderer";
-import { Path } from "rive/path";
-import { Paint } from "rive/paint";
-import { Vector } from "rive/vector";
 import { KeyboardEvent, GamepadEvent } from "rive/events";
-import { ViewModel } from "rive/data";
 import { Color } from "rive/color";
 import { clock } from "rive/os";
 import { MapData, MapLoader } from "./map";
@@ -22,6 +19,8 @@ import { Fx } from "./fx";
 import { OverheadCamera } from "./camera";
 import { Model } from "./models";
 import { GameRenderer, GpuMesh, Look } from "./render";
+import { Hud, money, thousands } from "./hud";
+import { Minimap } from "./minimap";
 import { M4, MeshBuilder, VERTEX_BYTES, clamp, ease, fmt } from "./util";
 
 const STEP: f64 = 1.0 / 120.0;
@@ -33,6 +32,8 @@ const KEY_S: i32 = 83;
 const KEY_D: i32 = 68;
 const KEY_R: i32 = 82;
 const KEY_SPACE: i32 = 32;
+const KEY_ENTER: i32 = 257;
+const KEY_KP_ENTER: i32 = 335;
 const KEY_UP: i32 = 265;
 const KEY_DOWN: i32 = 264;
 const KEY_LEFT: i32 = 263;
@@ -45,8 +46,27 @@ const KEY_RBRACKET: i32 = 93;
 const KEY_MINUS: i32 = 45;
 const KEY_EQUAL: i32 = 61;
 
+/** Where the run is: choosing the crew (the city loads behind it), the intro, driving, the end screen. */
+const PHASE_SELECT: i32 = 0;
+const PHASE_INTRO: i32 = 1;
+const PHASE_DRIVE: i32 = 2;
+const PHASE_RESULT: i32 = 3;
+
+/** How long the intro's camera takes to come down from the orbit to the convoy (s). */
+const INTRO_SWOOP: f64 = 3.2;
+const INTRO_LENGTH: f64 = 4.4;
+
+/** Where the convoy starts: outside the station on Avenida Juan Ponce de León, heading north. */
+const START_X: f64 = 200;
+const START_Z: f64 = 160;
+
 /** What the tuning panel can change. */
 const TUNE_NAMES: StaticArray<string> = ["Cable stiffness", "Cable damping", "Break strength", "Winch slips at", "Stringiness", "Tow length", "Vault mass", "Vault friction"];
+
+/** The crew. Dom's Charger is heavy and strong; Brian's Skyline lighter and sharper. */
+const CREW_NAMES: StaticArray<string> = ["DOM", "BRIAN"];
+const DOM_PAINT: u32 = 0x141518;
+const BRIAN_PAINT: u32 = 0x1c4fd8;
 
 function domSpec(): CarSpec {
   let s = new CarSpec();
@@ -70,11 +90,6 @@ function brianSpec(): CarSpec {
   return s;
 }
 
-function setNum(vm: ViewModel, name: string, value: f64): void {
-  let p = vm.getNumber(name);
-  if (p != null) p.value = value;
-}
-
 /** Green while easy, amber as it works, red past the breaking point's warning line. */
 function strainColor(ratio: f64): Color {
   let r: f64, g: f64, b: f64;
@@ -86,6 +101,11 @@ function strainColor(ratio: f64): Color {
     r = 255; g = 181 + (64 - 181) * t; b = 71 + (46 - 71) * t;
   }
   return Color.rgba(<u8>r, <u8>g, <u8>b, 255);
+}
+
+function smooth(t: f64): f64 {
+  let x = clamp(t, 0, 1);
+  return x * x * (3 - 2 * x);
 }
 
 export class Game extends Layout {
@@ -103,16 +123,41 @@ export class Game extends Layout {
   city: CityMesh? = null;
   cityGpu: GpuMesh? = null;
   ready: bool = false;
-  bar: Path = new Path();
-  barPaint: Paint = new Paint();
+  loadedFrames: i32 = 0;
+  uploaded: bool = false;
+
+  // The story.
+  phase: i32 = PHASE_SELECT;
+  phaseTime: f64 = 0;
+  /** 0 Dom, 1 Brian: who you drive. */
+  crew: i32 = 0;
+  startWanted: bool = false;
+  /** The title orbit's camera when the intro began, which it swoops down from. */
+  fromEyeX: f64 = 0;
+  fromEyeY: f64 = 0;
+  fromEyeZ: f64 = 0;
+  fromTargetX: f64 = 0;
+  fromTargetZ: f64 = 0;
+  // The run's score.
+  runTime: f64 = 0;
+  style: f64 = 0;
+  damage: f64 = 0;
+  wrecked: i32 = 0;
+  heat: f64 = 0;
+  busted: f64 = 0;
 
   // The world.
   world: StaticWorld? = null;
   physics: PhysicsWorld? = null;
+  dom: Car? = null;
+  brian: Car? = null;
+  domCable: Cable? = null;
+  brianCable: Cable? = null;
   player: Car? = null;
   partnerCar: Car? = null;
   partner: Partner? = null;
   vault: Vault? = null;
+  /** The player's cable, then the partner's. */
   cables: Array<Cable> = [];
   cableParams: CableParams = new CableParams();
   vaultParams: VaultParams = new VaultParams();
@@ -124,9 +169,11 @@ export class Game extends Layout {
   // Drawing.
   gfx: GameRenderer? = null;
   charger: Model? = null;
+  skyline: Model? = null;
   vaultGpu: GpuMesh? = null;
   cableGpu: GpuMesh? = null;
   cableMesh: MeshBuilder = new MeshBuilder();
+  minimap: Minimap? = null;
 
   // Input.
   keys: StaticArray<bool> = new StaticArray<bool>(512);
@@ -136,14 +183,14 @@ export class Game extends Layout {
   padHandbrake: bool = false;
   padNos: bool = false;
 
-  // View model.
-  vm: ViewModel? = null;
+  // The screens and HUD, and the test switches.
+  hud: Hud? = null;
   autopilot: f64 = 0;
+  /** Set by headless test runs (view model `headless` = 1): the CLI's data dump has no GPU to upload to. */
+  headless: bool = false;
   testTime: f64 = -1;
   tuneOpen: bool = false;
   tuneIndex: i32 = 0;
-  banner: string = "";
-  bannerTime: f64 = 0;
   // Sound events for the page: counters it watches for changes.
   crashCount: f64 = 0;
   crashPower: f64 = 0;
@@ -151,10 +198,6 @@ export class Game extends Layout {
   jerkCount: f64 = 0;
   wasTaut: StaticArray<bool> = [false, false];
   slowest: f64 = 0;
-  loadedFrames: i32 = 0;
-  uploaded: bool = false;
-  /** Set by headless test runs (view model `headless` = 1): the CLI's data dump has no GPU to upload to. */
-  headless: bool = false;
   drawTime: f64 = 0;
   drawFrames: i32 = 0;
   debugFrames: i32 = 0;
@@ -174,7 +217,8 @@ export class Game extends Layout {
     this.mapBytes = bytes;
     this.city = new CityMesh();
     this.gfx = new GameRenderer(context);
-    this.vm = context.viewModel();
+    let vm = context.viewModel();
+    if (vm != null) this.hud = new Hud(vm);
     return true;
   }
 
@@ -212,53 +256,88 @@ export class Game extends Layout {
     return false;
   }
 
-  /** The crew outside the station: the vault on the pavement, both Chargers in the street, cables on. */
+  /** 0..1: reading the map, building the city (most of it), putting it on the GPU. */
+  loadProgress(): f64 {
+    let map = this.map;
+    let loader = this.loader;
+    if (this.ready) return 0.85 + 0.15 * this.city!.uploadProgress();
+    if (map != null) return 0.1 + this.city!.progress(map) * 0.75;
+    return loader != null ? loader.progress() * 0.1 : 0;
+  }
+
+  /** The crew outside the station: both cars in the street, the vault behind them, cables on. */
   setup(): void {
     let map = this.map!;
     let world = new StaticWorld(map);
     this.world = world;
     let physics = new PhysicsWorld(world);
     this.physics = physics;
+    this.minimap = new Minimap(map);
 
     let vault = new Vault(this.vaultParams);
     physics.add(vault.body);
     this.vault = vault;
-    let player = new Car(domSpec());
-    let mate = new Car(brianSpec());
-    physics.add(player.body);
-    physics.add(mate.body);
+    let dom = new Car(domSpec());
+    let brian = new Car(brianSpec());
+    physics.add(dom.body);
+    physics.add(brian.body);
     // The crew's cars ghost through each other (they'd only tangle); everything else collides.
-    player.body.group = 2;
-    player.body.mask = 0xffff & ~2;
-    mate.body.group = 2;
-    mate.body.mask = 0xffff & ~2;
-    this.player = player;
-    this.partnerCar = mate;
+    dom.body.group = 2;
+    dom.body.mask = 0xffff & ~2;
+    brian.body.group = 2;
+    brian.body.mask = 0xffff & ~2;
+    this.dom = dom;
+    this.brian = brian;
 
     // Physics order: tyres first, then the cables' pull, then the vault's friction.
-    physics.solvers.push(player);
-    physics.solvers.push(mate);
-    let left = new Cable(player, vault, 1, world, physics.bodies, this.cableParams, 11);
-    let right = new Cable(mate, vault, -1, world, physics.bodies, this.cableParams, 23);
-    this.cables.push(left);
-    this.cables.push(right);
-    physics.solvers.push(left);
-    physics.solvers.push(right);
+    // Dom tows from the vault's left eye and Brian from its right, whoever's driving.
+    physics.solvers.push(dom);
+    physics.solvers.push(brian);
+    let domCable = new Cable(dom, vault, 1, world, physics.bodies, this.cableParams, 11);
+    let brianCable = new Cable(brian, vault, -1, world, physics.bodies, this.cableParams, 23);
+    this.domCable = domCable;
+    this.brianCable = brianCable;
+    physics.solvers.push(domCable);
+    physics.solvers.push(brianCable);
     physics.solvers.push(vault);
-    this.partner = new Partner(mate, player, right, left, world, -1);
 
+    this.chooseCrew(0);
     this.place(true);
     this.ready = true;
   }
 
-  /** Lines the convoy up at (x, z) heading a: cars side by side, the vault a tow length behind. */
+  /** Who you drive: the other car is your partner, holding the slot beside you. */
+  chooseCrew(crew: i32): void {
+    this.crew = crew;
+    let me = crew == 0 ? this.dom! : this.brian!;
+    let mate = crew == 0 ? this.brian! : this.dom!;
+    let myCable = crew == 0 ? this.domCable! : this.brianCable!;
+    let mateCable = crew == 0 ? this.brianCable! : this.domCable!;
+    this.player = me;
+    this.partnerCar = mate;
+    this.cables = [myCable, mateCable];
+    // Brian keeps Dom's right; Dom keeps Brian's left.
+    this.partner = new Partner(mate, me, mateCable, myCable, this.world!, crew == 0 ? -1 : 1);
+    for (let i = 0; i < 2; i++) {
+      let c = (i == 0 ? me : mate).controls;
+      c.throttle = 0;
+      c.brake = 0;
+      c.steer = 0;
+      c.handbrake = false;
+      c.nos = false;
+    }
+  }
+
+  /** Lines the convoy up at (x, z) heading a: Dom on the left, Brian on the right, the vault a tow length behind. */
   placeAt(x: f64, z: f64, a: f64): void {
     let fx = Math.sin(a), fz = Math.cos(a), lx = Math.cos(a), lz = -Math.sin(a);
-    this.player!.body.place(x + lx * 3, z + lz * 3, a);
-    this.partnerCar!.body.place(x - lx * 3, z - lz * 3, a);
+    this.dom!.body.place(x + lx * 3, z + lz * 3, a);
+    this.brian!.body.place(x - lx * 3, z - lz * 3, a);
     let back = this.cableParams.length + 5;
     this.vault!.body.place(x - fx * back, z - fz * back, a);
     for (let i = 0; i < this.cables.length; i++) this.cables[i].hook(0.6);
+    let partner = this.partner;
+    if (partner != null) partner.lead = 0;
     this.camera.reset(x, z);
   }
 
@@ -270,11 +349,12 @@ export class Game extends Layout {
    */
   place(start: bool): void {
     if (start) {
-      this.placeAt(200, 160, 0);
+      this.placeAt(START_X, START_Z, 0);
       return;
     }
     let b = this.player!.body;
-    this.placeAt(b.x - b.leftX() * 3, b.z - b.leftZ() * 3, b.a);
+    let side: f64 = this.crew == 0 ? 3 : -3;
+    this.placeAt(b.x - b.leftX() * side, b.z - b.leftZ() * side, b.a);
   }
 
   // ------------------------------------------------------------ input
@@ -285,8 +365,20 @@ export class Game extends Layout {
     let down = event.phase != "up";
     let was = this.keys[key];
     this.keys[key] = down;
-    if (down && !was && key == KEY_R && this.ready) this.place(false);
-    if (down && !was && key == KEY_TAB) this.tuneOpen = !this.tuneOpen;
+    let pressed = down && !was;
+    let confirm = pressed && (key == KEY_ENTER || key == KEY_KP_ENTER || key == KEY_SPACE);
+    if (this.phase == PHASE_SELECT) {
+      if (pressed && (key == KEY_LEFT || key == KEY_A)) this.highlight(0);
+      if (pressed && (key == KEY_RIGHT || key == KEY_D)) this.highlight(1);
+      if (confirm) this.startWanted = true;
+      return true;
+    }
+    if (this.phase == PHASE_INTRO) {
+      if (pressed && (key == KEY_ENTER || key == KEY_KP_ENTER)) this.startDriving();
+      return true;
+    }
+    if (pressed && key == KEY_R && this.phase == PHASE_DRIVE) this.place(false);
+    if (pressed && key == KEY_TAB) this.tuneOpen = !this.tuneOpen;
     if (down && this.tuneOpen) {
       if (key == KEY_LBRACKET) this.tuneIndex = (this.tuneIndex + TUNE_NAMES.length - 1) % TUNE_NAMES.length;
       if (key == KEY_RBRACKET) this.tuneIndex = (this.tuneIndex + 1) % TUNE_NAMES.length;
@@ -294,6 +386,12 @@ export class Game extends Layout {
       if (key == KEY_EQUAL) this.tune(this.tuneIndex, 1);
     }
     return true;
+  }
+
+  /** The crew card under the keyboard's cursor (the mouse sets it in the UI too). */
+  private highlight(crew: i32): void {
+    let hud = this.hud;
+    if (hud != null) hud.crew.force(<f64>crew);
   }
 
   /** Nudges a tunable up or down a notch. */
@@ -333,7 +431,12 @@ export class Game extends Layout {
     this.padBrake = <f64>event.leftTrigger;
     this.padHandbrake = event.south;
     this.padNos = event.east || event.rightShoulder;
-    if (event.north && this.ready) this.place(false);
+    if (this.phase == PHASE_SELECT) {
+      if (event.leftX < -0.5) this.highlight(0);
+      if (event.leftX > 0.5) this.highlight(1);
+      if (event.south) this.startWanted = true;
+    }
+    if (event.north && this.phase == PHASE_DRIVE) this.place(false);
     return true;
   }
 
@@ -353,7 +456,7 @@ export class Game extends Layout {
     c.brake = this.key(KEY_S) || this.key(KEY_DOWN) ? 1 : this.padBrake;
     c.handbrake = this.key(KEY_SPACE) || this.padHandbrake;
     c.nos = this.key(KEY_LSHIFT) || this.key(KEY_RSHIFT) || this.padNos;
-    if (this.autopilot == 1) this.drive(c, this.time);
+    if (this.autopilot == 1) this.drive(c, this.phaseTime);
     if (this.autopilot == 2) this.yankTest(c, dt);
   }
 
@@ -412,9 +515,9 @@ export class Game extends Layout {
    */
   private drive(c: Controls, t: f64): void {
     let b = this.player!.body;
-    let s = t - 4;
-    // Hold a line up the avenue (north, x 203), shifted a lane each way to swerve.
-    let lane: f64 = 203;
+    let s = t - 1;
+    // Hold a line up the avenue (north), shifted a lane each way to swerve.
+    let lane: f64 = this.crew == 0 ? 203 : 197;
     if (s > 3 && s < 7) lane += 3.5 * Math.sin((s - 3) * 1.5708);
     let want = Math.atan2(lane - b.x, 14 + Math.abs(this.player!.forwardSpeed) * 0.6);
     let err = want - b.a;
@@ -451,39 +554,147 @@ export class Game extends Layout {
   tick(seconds: f64): bool {
     let dt = Math.min(seconds, 0.05);
     this.time += dt;
-    if (!this.load()) return true;
-    if (!this.ready) {
-      let t0 = clock();
-      this.setup();
-      this.log("setup: " + fmt((clock() - t0) * 1000, 1) + " ms");
-      return true;
-    }
-    let vm = this.vm;
-    if (vm != null) {
-      let ap = vm.getNumber("autopilot");
-      if (ap != null) this.autopilot = ap.value;
-      let hl = vm.getNumber("headless");
-      if (hl != null) this.headless = hl.value > 0;
-    }
-    // GPU resources, a budgeted slice per frame (the city's buffers are big).
-    if (!this.uploaded && !this.headless) {
-      let t1 = clock();
-      this.uploaded = this.uploadStep(this.context!);
-      let took = clock() - t1;
-      if (took > 0.05) this.log("upload slice: " + fmt(took * 1000, 1) + " ms");
-      if (!this.uploaded) return true;
+    this.phaseTime += dt;
+    let hud = this.hud;
+    if (hud != null) {
+      this.autopilot = hud.autopilot.read();
+      this.headless = hud.headless.read() > 0;
+      hud.update(dt);
     }
 
+    // Loading carries on behind the crew select: the map, the city, then its GPU buffers.
+    if (this.load()) {
+      if (!this.ready) {
+        let t0 = clock();
+        this.setup();
+        this.log("setup: " + fmt((clock() - t0) * 1000, 1) + " ms");
+      } else if (!this.uploaded && !this.headless) {
+        let t1 = clock();
+        this.uploaded = this.uploadStep(this.context!);
+        let took = clock() - t1;
+        if (took > 0.05) this.log("upload slice: " + fmt(took * 1000, 1) + " ms");
+      }
+    }
+    let live = this.ready && (this.uploaded || this.headless);
+
+    if (this.phase == PHASE_SELECT) {
+      this.selecting(dt, live);
+      return true;
+    }
+    if (this.phase == PHASE_INTRO && this.phaseTime >= INTRO_LENGTH) this.startDriving();
+    this.simulate(dt);
+    this.effects(dt);
+    this.fx.update(dt);
+    this.follow(dt);
+    this.publish();
+    return true;
+  }
+
+  /** The crew select: pick with the keys or the mouse, start once the city's ready. */
+  private selecting(dt: f64, live: bool): void {
+    let hud = this.hud;
+    if (hud != null) {
+      hud.screen("select");
+      if (hud.takeConfirm()) this.startWanted = true;
+      hud.selectPrompt.set(live ? "PRESS ENTER TO START" : "LOADING THE CITY   " + fmt(this.loadProgress() * 100, 0) + "%");
+    }
+    // Test runs go straight in, as whoever the view model's `crew` says.
+    if (this.autopilot > 0) this.startWanted = true;
+    if (!live) return;
+    // A slow orbit high over the convoy while you choose.
+    let t = this.time * 0.06;
+    let cx = START_X, cz = START_Z - 8;
+    this.camera.frame(cx + Math.cos(t) * 80, 84, cz + Math.sin(t) * 80, cx, cz);
+    if (this.startWanted) {
+      let crew = hud != null ? <i32>Math.round(hud.crew.read()) : 0;
+      this.beginRun(crew == 1 ? 1 : 0);
+    }
+  }
+
+  /** The crew's chosen: the intro, the camera coming down out of the orbit onto the convoy. */
+  private beginRun(crew: i32): void {
+    this.chooseCrew(crew);
+    this.place(true);
+    this.phase = PHASE_INTRO;
+    this.phaseTime = 0;
+    this.runTime = 0;
+    this.style = 0;
+    this.damage = 0;
+    this.wrecked = 0;
+    this.heat = 0;
+    this.busted = 0;
+    this.nos = 1;
+    let cam = this.camera;
+    this.fromEyeX = cam.eyeX;
+    this.fromEyeY = cam.eyeY;
+    this.fromEyeZ = cam.eyeZ;
+    this.fromTargetX = cam.targetX;
+    this.fromTargetZ = cam.targetZ;
+    let hud = this.hud;
+    if (hud != null) {
+      hud.screen("cinematic");
+      hud.titleCard.set("RIO DE JANEIRO");
+      hud.subtitleWho.set("");
+      hud.subtitleText.set("");
+    }
+    if (this.autopilot > 0) this.startDriving();
+  }
+
+  /** Hands over: the HUD comes up and the radio crackles. */
+  private startDriving(): void {
+    this.phase = PHASE_DRIVE;
+    this.phaseTime = 0;
+    let hud = this.hud;
+    if (hud == null) return;
+    hud.screen("drive");
+    hud.titleCard.set("");
+    hud.subtitleWho.set("");
+    hud.subtitleText.set("");
+    hud.objective.set("Drag the vault to the bridge");
+    hud.radio("MIA", "You’re out and rolling. Keep the cables tight and get that box to the bridge.");
+  }
+
+  /** The intro's lines over the title card. */
+  private introLines(): void {
+    let hud = this.hud;
+    if (hud == null) return;
+    let t = this.phaseTime;
+    hud.titleCard.set(t < 2.6 ? "RIO DE JANEIRO" : "");
+    let who = "", line = "";
+    if (t > 1.2) {
+      who = this.crew == 0 ? "DOM" : "BRIAN";
+      line = this.crew == 0 ? "Every dirty cop in this city is about to come for that vault. Stay with me." : "Four tons of steel behind us, Dom. Let’s see what these cables can take.";
+    }
+    hud.subtitleWho.set(who);
+    hud.subtitleText.set(line);
+  }
+
+  /** One frame of the world: controls, the partner, the physics, the cables' winches and snaps. */
+  private simulate(dt: f64): void {
     let player = this.player!;
     let mate = this.partnerCar!;
     let vault = this.vault!;
     let physics = this.physics!;
-    this.readControls(dt);
+    let driving = this.phase == PHASE_DRIVE;
+    if (driving) {
+      this.runTime += dt;
+      this.readControls(dt);
+      this.partner!.update(dt);
+    } else {
+      // Waiting on the intro: engines running, brakes on.
+      for (let i = 0; i < 2; i++) {
+        let c = (i == 0 ? player : mate).controls;
+        c.throttle = 0;
+        c.brake = 0;
+        c.steer = 0;
+        c.handbrake = true;
+        c.nos = false;
+      }
+    }
     // Nitrous: a tank that drains while it burns and refills slowly.
-    let burning = player.controls.nos && this.nos > 0.02 && player.controls.throttle > 0;
+    let burning = driving && player.controls.nos && this.nos > 0.02 && player.controls.throttle > 0;
     player.nosActive = burning;
     this.nos = clamp(this.nos + (burning ? -0.22 : 0.06) * dt, 0, 1);
-    this.partner!.update(dt);
 
     this.accumulator = Math.min(this.accumulator + dt, STEP * 6);
     while (this.accumulator >= STEP) {
@@ -505,33 +716,39 @@ export class Game extends Layout {
           this.fx.sparks(c.snapX, c.snapY, c.snapZ, 0, 0, 14, 40);
           this.camera.shake(1.4);
           this.snapCount++;
-          let both = this.cables[0].broken && this.cables[1].broken;
-          this.banner = both ? "THE VAULT'S LOOSE" : i == 0 ? "YOUR CABLE SNAPPED" : "BRIAN'S CABLE SNAPPED";
-          this.bannerTime = 0;
+          let hud = this.hud;
+          if (hud != null) {
+            let both = this.cables[0].broken && this.cables[1].broken;
+            hud.banner(both ? "THE VAULT’S LOOSE" : "CABLE SNAPPED", both ? "BOTH CABLES GONE" : i == 0 ? "YOUR CABLE" : CREW_NAMES[1 - this.crew] + "’S CABLE");
+          }
           this.log("cable " + i.toString() + " snapped at " + fmt(strain * c.params.breakForce / 1000, 0) + " kN");
         }
       }
     }
-    this.effects(dt);
-    this.fx.update(dt);
-    this.bannerTime += dt;
-    if (this.bannerTime > 2.4) this.banner = "";
     this.debugFrames++;
     if (this.autopilot > 0 && this.debugFrames % 30 == 0) {
       let cA = this.cables[0], cB = this.cables[1];
-      this.log("t " + fmt(this.time, 1) + " player v " + fmt(player.forwardSpeed, 2) + " lat " + fmt(player.lateralSpeed, 2) + " w " + fmt(player.body.w, 2) +
+      this.log("t " + fmt(this.phaseTime, 1) + " player v " + fmt(player.forwardSpeed, 2) + " lat " + fmt(player.lateralSpeed, 2) + " w " + fmt(player.body.w, 2) +
         " slipR " + fmt(player.slipRear, 3) + " spin " + fmt(player.wheelspin, 2) + " | mate v " + fmt(mate.forwardSpeed, 2) + " slipR " + fmt(mate.slipRear, 3) + " @ " + fmt(mate.body.x, 1) + "," + fmt(mate.body.z, 1) +
         " | vault v " + fmt(vault.sliding, 2) + " @ " + fmt(vault.body.x, 1) + "," + fmt(vault.body.z, 1) + " | cables " + fmt(cA.tension / 1000, 1) + "/" + fmt(cB.tension / 1000, 1) + " kN len " + fmt(cA.length, 1) + "/" + fmt(cB.length, 1) +
         " | fx " + this.fx.count.toString() + " | pos " + fmt(player.body.x, 1) + "," + fmt(player.body.z, 1));
     }
+  }
 
-    let b = player.body;
-    let vb = vault.body;
+  /** The camera: following the convoy, or coming down to it out of the title orbit. */
+  private follow(dt: f64): void {
+    let b = this.player!.body;
+    let vb = this.vault!.body;
     let spread = Math.sqrt((vb.x - b.x) * (vb.x - b.x) + (vb.z - b.z) * (vb.z - b.z));
     // Frame the convoy: mostly the player, some of the vault.
-    this.camera.update(dt, b.x * 0.72 + vb.x * 0.28, b.z * 0.72 + vb.z * 0.28, b.vx, b.vz, spread, player.nosActive);
-    this.publish();
-    return true;
+    let cam = this.camera;
+    cam.update(dt, b.x * 0.72 + vb.x * 0.28, b.z * 0.72 + vb.z * 0.28, b.vx, b.vz, spread, this.player!.nosActive);
+    if (this.phase == PHASE_INTRO) {
+      this.introLines();
+      let k = smooth(this.phaseTime / INTRO_SWOOP);
+      cam.frame(this.fromEyeX + (cam.eyeX - this.fromEyeX) * k, this.fromEyeY + (cam.eyeY - this.fromEyeY) * k, this.fromEyeZ + (cam.eyeZ - this.fromEyeZ) * k,
+        this.fromTargetX + (cam.targetX - this.fromTargetX) * k, this.fromTargetZ + (cam.targetZ - this.fromTargetZ) * k);
+    }
   }
 
   /** Sparks and dust off the vault, tyre smoke, scrapes and knocks. */
@@ -582,60 +799,59 @@ export class Game extends Layout {
     }
   }
 
-  /** Game state for the HUD and the page. */
+  /** The run's state, for the HUD and for the page's sound. */
   private publish(): void {
-    let vm = this.vm;
-    if (vm == null) return;
+    let hud = this.hud;
+    if (hud == null) return;
     let player = this.player!;
     let kmh = Math.abs(player.forwardSpeed) * 3.6;
-    let speed = vm.getNumber("speed");
-    if (speed != null) speed.value = kmh;
-    let speedText = vm.getString("speedText");
-    if (speedText != null) speedText.value = fmt(kmh, 0);
-    for (let i = 0; i < this.cables.length; i++) {
-      let c = this.cables[i];
-      let pre = i == 0 ? "cableA" : "cableB";
-      let t = vm.getNumber(pre + "Strain");
-      if (t != null) t.value = c.broken ? 0 : clamp(c.tension / c.params.breakForce, 0, 1.2);
-      let hp = vm.getNumber(pre + "Health");
-      if (hp != null) hp.value = c.broken ? 0 : 1 - clamp(c.damage, 0, 1);
-      let txt = vm.getString(pre + "Text");
-      if (txt != null) txt.value = c.broken ? "SNAPPED" : fmt(c.tension / 1000, 0) + " kN";
-      let len = vm.getNumber(pre + "Length");
-      if (len != null) len.value = c.length;
-    }
-    let nos = vm.getNumber("nos");
-    if (nos != null) nos.value = this.nos;
-    let vs = vm.getNumber("vaultSpeed");
-    if (vs != null) vs.value = this.vault!.sliding * 3.6;
-    let grind = vm.getNumber("vaultGrind");
-    if (grind != null) grind.value = this.vault!.grind;
+    hud.speed.set(Math.round(kmh));
+    hud.speedText.set(fmt(kmh, 0));
+    hud.nos.set(this.nos);
+    hud.heat.set(this.heat);
+    hud.busted.set(this.busted);
+    hud.style.set(thousands(this.style));
+    hud.damage.set(money(this.damage));
+    hud.wrecked.set(this.wrecked.toString());
+    hud.arrowOn.set(false);
+    hud.guidance.set("");
+    hud.meterOn.set(false);
 
-    // The cable panel: pull against strength, coloured as it nears breaking.
+    // The cables: pull against strength, coloured as it nears breaking, and what's left of them.
+    let driving = this.phase == PHASE_DRIVE;
+    hud.cablesAlpha.set(driving ? 1 : 0);
     for (let i = 0; i < this.cables.length; i++) {
       let c = this.cables[i];
-      let pre = i == 0 ? "cableA" : "cableB";
       let ratio = c.broken ? 0 : c.tension / c.params.breakForce;
-      let bar = vm.getNumber(pre + "Bar");
-      if (bar != null) bar.value = 220 * clamp(ratio / 1.25, 0, 1);
-      let hp = vm.getNumber(pre + "Hp");
-      if (hp != null) hp.value = 220 * (c.broken ? 0 : 1 - clamp(c.damage, 0, 1));
-      let col = vm.getColor(pre + "Color");
-      if (col != null) col.value = strainColor(ratio);
+      hud.cableName[i].set(CREW_NAMES[i == 0 ? this.crew : 1 - this.crew]);
+      hud.cableBar[i].set(Math.round(150 * clamp(ratio / 1.25, 0, 1)));
+      hud.cableHp[i].set(Math.round(150 * (c.broken ? 0 : 1 - clamp(c.damage, 0, 1))));
+      hud.cableColor[i].set(strainColor(ratio));
+      hud.cableText[i].set(c.broken ? "SNAPPED" : fmt(c.tension / 1000, 0) + " kN");
     }
-    let vt = vm.getString("vaultText");
-    if (vt != null) vt.value = "VAULT  " + fmt(this.vault!.sliding * 3.6, 0) + " km/h";
-    let nb = vm.getNumber("nosBar");
-    if (nb != null) nb.value = 180 * this.nos;
+
+    // Hint: what the cables need from you right now.
+    let a = this.cables[0], b = this.cables[1];
+    let mateName = this.crew == 0 ? "Brian" : "Dom";
+    let msg = "";
+    if (driving) {
+      if (a.broken && b.broken) msg = "BOTH CABLES GONE · R TO HOOK UP AGAIN";
+      else if (!a.broken && a.tension > a.params.breakForce * 0.6) msg = "EASE OFF · YOUR CABLE’S ABOUT TO GO";
+      else if (!a.broken && a.damage > 0.5) msg = "YOUR CABLE’S FRAYING · NO YANKS";
+      else if (a.broken) msg = mateName.toUpperCase() + "’S STILL TOWING · KEEP IT OFF THE WALLS";
+    }
+    hud.hint.set(msg);
 
     // Sound: the page synthesises it from these.
     let pc = player.controls;
-    setNum(vm, "throttle", pc.throttle);
-    setNum(vm, "slip", Math.max(player.wheelspin, clamp((Math.abs(player.slipRear) - 0.1) * 3, 0, 1)));
-    setNum(vm, "nosOn", player.nosActive ? 1 : 0);
-    setNum(vm, "crashCount", this.crashCount);
-    setNum(vm, "crashPower", this.crashPower);
-    setNum(vm, "snapCount", this.snapCount);
+    hud.throttle.set(pc.throttle);
+    hud.slip.set(Math.max(player.wheelspin, clamp((Math.abs(player.slipRear) - 0.1) * 3, 0, 1)));
+    hud.nosOn.set(player.nosActive ? 1 : 0);
+    hud.crashCount.set(this.crashCount);
+    hud.crashPower.set(this.crashPower);
+    hud.snapCount.set(this.snapCount);
+    hud.vaultSpeed.set(this.vault!.sliding * 3.6);
+    hud.vaultGrind.set(this.vault!.grind);
     // A cable going taut with a jolt: the clank.
     for (let i = 0; i < this.cables.length; i++) {
       let c = this.cables[i];
@@ -643,36 +859,16 @@ export class Game extends Layout {
       if (taut && !this.wasTaut[i]) this.jerkCount++;
       this.wasTaut[i] = taut;
     }
-    setNum(vm, "jerkCount", this.jerkCount);
-
-    // Banner: a few seconds, then fades.
-    let bt = vm.getString("bannerText");
-    let ba = vm.getNumber("bannerAlpha");
-    if (bt != null) bt.value = this.banner;
-    if (ba != null) ba.value = this.banner.length > 0 ? clamp(1 - (this.bannerTime - 1.8) / 0.6, 0, 1) * clamp(this.bannerTime * 8, 0, 1) : 0;
-
-    // Hint: what the cables need from you right now.
-    let hint = vm.getString("hint");
-    if (hint != null) {
-      let a = this.cables[0], b = this.cables[1];
-      let msg = "";
-      if (a.broken && b.broken) msg = "Both cables are gone. Press R to hook the vault up again.";
-      else if (!a.broken && a.tension > a.params.breakForce * 0.6) msg = "Ease off! Your cable is about to go.";
-      else if (!a.broken && a.damage > 0.5) msg = "Your cable is fraying. Smooth inputs, no yanks.";
-      else if (a.broken) msg = "Brian's still towing. Keep the vault out of the walls.";
-      hint.value = msg;
-    }
+    hud.jerkCount.set(this.jerkCount);
 
     // Tuning panel.
-    let ta = vm.getNumber("tuneAlpha");
-    if (ta != null) ta.value = this.tuneOpen ? 1 : 0;
-    let tt = vm.getString("tuneText");
-    if (tt != null && this.tuneOpen) {
+    hud.tuneAlpha.set(this.tuneOpen ? 1 : 0);
+    if (this.tuneOpen) {
       let lines = "";
       for (let i = 0; i < TUNE_NAMES.length; i++) {
         lines += (i == this.tuneIndex ? "▸ " : "   ") + TUNE_NAMES[i] + "   " + this.tuneValue(i) + (i < TUNE_NAMES.length - 1 ? "\n" : "");
       }
-      tt.value = lines;
+      hud.tuneText.set(lines);
     }
   }
 
@@ -691,6 +887,11 @@ export class Game extends Layout {
       if (blob != null) this.charger = Model.parse(blob);
       return false;
     }
+    if (this.skyline == null) {
+      let blob = context.blob("skyline");
+      if (blob != null) this.skyline = Model.parse(blob);
+      return false;
+    }
     if (this.vaultGpu == null) {
       let vm = new MeshBuilder();
       Vault.mesh(vm);
@@ -699,26 +900,6 @@ export class Game extends Layout {
       return false;
     }
     return true;
-  }
-
-  drawLoading(renderer: Renderer): void {
-    let map = this.map;
-    let loader = this.loader;
-    // Reading the map, then building the city (most of the bar), then putting it on the GPU.
-    let p = map != null ? 0.1 + this.city!.progress(map) * 0.75 : loader != null ? loader.progress() * 0.1 : 0;
-    if (this.ready) p = 0.85 + 0.15 * this.city!.uploadProgress();
-    let w = this.width, h = this.height;
-    let bw = Math.min(420, w * 0.5);
-    let x = (w - bw) / 2, y = h * 0.62;
-    this.barPaint.color = Color.rgba(255, 181, 71, 255);
-    let bar = this.bar;
-    bar.reset();
-    bar.moveTo(Vector.xy(<f32>x, <f32>y));
-    bar.lineTo(Vector.xy(<f32>(x + bw * p), <f32>y));
-    bar.lineTo(Vector.xy(<f32>(x + bw * p), <f32>(y + 4)));
-    bar.lineTo(Vector.xy(<f32>x, <f32>(y + 4)));
-    bar.close();
-    renderer.drawPath(bar, this.barPaint);
   }
 
   override draw(renderer: Renderer): void {
@@ -739,14 +920,8 @@ export class Game extends Layout {
     let city = this.city;
     let context = this.context;
     if (gfx == null || city == null || context == null) return;
-    if (!this.ready) {
-      this.drawLoading(renderer);
-      return;
-    }
-    if (!this.uploaded) {
-      this.drawLoading(renderer);
-      return;
-    }
+    // Nothing to draw until the city's on the GPU: the crew select covers the screen meanwhile.
+    if (!this.ready || !this.uploaded) return;
     let cam = this.camera;
     gfx.begin();
     gfx.camera(cam.eyeX, cam.eyeY, cam.eyeZ, cam.targetX, 0, cam.targetZ, cam.fov, this.width * this.scale, this.height * this.scale, this.time, this.look);
@@ -770,15 +945,14 @@ export class Game extends Layout {
       }
     }
 
-    // The cars.
-    let charger = this.charger;
-    if (charger != null) {
-      for (let i = 0; i < 2; i++) {
-        let car = i == 0 ? this.player! : this.partnerCar!;
-        let b = car.body;
-        let paint: u32 = i == 0 ? 0x141518 : 0x24272c;
-        charger.draw(gfx, b.x, b.z, b.a, car.pitch, car.roll, car.steer, car.spinFront, car.spinRear, paint, 0.35, car.braking ? 1.0 : 0.0, 0.0, 0.0);
-      }
+    // The cars: Dom's black Charger, Brian's blue Skyline.
+    for (let i = 0; i < 2; i++) {
+      let car = i == 0 ? this.dom! : this.brian!;
+      let model = i == 0 ? this.charger : this.skyline;
+      if (model == null) model = this.charger;
+      if (model == null) continue;
+      let b = car.body;
+      model.draw(gfx, b.x, b.z, b.a, car.pitch, car.roll, car.steer, car.spinFront, car.spinRear, i == 0 ? DOM_PAINT : BRIAN_PAINT, i == 0 ? 0.35 : 0.85, car.braking ? 1.0 : 0.0, 0.0, 0.0);
     }
 
     // The vault, rocking on its base.
@@ -811,5 +985,21 @@ export class Game extends Layout {
 
     this.fx.draw(gfx);
     gfx.finish(renderer, this.width, this.height, this.scale);
+    if (this.phase == PHASE_DRIVE) this.drawMinimap(renderer);
+  }
+
+  /** The minimap, in the HUD's bezel: 200 points round, 20 from the bottom-left corner. */
+  private drawMinimap(renderer: Renderer): void {
+    let mm = this.minimap;
+    if (mm == null) return;
+    let p = this.player!.body;
+    let cx: f64 = 120, cy = this.height - 120;
+    mm.begin(renderer, cx, cy, 100, p.x, p.z, this.camera.bearing());
+    let v = this.vault!.body;
+    mm.box(renderer, v.x, v.z, 4, v.a, 0xffffb547, 0xff0a0e16);
+    let mate = this.partnerCar!.body;
+    mm.arrow(renderer, mate.x, mate.z, mate.a, 6, this.crew == 0 ? 0xff6f95ff : 0xffbfc4cc, 0xff0a0e16);
+    mm.arrow(renderer, p.x, p.z, p.a, 8, 0xfffff4e3, 0xff0a0e16);
+    mm.end(renderer);
   }
 }

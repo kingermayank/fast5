@@ -34,6 +34,20 @@ export class OverheadCamera {
     this.shakeAmount = Math.max(this.shakeAmount, amount);
   }
 
+  /** Puts the eye and target somewhere else for this frame: the title orbit, cutscene shots. */
+  frame(eyeX: f64, eyeY: f64, eyeZ: f64, targetX: f64, targetZ: f64): void {
+    this.eyeX = eyeX;
+    this.eyeY = eyeY;
+    this.eyeZ = eyeZ;
+    this.targetX = targetX;
+    this.targetZ = targetZ;
+  }
+
+  /** The bearing it looks along (forward is sin, cos), for the minimap and the route arrow. */
+  bearing(): f64 {
+    return Math.atan2(this.targetX - this.eyeX, this.targetZ - this.eyeZ);
+  }
+
   /** Follow (x, z) moving at (vx, vz); `spread` widens the view to fit the convoy. */
   update(dt: f64, x: f64, z: f64, vx: f64, vz: f64, spread: f64, boost: bool): void {
     let speed = Math.sqrt(vx * vx + vz * vz);

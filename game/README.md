@@ -2,9 +2,17 @@
 
 The game rebuilt as a single Rive file: the city, the cars, the vault and its
 cables are drawn by AnimaScript (`src/*.as`, compiled to wasm) through Rive's
-GPU API (`shaders/*.wgsl`), under a HUD authored in RML (`main.rml`).
+GPU API (`shaders/*.wgsl`), under the original game's Rive screens and HUD.
 
-- `src/game.as`: the loop, input, camera, HUD state.
+- `ui.rml`: the `UI` artboard, from the original game's UI (`../ui/`): crew select, the
+  intro and cutscene cards, the driving HUD (heat, stats, objective, route arrow, meters,
+  speedometer, minimap bezel, cables), banners, Mia's radio, end screens. The game runs
+  under all of it as a scripted layout.
+- `data.rml`: the `Game` view model the script drives (the original UI's contract, plus the
+  cables, tuning, sound cues and test switches). `main.rml`: the assets.
+- `src/game.as`: the loop, the story (select, intro, drive), input, camera.
+- `src/hud.as`: the view model's properties, written only when they change; banner and radio timing.
+- `src/minimap.as`: the minimap in the bezel, drawn as vectors.
 - `src/physics.as`: rigid bodies on the ground plane, substepped XPBD.
 - `src/car.as`: tyre forces, load transfer (including the cable's pull at the hitch), traction control.
 - `src/partner.as`: Brian's driver: holds formation and takes his share of the pull.
@@ -14,7 +22,8 @@ GPU API (`shaders/*.wgsl`), under a HUD authored in RML (`main.rml`).
 - `src/render.as`: shadow map, lit pass with MSAA, particles.
 
 `assets/` is generated: `node tools/rive/pack-map.mjs` and `node tools/rive/pack-models.mjs`
-(from the repo root) rebuild the map and the car meshes.
+(from the repo root) rebuild the map and the car meshes: Dom's Charger, Brian's blue
+Skyline and the police cruiser.
 
 ## Playing it
 
@@ -26,8 +35,9 @@ cd fast5
 rive game
 ```
 
-A window opens and the city loads in a few seconds. Click into it if the keys
-do nothing.
+A window opens on the crew select while the city loads behind it. Pick Dom or
+Brian (A / D or the mouse) and press Enter; Enter again skips the intro. Click
+into the window if the keys do nothing.
 
 | Key | |
 |---|---|
@@ -47,7 +57,7 @@ past their strength they snap. The preview has no sound; the page in
 
 ```bash
 rive game --verify              # compile check
-rive game --screenshot --viewport=1600x900 --advance=2 --key=w:down --advance=300   # hold W for 5 s, then a frame
+rive game --screenshot --viewport=1600x900 --advance=420 --key=enter --advance=30 --key=enter --key=w:down --advance=300   # start, hold W 5 s
 rive game --data=autopilot=1 --data=headless=1 --data-dump=build/run.jsonl --data-dump-every=30 --advance=1500
 rive game --bench=600           # frame times with the scripts a publish ships
 rive game --publish             # signed build for the web (needs `rive login`)
@@ -55,7 +65,10 @@ rive game --publish             # signed build for the web (needs `rive login`)
 
 - `--data=autopilot=1` drives a scripted run up the avenue (swerves, a firm
   stop, pull away again); `--data=autopilot=2` is the yank test on the Expreso
-  Piñero. Either one also logs the cars, the vault and the cables twice a second.
+  Piñero. Either one skips the crew select and the intro (`--data=crew=1` to
+  drive Brian), and logs the cars, the vault and the cables twice a second.
+- Driving by key: `--advance=420 --key=enter --advance=30 --key=enter` gets
+  past the select (once the city's loaded) and the intro.
 - `--data-dump` runs have no GPU: pass `--data=headless=1` so the game skips
   its uploads. They can't take `--key` either (the CLI crashes); use
   `--screenshot` runs for driving by key.

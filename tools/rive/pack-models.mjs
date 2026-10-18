@@ -37,6 +37,24 @@ const CARS = {
       return ROLE.matte;
     },
   },
+  // Brian's blue R34: the paint is the blue, the "Coloured" layer its textured livery.
+  skyline: {
+    ratio: 0.08,
+    error: 0.006,
+    role(mat, x, z, lum) {
+      const n = mat.getName();
+      if (n.includes('Paint_Material')) return ROLE.paint;
+      if (n.includes('Coloured_Material')) return ROLE.livery;
+      if (n.includes('Window_Material')) return ROLE.glass;
+      if (n === 'red_glass') return ROLE.tail;
+      if (n === 'orange_glass') return ROLE.amber;
+      if (n.includes('LightA_Material')) return z > 0 ? ROLE.head : ROLE.tail;
+      if (n.includes('CalliperGloss')) return ROLE.red;
+      if (n.includes('Wheel1A')) return lum > 0.3 ? ROLE.chrome : ROLE.rubber;
+      if (n.includes('ManufacturerPlateA')) return -1;
+      return ROLE.matte;
+    },
+  },
   police: {
     ratio: 0.3,
     role(mat, x, z, lum) {
@@ -87,7 +105,7 @@ async function pack(name) {
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
   const doc = await io.read(`public/models/${name}.glb`);
   // Quantized attributes come back as normalized ints; weld and simplify want floats.
-  await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: cfg.ratio, error: 0.0015 }));
+  await doc.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio: cfg.ratio, error: cfg.error ?? 0.0015 }));
 
   const textures = new Map();
   for (const mat of doc.getRoot().listMaterials()) {
