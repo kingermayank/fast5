@@ -1,128 +1,90 @@
 import * as THREE from 'three';
 import { NEWS } from './broadcast';
 import { ease, type Shot } from './cutscene';
+import { BODY_BACK, FLOOR, GarbageTruck, INSIDE, RAMP_FOOT, STEP } from './garbageTruck';
 import type { MomentContext } from './moments';
+import { beckon, buildFigure, cheer, type Figure, stand, wave } from './people';
 import { RAPIER, yawQuat } from './physics';
+import { Path } from './roads';
 import { inTunnel, TUNNEL } from './roadmap';
 import { CABLE_TOW_LENGTH } from './vault';
 import type { Vehicle } from './vehicle';
 
 /*
- * The swap's layout, in the tunnel's frame: x across (left positive), z along it
- * from the entrance.
+ * The rolling swap, laid out in the tunnel's frame: x across (left positive), z
+ * along it from the entrance. Gisele's garbage truck waits inside with its hopper
+ * up and the ramp down, and rolls off along the line as the convoy comes in. The
+ * player threads the vault onto the ramp (the line-up); then, in one take, the
+ * cars straddle the truck, the vault rides up into the hopper, the cables come off
+ * and the hopper slams shut, the trailing hooks catch the rings on the decoy's
+ * cables further on, and the decoy is yanked out from under its tarp.
  */
-/** Where the cars stop, and the line they settle on. */
-const STOP = 72;
-const LANE = -1;
+
+/** The line the truck drives and the convoy threads. */
+const LINE = 0;
 /** Car centres to the vault's centre. */
 const TOW = CABLE_TOW_LENGTH + 2.5;
-/** Half the gap between the two cars' centres. */
+/** Each car's distance from the line: in formation, and spread round the truck and the decoy. */
 const BESIDE = 2.75;
-/** The decoy waits in the left lanes, level with where the real vault stops. */
-const DECOY_X = 8;
-/** The truck is parked in the right lanes, facing out; its bed is 1.3 m up, its tailgate 4.8 m behind its middle. */
-const TRUCK_X = -9;
-const TRUCK_Z = 72;
-const TAIL = 4.8;
-const BED = 1.3;
-const RAMP = 5;
-/** The ramp's foot on the road (z), and how high the vault rides (its half height). */
-const RAMP_FOOT = TRUCK_Z - TAIL - Math.sqrt(RAMP * RAMP - BED * BED);
+const WIDE = 3.4;
 const VAULT_Y = 1.27;
-/** On the decoy, the cars pull away at this rate (m/s²) for the scene's last seconds. */
-const PULL_AWAY = 3.5;
-const PULL_START = 2.2;
-const DECOY_SHOT = 4.8;
-const ROLL_OUT = 0.5 * PULL_AWAY * (DECOY_SHOT - PULL_START) ** 2;
-const ROLL_SPEED = PULL_AWAY * (DECOY_SHOT - PULL_START);
+/** The truck waits here (its middle) and rolls off at ROLL m/s as the convoy comes in, stopping at HOLD if it isn't caught. */
+const WAIT_Z = 30;
+const HOLD_Z = 50;
+const ROLL = 4.5;
+/** Where the truck is when the scene starts, as staged (the real start is eased into it). */
+const Z0 = 44;
+/** The scene starts with the cars' noses this far short of the ramp's foot... */
+const TRIGGER_GAP = 6;
+/** ...the convoy's centre this far behind the truck's then (m), and this far ahead when the vault's nose reaches the sill. */
+const R0 = RAMP_FOOT - TRIGGER_GAP - 2.5;
+const R_POP = BODY_BACK + TOW - 1.5;
+/** The vault's nose reaches the sill (s into the scene), with the convoy doing V_POP m/s; it takes T_IN s to slide in. */
+const T_POP = 2.5;
+const V_POP = 12;
+const T_IN = 0.85;
+/** Then the truck pulls over to the right-hand lanes and stops, over T_PARK s. */
+const T_VEER = T_POP + T_IN + 0.3;
+const T_PARK = 6;
+const PARK_X = -7.5;
+const PARK_Z = Z0 + ROLL * T_VEER + (ROLL * T_PARK) / 1.5;
+/** The convoy gathers speed slowly with the hooks trailing, then floors it once the decoy is on. */
+const A_DRAG = 0.4;
+const A_OUT = 3.6;
+/** The decoy waits on the line under a tarp; its own cables lie out ahead of it to rings on the road. */
+const DECOY_Z = 96;
+const RING_OUT = 4.6;
+const RING_Z = DECOY_Z + 1.5 + RING_OUT;
+/** The cut cables' hooks drag this far behind each car's tow point. */
+const HOOK_TRAIL = 2.8;
+/** Convoy centre (z) as the scene stages it: at the pop, when the hooks catch the rings, and when the decoy's cables go taut. */
+const CZ_POP = Z0 + ROLL * T_POP + R_POP;
+const CZ_CATCH = RING_Z + 2.6 + HOOK_TRAIL;
+const CZ_YANK = DECOY_Z + TOW;
+const dragTime = (z: number) => (-V_POP + Math.sqrt(V_POP * V_POP + 2 * A_DRAG * (z - CZ_POP))) / A_DRAG;
+const T_CATCH = T_POP + dragTime(CZ_CATCH);
+const T_YANK = T_POP + dragTime(CZ_YANK);
+const V_YANK = V_POP + A_DRAG * (T_YANK - T_POP);
+/** Shot boundaries (s into the scene). */
+const S_RIDE = 1.4;
+const S_JAW = T_POP - 0.3;
+const S_CATCH = T_POP + 1.9;
+const S_OUT = T_YANK + 0.8;
+const S_BY = S_OUT + 1.9;
+const BY_TIME = 4.6;
 /** The gate's height (up to the portal's header). */
 const GATE_H = 6.2;
+
+/** Cubic Hermite from 0 to 1 leaving at slope m0 and arriving at m1, and its slope. */
+const hermite = (k: number, m0: number, m1: number) => (k ** 3 - 2 * k ** 2 + k) * m0 + (-2 * k ** 3 + 3 * k ** 2) + (k ** 3 - k ** 2) * m1;
+const hermiteSlope = (k: number, m0: number, m1: number) => (3 * k ** 2 - 4 * k + 1) * m0 + (-6 * k ** 2 + 6 * k) + (3 * k ** 2 - 2 * k) * m1;
+const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+/** How high the ramp is under a point `z` in the truck's frame (0 on the road, FLOOR at the sill). */
+const rampLift = (z: number) => THREE.MathUtils.clamp((z - RAMP_FOOT) / (BODY_BACK - RAMP_FOOT), 0, 1) * FLOOR;
 
 function say(ctx: MomentContext, who: string, line: string): void {
   ctx.hud.radio(who, line);
   ctx.voice.speak(who, line);
-}
-
-interface SwapTruck {
-  group: THREE.Group;
-  /** The rear doors, each on its hinge. */
-  doors: THREE.Group[];
-  /** The loading ramp, hinged at the tailgate. */
-  ramp: THREE.Group;
-  /** Tail and head lamps, and the work lamp in the box. */
-  lamps: THREE.MeshStandardMaterial[];
-  work: THREE.MeshStandardMaterial;
-  /** The winch drum on the bulkhead, in the truck's frame. */
-  winch: THREE.Vector3;
-}
-
-/**
- * Han and Roman's box truck: a cab, a cargo box big enough for the vault, swing
- * doors at the back and a ramp down to the road. Origin on the ground at its
- * middle, facing +z.
- */
-function buildSwapTruck(): SwapTruck {
-  const g = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color: 0xe6e3dc, roughness: 0.6, metalness: 0.15 });
-  const cabPaint = new THREE.MeshStandardMaterial({ color: 0x1d4e7a, roughness: 0.45, metalness: 0.4 });
-  const stripe = new THREE.MeshStandardMaterial({ color: 0xd9822b, roughness: 0.6 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x1a1c1e, roughness: 0.8 });
-  const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.8, roughness: 0.35 });
-  const glass = new THREE.MeshStandardMaterial({ color: 0x0c1218, metalness: 0.9, roughness: 0.1 });
-  const tire = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.95 });
-  const tail = new THREE.MeshStandardMaterial({ color: 0x400000, emissive: 0xff2a1a, emissiveIntensity: 1.6 });
-  const head = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4dd, emissiveIntensity: 2.4 });
-  const work = new THREE.MeshStandardMaterial({ color: 0x2a2620, emissive: 0xffd8a0, emissiveIntensity: 0 });
-  const add = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D = g) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, y, z);
-    m.castShadow = m.receiveShadow = true;
-    parent.add(m);
-    return m;
-  };
-  const w = 3.4;
-  const back = -TAIL;
-  const front = 2.6;
-  const len = front - back;
-  const mid = (back + front) / 2;
-  const tall = 3.1;
-  const top = BED + tall;
-  // Chassis, then the box: floor, sides, roof and bulkhead, open at the back.
-  add(new THREE.BoxGeometry(2.3, 0.35, 10.2), dark, 0, 0.85, 0.3);
-  add(new THREE.BoxGeometry(w, 0.12, len), steel, 0, BED - 0.06, mid);
-  for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.08, tall, len), paint, s * (w / 2 - 0.04), BED + tall / 2, mid);
-  add(new THREE.BoxGeometry(w, 0.08, len), paint, 0, top - 0.04, mid);
-  add(new THREE.BoxGeometry(w, tall, 0.08), paint, 0, BED + tall / 2, front - 0.04);
-  for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.02, 0.35, len - 0.4), stripe, s * (w / 2 + 0.01), BED + 1, mid);
-  // Inside: a work lamp under the roof, and the winch on the bulkhead.
-  add(new THREE.BoxGeometry(1.2, 0.05, 0.3), work, 0, top - 0.11, mid);
-  const winch = new THREE.Vector3(0, BED + 0.6, front - 0.45);
-  add(new THREE.CylinderGeometry(0.22, 0.22, 0.9, 12).rotateZ(Math.PI / 2), dark, winch.x, winch.y, winch.z);
-  // The cab.
-  add(new THREE.BoxGeometry(2.5, 1.5, 2.6), cabPaint, 0, 1.25, front + 1.35);
-  add(new THREE.BoxGeometry(2.4, 1.15, 2.0), cabPaint, 0, 2.55, front + 1.1);
-  add(new THREE.BoxGeometry(2.2, 0.75, 0.05), glass, 0, 2.65, front + 2.12).rotation.x = -0.15;
-  for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.05, 0.6, 1.2), glass, s * 1.21, 2.65, front + 1.2);
-  for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.4, 0.2, 0.05), head, s * 0.85, 1.25, front + 2.66);
-  // One axle under the cab, two under the box.
-  for (const z of [front + 1.4, -1.6, -2.9]) {
-    for (const s of [-1, 1]) add(new THREE.CylinderGeometry(0.55, 0.55, 0.45, 18).rotateZ(Math.PI / 2), tire, s * 1.1, 0.55, z);
-  }
-  for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.3, 0.18, 0.05), tail, s * 1.45, 0.95, back - 0.02);
-  // Rear doors, hinged at the box's back corners.
-  const doors: THREE.Group[] = [];
-  for (const s of [-1, 1]) {
-    const hinge = new THREE.Group();
-    hinge.position.set((s * w) / 2, 0, back);
-    add(new THREE.BoxGeometry(w / 2 - 0.02, tall - 0.1, 0.06), paint, (-s * w) / 4, BED + tall / 2, -0.03, hinge);
-    g.add(hinge);
-    doors.push(hinge);
-  }
-  const ramp = new THREE.Group();
-  ramp.position.set(0, BED, back);
-  add(new THREE.BoxGeometry(3.1, 0.08, RAMP), steel, 0, -0.04, -RAMP / 2, ramp);
-  g.add(ramp);
-  return { group: g, doors, ramp, lamps: [tail, head], work, winch };
 }
 
 /** A roller shutter across the tunnel's mouth: grey slats over a hazard-striped bottom rail. */
@@ -150,58 +112,157 @@ function buildGate(width: number): THREE.Group {
   return g;
 }
 
+/** A tarp thrown over the decoy: a box a size up from the vault's, its sides pushed in and out a little like cloth. */
+function buildTarp(): THREE.Mesh {
+  const geo = new THREE.BoxGeometry(3.75, 2.85, 3.75, 6, 5, 6);
+  const p = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    const y = p.getY(i);
+    const z = p.getZ(i);
+    // Folds hang off the top edge; the hem flares at the bottom.
+    const fold = Math.sin(x * 3.1 + z * 1.7) * 0.06 + Math.sin(z * 4.3 - x) * 0.04;
+    const flare = y < -1 ? (-1 - y) * 0.18 : 0;
+    const k = 1 + flare / 1.85;
+    p.setXYZ(i, x * k + fold, y - (Math.abs(x) > 1.75 && Math.abs(z) > 1.75 ? 0.05 : 0), z * k - fold);
+  }
+  geo.translate(0, 1.42, 0);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x2c3a4a, roughness: 0.92, side: THREE.DoubleSide }));
+  mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
+}
+
+/** A length of cable drawn as a tube through three points (redrawn when it moves). */
+class CableLine {
+  readonly mesh: THREE.Mesh;
+  constructor(scene: THREE.Scene, radius = 0.045) {
+    this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.7, roughness: 0.4 }));
+    this.mesh.castShadow = true;
+    this.mesh.userData.radius = radius;
+    scene.add(this.mesh);
+  }
+  draw(a: THREE.Vector3, mid: THREE.Vector3, b: THREE.Vector3): void {
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, mid, b), 10, this.mesh.userData.radius, 5, false);
+    this.mesh.visible = true;
+  }
+}
+
+/** Where the scene puts everyone, for the frame it's on. */
+interface Staging {
+  /** Seconds into the scene. */
+  t: number;
+  /** The convoy's speed as the scene took over, to leave at that speed. */
+  v0: number;
+  /** How far off their staged start everyone was (world offsets and headings), eased away as the scene runs. */
+  off: { player: THREE.Vector3; partner: THREE.Vector3; vault: THREE.Vector3; truck: number };
+  turn: { player: number; partner: number; vault: THREE.Quaternion };
+  /** The convoy's centre (z and x in the tunnel's frame) and speed. */
+  cz: number;
+  cx: number;
+  speed: number;
+  /** Frozen while the camera is away at the drive-by. */
+  frozen: boolean;
+}
+
 /**
- * The swap, in the tunnel on the expressway. Han and Roman wait inside with a box
- * truck and a decoy that looks just like the vault. Han drops the gate behind the
- * convoy, so no cop sees it: the cables come off, the real vault is winched up into
- * the truck, the cars are hooked to the decoy, and the convoy rolls on out of the
- * tunnel with every cop in Rio still chasing it. The truck waits inside with its
- * lights off until they've all gone by.
+ * The swap, in the tunnel on the expressway. Mia calls it; the gate drops behind
+ * the convoy so no cop sees; the player lines the vault up with the ramp of the
+ * garbage truck rolling ahead; then the scene: the real vault goes into the truck
+ * and the decoy comes out from under its tarp on the cables, and the convoy bursts
+ * out of the tunnel with every cop in Rio still chasing it. The cops come through
+ * the gate behind them and drive straight past the parked garbage truck.
  */
 export class TunnelSwap {
-  state: 'waiting' | 'called' | 'swapping' | 'swapped' | 'clear' = 'waiting';
-  private truck = buildSwapTruck();
+  state: 'waiting' | 'called' | 'lineup' | 'swapping' | 'clear' = 'waiting';
+  /** How well the vault was lined up with the ramp when the scene took over (0..1). */
+  quality = 0;
+  private truck = new GarbageTruck();
+  /** The truck's place in the tunnel's frame, its heading off the tunnel's, and its speed. */
+  private truckX = LINE;
+  private truckZ = WAIT_Z;
+  private truckYaw = 0;
+  private truckSpeed = 0;
   private gate: THREE.Group;
-  /** The real vault once it's off the cables (a copy of the vault's mesh). */
-  private real: THREE.Object3D;
-  /** The decoy, until the vault in the physics takes its place. */
-  private decoy: THREE.Object3D;
-  private decoyCollider: RAPIER.Collider | null;
-  /** The winch cable, while the real vault goes up the ramp. */
-  private winchLine: THREE.Mesh;
-  private hooked: 'real' | 'none' | 'decoy' = 'real';
-  private shut = false;
-  private time = 0;
-  private swappedAt = 0;
   /** The gate: how far down it is (0 open, 1 shut), and where it's going. */
   private gateNow = 0;
   private gateTo = 0;
-  private bump = new Set<string>();
+  /** The real vault once it's off the cables (a copy of the vault's mesh), and the decoy until the vault in the physics takes its place. */
+  private real: THREE.Object3D;
+  private decoy: THREE.Object3D;
+  private decoyCollider: RAPIER.Collider | null;
+  private tarp = buildTarp();
+  private tarpFly: { vel: THREE.Vector3; spin: THREE.Vector3; landed: number } | null = null;
+  /** The decoy's own cables, laid out to rings on the road; and the cut cables' hooks, dragging behind the cars. */
+  private ringLines: CableLine[] = [];
+  private rings: THREE.Mesh[] = [];
+  private hookLines: CableLine[] = [];
+  private hooks: THREE.Mesh[] = [];
+  private tej: Figure;
+  private roman: Figure;
+  private hooked: 'real' | 'none' | 'decoy' = 'real';
+  private time = 0;
+  private lineupTime = 0;
+  private slowed = false;
+  private gateCalled = false;
+  private lockedOut = false;
+  private stage: Staging | null = null;
+  private once = new Set<string>();
+  /** The cruisers that come through the gate in the drive-by. */
+  private cops: { v: Vehicle; x: number; z: number }[] = [];
+  /** Solid once it's parked. */
+  private parked: RAPIER.Collider | null = null;
+  private road = new Path(TUNNEL.road);
+  /** The tunnel's entrance, along its road. */
+  private s0 = this.road.project(TUNNEL.frame.origin);
 
   constructor(private ctx: MomentContext) {
     const f = TUNNEL.frame;
     const { scene, world, vault } = ctx;
-    const t = this.truck;
-    t.group.position.copy(f.toWorld(TRUCK_X, TRUCK_Z));
-    t.group.rotation.y = f.heading;
-    scene.add(t.group);
-    this.openDoors(1);
-    this.stowRamp(0);
-    // The parked truck and the waiting decoy are solid.
+    scene.add(this.truck.group);
+    this.placeTruck();
+    // The decoy waits on the line, solid, under its tarp.
+    const d = f.toWorld(LINE, DECOY_Z);
     const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-    const at = f.toWorld(TRUCK_X, TRUCK_Z + 0.3);
-    world.createCollider(RAPIER.ColliderDesc.cuboid(1.75, 2.2, 5.1).setTranslation(at.x, 2.2, at.z).setRotation(yawQuat(f.heading)), body);
-    const d = f.toWorld(DECOY_X, STOP - TOW);
     this.decoyCollider = world.createCollider(RAPIER.ColliderDesc.cuboid(1.5, 1.25, 1.5).setTranslation(d.x, VAULT_Y, d.z).setRotation(yawQuat(f.heading)), body);
     this.decoy = vault.mesh.clone();
     this.decoy.position.copy(d).setY(VAULT_Y);
     this.decoy.rotation.set(0, f.heading, 0);
     this.real = vault.mesh.clone();
     this.real.visible = false;
-    scene.add(this.decoy, this.real);
-    this.winchLine = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 1, 6), new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.7, roughness: 0.4 }));
-    this.winchLine.visible = false;
-    scene.add(this.winchLine);
+    this.tarp.position.copy(d);
+    this.tarp.rotation.y = f.heading + 0.04;
+    scene.add(this.decoy, this.real, this.tarp);
+    // Its cables lie out ahead of it to two rings, one under each car's line.
+    for (const s of [-1, 1]) {
+      const line = new CableLine(scene);
+      const anchor = f.toWorld(LINE + s * 0.9, DECOY_Z + 1.55, VAULT_Y - 0.7);
+      const ringAt = f.toWorld(LINE + s * WIDE, RING_Z, 0.06);
+      line.draw(anchor, anchor.clone().lerp(ringAt, 0.4).setY(0.04), ringAt);
+      this.ringLines.push(line);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.045, 6, 16), new THREE.MeshStandardMaterial({ color: 0xc9a227, metalness: 0.8, roughness: 0.3 }));
+      ring.position.copy(ringAt);
+      ring.rotation.set(Math.PI / 2, 0, f.heading);
+      scene.add(ring);
+      this.rings.push(ring);
+      const hookLine = new CableLine(scene);
+      hookLine.mesh.visible = false;
+      this.hookLines.push(hookLine);
+      const hook = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.34), new THREE.MeshStandardMaterial({ color: 0x55585c, metalness: 0.85, roughness: 0.35 }));
+      hook.visible = false;
+      scene.add(hook);
+      this.hooks.push(hook);
+    }
+    // Tej rides the truck's left-hand step, facing back down the tunnel; Roman waits by the decoy.
+    this.tej = buildFigure({ suit: 0xff7a1a, skin: 0x7a5236, hat: 0xf2c200, bands: true });
+    this.tej.group.position.set(STEP.x, STEP.y, STEP.z);
+    this.tej.group.rotation.y = Math.PI;
+    this.truck.group.add(this.tej.group);
+    this.roman = buildFigure({ suit: 0xff7a1a, skin: 0x5b3a26, hat: 0xf2c200, bands: true });
+    this.roman.group.position.copy(f.toWorld(LINE + 5.6, DECOY_Z - 3));
+    this.roman.group.rotation.y = f.heading + Math.PI - 0.5;
+    scene.add(this.roman.group);
     this.gate = buildGate((TUNNEL.hw + 0.7) * 2);
     this.gate.position.copy(f.toWorld(0, 1.4, GATE_H));
     this.gate.rotation.y = f.heading;
@@ -211,227 +272,504 @@ export class TunnelSwap {
 
   /** The swap has happened (the vault on the cables is the decoy). */
   get done(): boolean {
-    return this.state === 'swapped' || this.state === 'clear';
+    return this.state === 'clear';
   }
 
   /** Waiting for the convoy (for the beacon and the map). */
   get pending(): boolean {
-    return this.state === 'waiting' || this.state === 'called';
+    return this.state === 'waiting' || this.state === 'called' || this.state === 'lineup';
+  }
+
+  /** The line to drive while lining up (painted on the road), else null. */
+  guide(): Path | null {
+    if (this.state !== 'lineup' && this.state !== 'called') return null;
+    const f = TUNNEL.frame;
+    if (this.state === 'called' && f.toLocal(this.ctx.player.position).z < -70) return null;
+    return new Path([f.toWorld(LINE, -25), f.toWorld(LINE, this.truckZ + RAMP_FOOT - 0.6)]);
+  }
+
+  /** While lining up, the foot of the truck's ramp (the overhead view opens the tunnel's roof up to it), else null. */
+  focus(): THREE.Vector3 | null {
+    return this.state === 'lineup' ? this.truck.toWorld(0, 0, RAMP_FOOT) : null;
+  }
+
+  /** While lining up: where the player's car should run, left of the road's middle (m), for the test autopilot. */
+  lineupOffset(): number | null {
+    return this.state === 'lineup' || this.state === 'called' ? LINE + this.ctx.crew.side * BESIDE : null;
   }
 
   /** Per frame of the chase. */
   update(dt: number): void {
     this.time += dt;
     this.animateGate(dt);
+    this.truck.update(dt, this.truckSpeed);
+    this.animateTarp(dt);
     const { player, vault } = this.ctx;
     vault.glow(inTunnel(vault.position, 2) ? 1 : 0);
     const f = TUNNEL.frame;
-    const l = f.toLocal(player.position);
+    const l = f.toLocal(this.convoyCentre());
     const along = player.forward.dot(f.z);
     if (this.state === 'waiting' && l.z > -260 && l.z < -40 && Math.abs(l.x) < TUNNEL.hw + 10 && along > 0.5) {
       this.state = 'called';
-      say(this.ctx, 'MIA', 'Tunnel ahead! Han and Roman are waiting inside with a truck. Get in there.');
+      say(this.ctx, 'MIA', 'Tunnel coming up. Gisele’s in there with a garbage truck, ramp down. Thread the vault right up it!');
     }
-    if (this.pending && l.z > 10 && l.z < TUNNEL.length - 40 && Math.abs(l.x) < TUNNEL.hw && along > 0.3) this.begin();
-    // Out the far end (and a breather), or long enough that the cops have got the gate open: here they come.
-    const since = this.time - this.swappedAt;
-    if (this.state === 'swapped' && ((l.z > TUNNEL.length + 6 && since > 7) || since > 16)) {
-      this.state = 'clear';
-      this.ctx.holdPolice(false);
-      this.gateTo = 0;
-      say(this.ctx, 'MIA', 'They’re through the gate! Here they come!');
-    }
+    if ((this.state === 'waiting' || this.state === 'called') && l.z > -18 && l.z < TUNNEL.length - 60 && Math.abs(l.x) < TUNNEL.hw && along > 0.3) this.startLineup();
+    if (this.state === 'lineup') this.lineup(dt, l);
+    if (this.state === 'waiting' || this.state === 'called' || this.state === 'lineup') stand(this.roman);
+    if (this.state === 'clear') wave(this.tej, this.time, 'L');
   }
 
   /** Debug starts past the tunnel: the swap happened off screen. */
   skipAhead(): void {
     if (this.state === 'clear') return;
     this.state = 'clear';
-    this.handOver(false);
-    this.load(1);
-    this.stowRamp(1);
-    this.openDoors(0);
-    this.lightsOff();
+    this.endState(false);
+  }
+
+  // ---------------------------------------------------------------- the line-up
+
+  private startLineup(): void {
+    const { ctx } = this;
+    this.state = 'lineup';
+    this.lineupTime = 0;
+    // No civilians in the way in there (out of sight, they're gone).
+    ctx.clearStreets((p) => inTunnel(p, 2) && !ctx.police.visible(p));
+    say(ctx, 'GISELE', 'I see you. Line it up with my ramp and keep it straight.');
+  }
+
+  private lineup(dt: number, l: { x: number; z: number }): void {
+    const { ctx } = this;
+    const { player, vault, hud, director, fx } = ctx;
+    const f = TUNNEL.frame;
+    this.lineupTime += dt;
+    // The truck rolls off down the line (no faster than the convoy can catch it) and waits at HOLD_Z.
+    const v = Math.max(0, player.forwardSpeed);
+    const want = this.truckZ < HOLD_Z ? Math.min(ROLL, Math.max(0, v - 3)) : 0;
+    this.truckSpeed += (want - this.truckSpeed) * Math.min(1, dt * 2);
+    this.truckZ += this.truckSpeed * dt;
+    this.placeTruck();
+    // The ramp's lip drags on the road while it rolls.
+    if (this.truckSpeed > 0.5) {
+      for (const x of [-1.3, 1.3]) if (Math.random() < 0.5) fx.scrape(this.truck.toWorld(x, 0.05, RAMP_FOOT + 0.1), f.z.clone().multiplyScalar(this.truckSpeed), 0.5);
+    }
+    beckon(this.tej, this.time);
+    // Once the vault is inside, the gate comes down behind it; anyone still out there is locked out.
+    const vl = f.toLocal(vault.position);
+    if (!this.gateCalled && vl.z > 6) {
+      this.gateCalled = true;
+      this.gateTo = 1;
+      say(ctx, 'HAN', 'Gate’s coming down. Nobody’s seeing this.');
+    }
+    if (this.gateNow === 1 && !this.lockedOut) {
+      this.lockedOut = true;
+      ctx.clearStreets((p) => {
+        const q = f.toLocal(p);
+        return q.z < 1 && q.z > -220 && Math.abs(q.x) < TUNNEL.hw + 30;
+      });
+    }
+    // Time slows as they come up on the truck, so there's a moment to line it up.
+    if (!this.slowed && vl.z > 2) {
+      this.slowed = true;
+      director.slowmo(0.45, 3.2);
+    }
+    this.quality = THREE.MathUtils.clamp(1 - Math.abs(l.x - LINE) / 3.2, 0, 1);
+    const prompt = this.quality > 0.85 ? 'DEAD CENTRE  —  KEEP IT STRAIGHT' : l.x > LINE ? 'EASE RIGHT  —  ONTO THE LINE' : 'EASE LEFT  —  ONTO THE LINE';
+    hud.meter('LINE UP', this.quality, prompt);
+    // The cars' noses are coming up on the foot of the ramp: the scene takes it from here.
+    if (l.z >= this.truckZ + R0 || this.lineupTime > 25) this.begin();
   }
 
   private begin(): void {
     const { ctx } = this;
+    const { player, partner, vault } = ctx;
+    const f = TUNNEL.frame;
     this.state = 'swapping';
+    ctx.hud.meter(null);
     ctx.holdPolice(true);
     ctx.clearStreets((p) => inTunnel(p, 40));
+    // Where everyone is now, off their staged start (eased away over the first second and a half).
+    const cz0 = Z0 + R0;
+    const start = this.lineUp(LINE, cz0, BESIDE);
+    const vaultStart = f.toWorld(LINE, cz0 - TOW, VAULT_Y);
+    this.stage = {
+      t: 0,
+      v0: Math.max(0, player.forwardSpeed),
+      off: {
+        player: player.position.sub(start.player),
+        partner: partner.position.sub(start.partner),
+        vault: vault.position.sub(vaultStart),
+        truck: this.truckZ - Z0,
+      },
+      turn: { player: angleDiff(f.heading, player.heading), partner: angleDiff(f.heading, partner.heading), vault: vault.mesh.quaternion.clone() },
+      cz: cz0,
+      cx: LINE,
+      speed: player.forwardSpeed,
+      frozen: false,
+    };
+    vault.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true);
     ctx.cutscene(this.shots(), () => this.finish());
   }
 
-  private shots(): Shot[] {
-    const { player, partner, vault, crew, fx, sound } = this.ctx;
-    const f = TUNNEL.frame;
-    // Rolling in: from wherever they are to a stop beside the truck, braking all the way.
-    const left = f.x;
-    const center = player.position.addScaledVector(left, -crew.side * BESIDE);
-    const z0 = f.toLocal(center).z;
-    const v0 = Math.max(4, player.forwardSpeed);
-    const dz = Math.max(10, STOP - z0);
-    const T = THREE.MathUtils.clamp((2 * dz) / v0, 3.6, 5);
-    // A Hermite ease: leaves at their speed, arrives at rest.
-    const m = THREE.MathUtils.clamp((v0 * T) / dz, 0, 2.6);
-    const H = (k: number) => (k ** 3 - 2 * k ** 2 + k) * m + (-2 * k ** 3 + 3 * k ** 2);
-    const dH = (k: number) => (3 * k ** 2 - 4 * k + 1) * m + (-6 * k ** 2 + 6 * k);
-    const z = (k: number) => STOP - dz + dz * H(k);
-    // Where each of them is now, off its place in the line-up (eased away as they settle).
-    const ideal = (k: number) => this.lineUp(LANE, z(k));
-    const start = ideal(0);
-    const off = {
-      player: player.position.sub(start.player),
-      partner: partner.position.sub(start.partner),
-      vault: vault.position.setY(VAULT_Y).sub(start.vault),
-    };
-    const turn = {
-      player: angleDiff(f.heading, player.heading),
-      partner: angleDiff(f.heading, partner.heading),
-      vault: vault.mesh.quaternion.clone(),
-    };
-    const rollIn = (k: number) => {
-      const p = ideal(k);
-      const fade = 1 - ease(Math.min(1, k / 0.6));
-      const speed = (dz * dH(k)) / T;
-      this.drive(player, p.player.addScaledVector(off.player, fade), f.heading + turn.player * fade, speed);
-      this.drive(partner, p.partner.addScaledVector(off.partner, fade), f.heading + turn.partner * fade, speed);
-      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), f.heading).slerp(turn.vault, fade);
-      this.setVault(p.vault.addScaledVector(off.vault, fade), q);
-    };
-    const look = (k: number) => f.toWorld(LANE, z(k) - 5, 1.2);
-    const me = crew.player;
-    const other = crew.partner;
+  // ---------------------------------------------------------------- the scene
 
+  private shots(): Shot[] {
+    const { ctx } = this;
+    const f = TUNNEL.frame;
+    const me = ctx.crew.player;
+    const step = (dt: number) => this.advance(dt);
+    const truckPt = (x: number, y: number, z: number) => this.truck.toWorld(x, y, z);
     return [
       {
-        // Inside, ahead of them: the convoy rolls in out of the light, the gate drops behind it.
-        duration: T,
-        start: () => {
-          vault.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true);
-          vault.glow(1);
-          this.truck.work.emissiveIntensity = 2.5;
-        },
-        update: (t, dt) => {
-          const k = Math.min(1, t / T);
-          rollIn(k);
-          if (k > 0.3) this.gateTo = 1;
-          this.animateGate(dt);
-          // Braking hard at the end, tires smoking.
-          if (k > 0.55 && k < 0.95) for (const car of [player, partner]) for (const w of car.rearWheels()) if (Math.random() < 0.5) fx.tireSmoke(w, 0.5, f.z.clone().multiplyScalar(2));
-        },
-        camera: (k) => ({ pos: f.toWorld(-4.5 + k * 0.5, 101, 2.1), look: look(k), fov: 46 }),
-        lines: [[0.4, 'HAN', 'Right on time. Gate’s coming down behind you.']],
+        // Off the truck's left-rear quarter, looking back: Tej waves them in, the cars fan out round the ramp.
+        duration: S_RIDE,
+        update: (_t, dt) => step(dt),
+        camera: () => ({ pos: f.toWorld(LINE + 7.6, this.truckZ - 1.5, 3.1), look: f.toWorld(LINE, this.truckZ - 13, 1.0), fov: 50 }),
+        lines: [[0.15, 'GISELE', 'Steady… steady… now!']],
       },
       {
-        // At the vault's door as the cables come off.
-        duration: 3.2,
-        start: () => rollIn(1),
-        update: (t, dt) => {
-          this.animateGate(dt);
-          if (t > 1.0 && this.hooked === 'real') this.unhook();
+        // Riding on the vault as it goes for the ramp: the hopper's open mouth dead ahead.
+        duration: S_JAW - S_RIDE,
+        update: (_t, dt) => step(dt),
+        camera: () => {
+          const v = this.ctx.vault.position;
+          return { pos: v.clone().addScaledVector(f.z, -3.4).setY(v.y + 2.05), look: truckPt(0, 1.7, BODY_BACK + 1.5), fov: 60 };
         },
-        camera: (k) => ({
-          pos: f.toWorld(LANE + 7.5 - k * 0.6, STOP - TOW + 4.2, 1.8 + k * 0.2),
-          look: f.toWorld(LANE - 0.5, STOP - TOW + 4.6, 0.8),
-          fov: 56,
-        }),
-        lines: [[0.3, other, 'Cables off. Make it quick, Roman.']],
       },
       {
-        // Wide, from behind the convoy: the real vault is dragged across and winched up into the truck.
-        duration: 6,
-        start: () => this.handOver(true),
-        update: (t, dt) => {
-          this.animateGate(dt);
-          this.load(Math.min(1, t / 5.4), dt);
-        },
-        camera: (k) => ({ pos: f.toWorld(5.6 - k * 0.8, 46.5 + k * 1.2, 4), look: f.toWorld(-6.5, 64, 1.9), fov: 50 }),
+        // The left-rear quarter again, close: the vault slides in, the ramp stows and the hopper slams down.
+        duration: S_CATCH - S_JAW,
+        update: (_t, dt) => step(dt),
+        camera: (k) => ({ pos: truckPt(5.3 - k * 0.4, 2.2 + k * 0.3, BODY_BACK - 4.2 + k * 0.6), look: truckPt(0, 2.1, BODY_BACK - 0.6), fov: 50 }),
+        lines: [[T_POP + 0.15 - S_JAW, 'TEJ', 'She’s in! Close it up!']],
+      },
+      {
+        // Low by the decoy: the cars come past it either side, the hooks catch the rings, and it's yanked out from under the tarp.
+        duration: S_OUT - S_CATCH,
+        update: (_t, dt) => step(dt),
+        camera: () => ({ pos: f.toWorld(LINE + 6.5, DECOY_Z + 9, 1.15), look: f.toWorld(LINE + 0.5, DECOY_Z + 1, 1.0), fov: 48 }),
         lines: [
-          [0.3, 'ROMAN', 'Quick? This thing weighs more than my first apartment.'],
-          [3.8, me, 'Easy with it. That one’s the real one.'],
+          [0.1, 'GISELE', 'Hopper’s shut. Ten tons of garbage, officer.'],
+          [T_YANK + 0.05 - S_CATCH, 'ROMAN', 'Hooked! Go, go, go!'],
         ],
       },
       {
-        // Behind the truck: the ramp comes up, the doors swing shut, the lights go out.
-        duration: 3.8,
-        start: () => this.load(1),
-        update: (t, dt) => {
-          this.animateGate(dt);
-          const k = t / 3.8;
-          this.stowRamp(THREE.MathUtils.clamp(k / 0.35, 0, 1));
-          this.openDoors(1 - ease(THREE.MathUtils.clamp((k - 0.35) / 0.4, 0, 1)));
-          if (k > 0.75 && !this.shut) {
-            this.shut = true;
-            sound.clank();
-            sound.crash(0.3);
-          }
-          if (k > 0.88) this.lightsOff();
+        // Behind the decoy as the convoy floors it for the daylight at the end.
+        duration: S_BY - S_OUT,
+        update: (_t, dt) => step(dt),
+        camera: () => {
+          const v = this.ctx.vault.position.setY(0);
+          return { pos: v.clone().addScaledVector(f.z, -11).addScaledVector(f.x, -0.8).setY(4.8), look: f.toWorld(this.stage!.cx, this.stage!.cz + 22, 1.0), fov: 54 };
         },
-        camera: (k) => ({ pos: f.toWorld(TRUCK_X + 1.6 - k, TRUCK_Z - TAIL - 11 + k * 1.5, 1.7), look: f.toWorld(TRUCK_X, TRUCK_Z - TAIL, 2.5), fov: 46 }),
-        lines: [[0.8, 'HAN', 'We wait in here till every cop has gone by.']],
+        lines: [[0.2, me, 'Now let’s give them a show.']],
       },
       {
-        // Low behind the decoy: the cables go on, and the convoy pulls away toward the light.
-        duration: DECOY_SHOT,
-        start: () => this.onDecoy(0),
-        update: (t, dt) => {
-          this.animateGate(dt);
-          if (t > 0.5 && this.hooked !== 'decoy') this.hookDecoy();
-          this.onDecoy(t);
+        // Down by the parked truck: the gate goes up and the cops come through, flat out, straight past it.
+        duration: BY_TIME,
+        start: () => {
+          if (this.stage) this.stage.frozen = true;
+          this.gateTo = 0;
         },
-        camera: (k) => ({ pos: f.toWorld(DECOY_X - 5.5, STOP - TOW - 7 + k * 6, 5.4), look: f.toWorld(DECOY_X - 0.5, STOP - 4 + k * 8, 0.8), fov: 52 }),
+        update: (t, dt) => {
+          step(dt);
+          this.driveBy(t, dt);
+        },
+        camera: () => ({ pos: f.toWorld(PARK_X + 4.2, PARK_Z + 7.5, 2.4), look: f.toWorld(PARK_X + 1.2, PARK_Z - 30, 1.5), fov: 46 }),
         lines: [
-          [0.6, other, 'Decoy’s hooked up.'],
-          [2.1, me, 'Then let’s give them something to chase.'],
+          [1.6, 'TEJ', 'Evening, officers!'],
+          [3.3, 'HAN', 'Not one of them looked twice.'],
         ],
       },
     ];
   }
 
-  /** The end of the scene, however far it got (it can be skipped): the real vault shut away, the convoy rolling on the decoy. */
-  private finish(): void {
-    if (this.state !== 'swapping') return;
+  /** The scene, `dt` s further on: everyone where the take puts them. */
+  private advance(dt: number): void {
+    const st = this.stage;
+    if (!st) return;
     const { ctx } = this;
-    const { vault, player, partner } = ctx;
+    const { player, partner, vault, fx, sound, director } = ctx;
     const f = TUNNEL.frame;
-    this.state = 'swapped';
-    this.swappedAt = this.time;
-    this.handOver(false);
-    this.load(1);
-    this.stowRamp(1);
-    this.openDoors(0);
-    this.lightsOff();
-    this.gateNow = this.gateTo = 1;
-    this.applyGate();
-    if (this.hooked === 'real') ctx.unhook();
-    vault.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
-    ctx.placeConvoy(f.toWorld(DECOY_X, STOP + ROLL_OUT), f.z, f.toWorld(DECOY_X, STOP + ROLL_OUT - TOW));
+    st.t += dt;
+    const t = st.t;
+    const fade = 1 - ease(Math.min(1, t / 1.5));
+
+    // The truck: rolling down the line, then pulling over to the right and stopping.
+    const tr = this.truckAt(t);
+    this.truckX = tr.x;
+    this.truckZ = tr.z + st.off.truck * fade;
+    this.truckYaw = tr.yaw;
+    this.truckSpeed = tr.speed;
+    this.placeTruck();
+    this.truck.update(dt, tr.speed);
+    this.truck.braking(t > T_VEER && t < T_VEER + T_PARK);
+
+    // The convoy.
+    if (!st.frozen) {
+      let cz: number;
+      let speed: number;
+      if (t <= T_POP) {
+        const k = t / T_POP;
+        const d = R_POP - R0;
+        const m0 = THREE.MathUtils.clamp(((st.v0 - ROLL) * T_POP) / d, 0, 3);
+        const m1 = ((V_POP - ROLL) * T_POP) / d;
+        cz = Z0 + ROLL * t + R0 + d * hermite(k, m0, m1);
+        speed = ROLL + (d * hermiteSlope(k, m0, m1)) / T_POP;
+      } else if (t <= T_YANK) {
+        const u = t - T_POP;
+        cz = CZ_POP + V_POP * u + 0.5 * A_DRAG * u * u;
+        speed = V_POP + A_DRAG * u;
+      } else {
+        const u = t - T_YANK;
+        const v = Math.min(24, V_YANK + A_OUT * u);
+        const cap = (24 - V_YANK) / A_OUT;
+        cz = CZ_YANK + (u < cap ? V_YANK * u + 0.5 * A_OUT * u * u : V_YANK * cap + 0.5 * A_OUT * cap * cap + 24 * (u - cap));
+        speed = v;
+      }
+      st.cz = cz;
+      st.speed = speed;
+      st.cx = LINE;
+      // Spread round the truck and the decoy, then back into formation.
+      const spread =
+        t < 1.5 ? THREE.MathUtils.lerp(BESIDE, WIDE, ease(t / 1.5)) : t < T_YANK + 0.3 ? WIDE : THREE.MathUtils.lerp(WIDE, BESIDE, ease(Math.min(1, (t - T_YANK - 0.3) / 1.2)));
+      const p = this.lineUp(st.cx, cz, spread);
+      this.drive(player, p.player.addScaledVector(st.off.player, fade), f.heading + st.turn.player * fade, speed);
+      this.drive(partner, p.partner.addScaledVector(st.off.partner, fade), f.heading + st.turn.partner * fade, speed);
+      // Hard on the brakes at first (from flat out), smoke off the rear tyres.
+      if (t < 1.4 && st.v0 > 14) for (const car of [player, partner]) for (const w of car.rearWheels()) if (Math.random() < 0.4) fx.tireSmoke(w, 0.5, f.z.clone().multiplyScalar(2));
+    }
+
+    // The vault: on the cables up to the pop, riding up the ramp at the end.
+    if (t < T_POP) {
+      const vz = st.cz - TOW;
+      const local = vz - this.truckZ;
+      const front = rampLift(local + 1.5);
+      const back = rampLift(local - 1.5);
+      const pitch = Math.atan2(front - back, 3);
+      const at = f.toWorld(st.cx, vz, VAULT_Y + (front + back) / 2).addScaledVector(st.off.vault, fade);
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-pitch, f.heading, 0, 'YXZ')).slerp(st.turn.vault, fade);
+      this.setVault(at, q);
+      // Steel on the ramp's lip.
+      if (front > 0.02 && Math.random() < 0.7) fx.scrape(this.truck.toWorld((Math.random() - 0.5) * 2.6, 0.1, RAMP_FOOT + 0.3), f.z.clone().multiplyScalar(-6), 0.8);
+    } else {
+      this.event('pop', () => this.pop());
+      // Sliding on in to the bulkhead, in the truck's frame.
+      const k = Math.min(1, (t - T_POP) / T_IN);
+      const from = R_POP - TOW;
+      const m0 = ((V_POP - ROLL) * T_IN) / (INSIDE - from);
+      const z = from + (INSIDE - from) * hermite(k, m0, 0);
+      const front = rampLift(z + 1.5);
+      const back = rampLift(z - 1.5);
+      this.real.position.set(0, VAULT_Y + (front + back) / 2, z);
+      this.real.rotation.set(-Math.atan2(front - back, 3), 0, 0);
+      if (k >= 1)
+        this.event('slam', () => {
+          this.truck.lurch(1);
+          sound.crash(0.7);
+          director.shake = Math.max(director.shake, 0.6);
+          fx.puff(this.truck.toWorld(0, 1.5, BODY_BACK - 0.4), 8);
+          this.truck.workLamp = false;
+        });
+    }
+
+    // The ramp stows and the hopper comes down, with a hiss and a clank.
+    const rampK = THREE.MathUtils.clamp((t - T_POP - T_IN - 0.05) / 0.5, 0, 1);
+    const hopK = THREE.MathUtils.clamp((t - T_POP - T_IN - 0.35) / 0.55, 0, 1);
+    if (rampK > 0) this.truck.setRamp(1 - ease(rampK));
+    if (hopK > 0) {
+      this.event('hiss', () => sound.hiss(0.7));
+      this.truck.setHopper(1 - ease(hopK));
+      if (hopK >= 1) this.event('shut', () => sound.clank());
+    }
+
+    // The cut cables' hooks drag along behind the cars until they catch the rings.
+    if (t >= T_POP && t < T_CATCH) {
+      for (const [i, car] of [player, partner].entries()) {
+        const a = car.towPoint();
+        const hook = a.clone().addScaledVector(car.forward, -HOOK_TRAIL).setY(0.1);
+        this.hookLines[i].draw(a, a.clone().lerp(hook, 0.6).setY(0.12), hook);
+        this.hooks[i].visible = true;
+        this.hooks[i].position.copy(hook);
+        this.hooks[i].rotation.y = car.heading;
+        if (Math.random() < 0.8) fx.scrape(hook, car.forward.multiplyScalar(st.speed), 0.6);
+      }
+    }
+    if (t >= T_CATCH) this.event('catch', () => this.catchRings());
+    if (t >= T_YANK) {
+      this.event('yank', () => this.yank());
+      if (!st.frozen) {
+        const u = t - T_YANK;
+        const hop = u < 0.35 ? Math.sin((u / 0.35) * Math.PI) * 0.28 : 0;
+        this.setVault(f.toWorld(st.cx, st.cz - TOW, VAULT_Y + hop), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), f.heading));
+        if (u < 1.2 && Math.random() < 0.8) fx.scrape(vault.position.setY(0.08).addScaledVector(f.x, (Math.random() - 0.5) * 2.6), f.z.clone().multiplyScalar(st.speed), 0.8);
+      }
+      cheer(this.roman, t);
+    } else if (t > S_CATCH) {
+      beckon(this.roman, t);
+    }
+    // Tej holds on through the slam, then waves at whoever's coming.
+    if (t < T_POP) beckon(this.tej, t);
+    else stand(this.tej);
+    this.animateTarp(dt);
+    this.animateGate(dt);
+  }
+
+  /** The canonical truck: rolling at ROLL, then easing over to PARK_X and stopping by PARK_Z. */
+  private truckAt(t: number): { x: number; z: number; yaw: number; speed: number } {
+    if (t < T_VEER) return { x: LINE, z: Z0 + ROLL * t, yaw: 0, speed: ROLL };
+    const k = Math.min(1, (t - T_VEER) / T_PARK);
+    const z = Z0 + ROLL * T_VEER + (ROLL * T_PARK * (1 - (1 - k) ** 1.5)) / 1.5;
+    const x = LINE + (PARK_X - LINE) * ease(k);
+    const dz = ROLL * Math.sqrt(1 - k);
+    const dx = ((PARK_X - LINE) * 6 * k * (1 - k)) / T_PARK;
+    return { x, z, yaw: k < 1 ? Math.atan2(dx, dz) : 0, speed: Math.hypot(dx, dz) };
+  }
+
+  /** The vault's nose is at the sill: the cables come off it, and the real vault becomes the truck's. */
+  private pop(): void {
+    const { ctx } = this;
+    for (const c of ctx.cables) ctx.fx.burst(ctx.vault.anchorWorld(c.side), 0.45);
+    if (this.hooked === 'real') {
+      this.hooked = 'none';
+      ctx.unhook();
+    }
+    ctx.sound.clank();
+    setTimeout(() => ctx.sound.clank(), 160);
+    this.handOver(true);
+  }
+
+  /** The trailing hooks catch the rings: the cars are on the decoy's cables. */
+  private catchRings(): void {
+    const { ctx } = this;
+    for (const h of this.hooks) h.visible = false;
+    for (const l of this.hookLines) l.mesh.visible = false;
+    for (const l of this.ringLines) l.mesh.visible = false;
+    for (const r of this.rings) {
+      ctx.fx.burst(r.position.clone().setY(0.3), 0.35);
+      r.visible = false;
+    }
     if (this.hooked !== 'decoy') {
       this.hooked = 'decoy';
       ctx.hook();
     }
-    const v = f.z.clone().multiplyScalar(ROLL_SPEED);
+    ctx.sound.clank();
+  }
+
+  /** The cables go taut and the decoy jerks into motion; its tarp flies off. */
+  private yank(): void {
+    const { ctx } = this;
+    const f = TUNNEL.frame;
+    ctx.sound.crash(0.5);
+    ctx.fx.puff(f.toWorld(LINE, DECOY_Z), 10);
+    ctx.director.shake = Math.max(ctx.director.shake, 0.5);
+    this.tarpFly = {
+      vel: f.z.clone().multiplyScalar(1.2).add(new THREE.Vector3(0, 6, 0)).addScaledVector(f.x, -2.2),
+      spin: new THREE.Vector3(-2.2, 0.9, -1.4),
+      landed: 0,
+    };
+  }
+
+  /** The take's last shot: the gate rolls up and two cruisers come through, flat out, past the parked truck. */
+  private driveBy(t: number, dt: number): void {
+    const { ctx } = this;
+    const f = TUNNEL.frame;
+    wave(this.tej, t, 'L');
+    if (!this.cops.length && this.gateNow < 0.55) {
+      for (const [x, z] of [[5, 3], [1.5, -4]] as const) this.cops.push({ v: ctx.police.spawnAt(f.toWorld(x, z), f.heading), x, z });
+      ctx.sound.ping(900, 0.08, 0.4);
+    }
+    for (const c of this.cops) {
+      c.z += 27 * dt;
+      this.drive(c.v, f.toWorld(c.x, c.z), f.heading, 27);
+    }
+  }
+
+  /** The end of the scene, however far it got (it can be skipped): the real vault shut away in the parked truck, the convoy rolling out on the decoy. */
+  private finish(): void {
+    if (this.state !== 'swapping') return;
+    const { ctx } = this;
+    const { vault, player, partner } = ctx;
+    this.state = 'clear';
+    this.endState(true);
+    vault.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+    // Out of the tunnel's far end, rolling, on the road (which may curve past the straight).
+    const s = this.s0 + TUNNEL.length + 22;
+    const ahead = this.road.tangent(s);
+    if (this.hooked === 'real') ctx.unhook();
+    ctx.placeConvoy(this.road.at(s), ahead, this.road.at(s - TOW));
+    if (this.hooked !== 'decoy') {
+      this.hooked = 'decoy';
+      ctx.hook();
+    }
+    const v = ahead.clone().multiplyScalar(17);
     for (const b of [player.body, partner.body, vault.body]) b.setLinvel({ x: v.x, y: 0, z: v.z }, true);
-    ctx.hud.banner('THE SWAP', 'THE REAL VAULT IS IN THE TRUCK  +750', 2.4);
-    ctx.reward(750, 0.3);
-    setTimeout(() => say(ctx, 'MIA', 'Swap’s done. Now drag that decoy to the bridge, and make it look good.'), 900);
+    // The cruisers that came through the gate are right behind.
+    for (const c of this.cops) c.v.body.setLinvel({ x: TUNNEL.frame.z.x * 26, y: 0, z: TUNNEL.frame.z.z * 26 }, true);
+    this.cops = [];
+    this.stage = null;
+    ctx.holdPolice(false);
+    const clean = this.quality > 0.85;
+    const bonus = clean ? 1250 : 750;
+    ctx.hud.banner('THE SWAP', clean ? `PERFECT LINE-UP  +${bonus}` : `THE REAL VAULT IS IN THE TRUCK  +${bonus}`, 2.4);
+    ctx.reward(bonus, 0.35);
+    setTimeout(() => say(ctx, 'MIA', 'Swap’s done. The real one’s riding off in a garbage truck. Now make them chase the fake!'), 900);
     setTimeout(() => ctx.hud.news(NEWS.tunnel), 2600);
+  }
+
+  /** Everything as the swap leaves it: the truck parked with the real vault shut in, the tarp on the road, the gate up. */
+  private endState(live: boolean): void {
+    const f = TUNNEL.frame;
+    this.handOver(live);
+    this.truck.group.add(this.real);
+    this.real.position.set(0, VAULT_Y + FLOOR, INSIDE);
+    this.real.rotation.set(0, 0, 0);
+    this.truckX = PARK_X;
+    this.truckZ = PARK_Z;
+    this.truckYaw = 0;
+    this.truckSpeed = 0;
+    this.placeTruck();
+    this.truck.setRamp(0);
+    this.truck.setHopper(0);
+    this.truck.braking(false);
+    this.truck.workLamp = false;
+    if (!this.parked) {
+      const at = f.toWorld(PARK_X, PARK_Z + 0.9);
+      const body = this.ctx.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+      this.parked = this.ctx.world.createCollider(RAPIER.ColliderDesc.cuboid(1.8, 2.0, 5.4).setTranslation(at.x, 2.0, at.z).setRotation(yawQuat(f.heading)), body);
+    }
+    for (const x of [...this.hooks, ...this.rings]) x.visible = false;
+    for (const l of [...this.hookLines, ...this.ringLines]) l.mesh.visible = false;
+    if (!this.tarpFly || this.tarpFly.landed < 1) {
+      // Where it came down, crumpled on the road.
+      this.tarpFly = { vel: new THREE.Vector3(), spin: new THREE.Vector3(), landed: 1 };
+      this.tarp.position.copy(f.toWorld(LINE + 0.8, DECOY_Z + 4, 0.12));
+      this.tarp.rotation.set(0, f.heading + 0.6, 0);
+      this.tarp.scale.set(1.25, 0.08, 1.15);
+    }
+    this.roman.group.visible = false;
+    stand(this.tej);
+    this.gateNow = this.gateTo = 0;
+    this.applyGate();
   }
 
   // ---------------------------------------------------------------- staging
 
-  /** The two cars side by side on line `x`, `z` along, and the vault behind them (world positions). */
-  private lineUp(x: number, z: number): { player: THREE.Vector3; partner: THREE.Vector3; vault: THREE.Vector3 } {
+  /** The convoy's centre: between the two cars. */
+  private convoyCentre(): THREE.Vector3 {
+    return this.ctx.player.position.add(this.ctx.partner.position).multiplyScalar(0.5);
+  }
+
+  /** The two cars side by side on line `x`, `spread` m either side of it, `z` along (world positions). */
+  private lineUp(x: number, z: number, spread: number): { player: THREE.Vector3; partner: THREE.Vector3 } {
     const f = TUNNEL.frame;
     const s = this.ctx.crew.side;
-    return { player: f.toWorld(x + s * BESIDE, z), partner: f.toWorld(x - s * BESIDE, z), vault: f.toWorld(x, z - TOW, VAULT_Y) };
+    return { player: f.toWorld(x + s * spread, z), partner: f.toWorld(x - s * spread, z) };
   }
 
   /** Put a car at `p` facing `heading`, rolling forward at `speed` (so its wheels turn). */
   private drive(car: Vehicle, p: THREE.Vector3, heading: number, speed: number): void {
     car.place(p, heading);
     car.body.setLinvel({ x: Math.sin(heading) * speed, y: 0, z: Math.cos(heading) * speed }, true);
+    car.forwardSpeed = speed;
   }
 
   private setVault(p: THREE.Vector3, q: THREE.Quaternion): void {
@@ -440,137 +778,63 @@ export class TunnelSwap {
     b.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
   }
 
-  /** On the decoy, `t` s into the last shot: still, then pulling away. */
-  private onDecoy(t: number): void {
-    const { player, partner } = this.ctx;
+  private placeTruck(): void {
     const f = TUNNEL.frame;
-    const run = Math.max(0, t - PULL_START);
-    const d = 0.5 * PULL_AWAY * run * run;
-    const p = this.lineUp(DECOY_X, STOP + d);
-    this.drive(player, p.player, f.heading, PULL_AWAY * run);
-    this.drive(partner, p.partner, f.heading, PULL_AWAY * run);
-    this.setVault(p.vault, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), f.heading));
-  }
-
-  private unhook(): void {
-    const { ctx } = this;
-    this.hooked = 'none';
-    for (const c of ctx.cables) ctx.fx.burst(ctx.vault.anchorWorld(c.side), 0.45);
-    ctx.unhook();
-    ctx.sound.clank();
-    setTimeout(() => ctx.sound.clank(), 260);
-  }
-
-  private hookDecoy(): void {
-    const { ctx } = this;
-    this.hooked = 'decoy';
-    ctx.hook();
-    ctx.sound.clank();
+    this.truck.group.position.copy(f.toWorld(this.truckX, this.truckZ));
+    this.truck.group.rotation.y = f.heading + this.truckYaw;
   }
 
   /**
    * The real vault comes out of the physics (a copy of its mesh goes into the truck),
-   * and the vault in the physics takes the decoy's place: from here on, that's what
-   * the convoy tows.
+   * and the vault in the physics takes the decoy's place, under the tarp: from here
+   * on, that's what the convoy tows. `live`: move the physics vault (not on a debug
+   * start, which places it itself).
    */
   private handOver(live: boolean): void {
     if (this.real.visible) return;
     const { vault, world } = this.ctx;
+    const f = TUNNEL.frame;
     this.real.visible = true;
     this.decoy.visible = false;
     if (this.decoyCollider) world.removeCollider(this.decoyCollider, false);
     this.decoyCollider = null;
+    // The copy rides into the truck in the truck's frame.
+    this.truck.group.add(this.real);
     if (!live) return;
-    vault.render();
-    this.real.position.copy(vault.mesh.position);
-    this.real.quaternion.copy(vault.mesh.quaternion);
-    const f = TUNNEL.frame;
-    vault.place(f.toWorld(DECOY_X, STOP - TOW), f.heading);
+    vault.place(f.toWorld(LINE, DECOY_Z), f.heading);
     vault.render();
   }
 
-  /**
-   * The real vault on its way into the truck, `k` 0..1: dragged across the road to the
-   * foot of the ramp (turning toward the winch as it comes), then up the ramp and in.
-   */
-  private load(k: number, dt = 0): void {
-    const f = TUNNEL.frame;
-    let x: number;
-    let z: number;
-    let yaw = 0;
-    const footZ = RAMP_FOOT - 1.5;
-    if (k < 0.45) {
-      const e = ease(k / 0.45);
-      x = THREE.MathUtils.lerp(LANE, TRUCK_X, e);
-      z = THREE.MathUtils.lerp(STOP - TOW, footZ, e) + Math.sin(e * Math.PI) * 0.8;
-      yaw = -0.5 * Math.sin(e * Math.PI);
-    } else {
-      x = TRUCK_X;
-      z = THREE.MathUtils.lerp(footZ, TRUCK_Z - 1.4, ease((k - 0.45) / 0.55));
-    }
-    // Riding up the ramp: height and tilt from the ramp under its front and back.
-    const h = (zz: number) => THREE.MathUtils.clamp((zz - RAMP_FOOT) / (TRUCK_Z - TAIL - RAMP_FOOT), 0, 1) * BED;
-    const front = h(z + 1.5);
-    const back = h(z - 1.5);
-    const pitch = Math.atan2(front - back, 3);
-    const before = this.real.position.clone();
-    this.real.position.copy(f.toWorld(x, z, VAULT_Y + (front + back) / 2));
-    this.real.quaternion.setFromEuler(new THREE.Euler(-pitch, f.heading + yaw, 0, 'YXZ'));
-    this.real.updateMatrixWorld();
-
-    // Sparks off the road as it's dragged, a clank onto the ramp and a thud inside.
-    if (dt > 0 && k < 0.45) {
-      const vel = this.real.position.clone().sub(before).divideScalar(dt);
-      for (const [cx, cz] of [[-1.4, -1.4], [1.4, -1.4], [-1.4, 1.4], [1.4, 1.4]]) {
-        if (Math.random() < 0.35) this.ctx.fx.scrape(this.real.localToWorld(new THREE.Vector3(cx, -1.2, cz)).setY(0.08), vel, 0.5);
-      }
-    }
-    if (dt > 0) {
-      if (k > 0.45) this.once('ramp', () => this.ctx.sound.clank());
-      if (k > 0.97) this.once('in', () => this.ctx.sound.crash(0.25));
-    }
-
-    // The winch cable, from the drum to the vault's door.
-    const line = this.winchLine;
-    line.visible = k < 0.97;
-    if (line.visible) {
-      this.truck.group.updateMatrixWorld();
-      const a = this.truck.group.localToWorld(this.truck.winch.clone());
-      const b = this.real.localToWorld(new THREE.Vector3(0, -0.3, 1.55));
-      const d = b.clone().sub(a);
-      line.position.copy(a).addScaledVector(d, 0.5);
-      line.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
-      line.scale.set(1, d.length(), 1);
-    }
-  }
-
-  private once(key: string, fn: () => void): void {
-    if (this.bump.has(key)) return;
-    this.bump.add(key);
+  private event(key: string, fn: () => void): void {
+    if (this.once.has(key)) return;
+    this.once.add(key);
     fn();
   }
 
-  /** Doors open by `k` (0 shut, 1 swung right round against the sides). */
-  private openDoors(k: number): void {
-    this.truck.doors.forEach((hinge, i) => {
-      const s = i === 0 ? -1 : 1;
-      hinge.rotation.y = -s * k * 4.3;
-    });
-  }
-
-  /** Ramp stowed by `k` (0 down on the road, 1 lifted level and slid away under the bed). */
-  private stowRamp(k: number): void {
-    const r = this.truck.ramp;
-    const down = -Math.asin(BED / RAMP);
-    const lift = ease(Math.min(1, k / 0.5));
-    const slide = ease(Math.max(0, (k - 0.5) / 0.5));
-    r.rotation.x = down * (1 - lift);
-    r.position.set(0, BED - 0.2 * slide, -TAIL + RAMP * slide);
-  }
-
-  private lightsOff(): void {
-    for (const l of this.truck.lamps) l.emissiveIntensity = 0;
-    this.truck.work.emissiveIntensity = 0;
+  /** The tarp in the air after the yank: up and back, tumbling, then down in a heap. */
+  private animateTarp(dt: number): void {
+    const fly = this.tarpFly;
+    if (!fly || fly.landed >= 1) return;
+    const t = this.tarp;
+    if (t.position.y > 0.15 || fly.vel.y > 0) {
+      fly.vel.y -= 6 * dt;
+      fly.vel.multiplyScalar(1 - 0.9 * dt);
+      t.position.addScaledVector(fly.vel, dt);
+      t.rotation.x += fly.spin.x * dt;
+      t.rotation.y += fly.spin.y * dt;
+      t.rotation.z += fly.spin.z * dt;
+      // Billowing as it goes.
+      const b = 1 + 0.12 * Math.sin(this.time * 11);
+      t.scale.set(b, 1 / b, b);
+      if (t.position.y <= 0.15 && fly.vel.y < 0) t.position.y = 0.15;
+    } else {
+      // Down: settling flat.
+      fly.landed = Math.min(1, fly.landed + dt * 3);
+      t.position.y = 0.12;
+      t.rotation.x *= 1 - fly.landed;
+      t.rotation.z *= 1 - fly.landed;
+      t.scale.set(1.25, THREE.MathUtils.lerp(t.scale.y, 0.08, fly.landed), 1.15);
+    }
   }
 
   private animateGate(dt: number): void {
@@ -595,5 +859,3 @@ export class TunnelSwap {
     this.gate.visible = this.gateNow > 0.01;
   }
 }
-
-const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos(b - a));

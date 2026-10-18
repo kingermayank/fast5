@@ -11,6 +11,7 @@ import type { Hud } from './hud';
 import type { Obstacle, PartnerDriver } from './partner';
 import { RAPIER } from './physics';
 import type { Police } from './police';
+import type { Reyes } from './reyes';
 import { leftOf, Path, roadHalfWidth } from './roads';
 import { BANK, BRIDGE, onBridge, SPIKES } from './roadmap';
 import { type Cable, CABLE_TOW_LENGTH, type Vault } from './vault';
@@ -28,6 +29,8 @@ export interface MomentContext {
   voice: Voice;
   director: Director;
   police: Police;
+  /** Reyes's SUVs (the bridge finale brings them on). */
+  reyes: Reyes;
   player: Vehicle;
   partner: Vehicle;
   partnerDriver: PartnerDriver;
@@ -556,6 +559,16 @@ export class Roadblock {
     return this.at.clone().sub(p).dot(this.dir);
   }
 
+  /** Where its cruisers stand (the finale starts them up and sends them at you), taking the parked ones away. */
+  release(): THREE.Vector3[] {
+    const at = this.cars.map((c) => {
+      const t = c.body.translation();
+      return new THREE.Vector3(t.x, 0, t.z);
+    });
+    this.clear();
+    return at;
+  }
+
   /** Take it down unbroken (the convoy went another way): its cruisers and their light go. */
   clear(): void {
     for (const c of this.cars) this.ctx.city.removeProp(c);
@@ -568,8 +581,9 @@ export class Roadblock {
 
 // ---------------------------------------------------------------- The bridge
 
-/** How far along the bridge the crew splits up (m): well short of the blockade. */
+/** How far along the bridge the crew splits up (m), and where the wall of cruisers waits (close enough to come alive). */
 export const SPLIT_AT = Math.max(80, BRIDGE.goalAlong - 500);
+const WALL_AT = SPLIT_AT + 300;
 /** Car centres to the vault's centre, half the gap between the cars, and the vault's ride height. */
 const TOW = CABLE_TOW_LENGTH + 2.5;
 const BESIDE = 2.75;
@@ -586,19 +600,23 @@ interface PackCar {
 }
 
 /**
- * The finale. The police have walled off the far end of the bridge with two rows
- * of cruisers, and more are coming up behind. Partway across, the partner calls it:
+ * The finale. The police have walled off the bridge ahead with two rows of
+ * cruisers, and more are coming up behind. Partway across, the partner calls it:
  * there are too many, they have to split up. The cars stop; the partner unhooks,
  * spins round and charges back at the pack to lead it away. The player is left with
  * the vault on one cable, stopped dead, and only the nitrous will get ten tons
- * rolling again (the solo pull). From there it swings like a wrecking ball, and the
- * wall has to be broken to reach the gantry.
+ * rolling again (the solo pull). Then the wall starts its engines and comes head-on,
+ * Reyes's SUVs come up behind with gunmen in the sunroofs, and the vault becomes a
+ * flail: SPACE throws it at whatever's nearest, and a cruiser hit near the rail goes
+ * over into the bay. Swing it into Reyes's SUV and the last scene takes over.
  */
 export class BridgeFinale {
-  state: 'idle' | 'set' | 'split' | 'pull' | 'alone' | 'done' = 'idle';
+  state: 'idle' | 'set' | 'split' | 'pull' | 'charge' | 'last' | 'done' = 'idle';
   readonly block: Roadblock;
   /** The solo pull: how close the vault is to rolling (0..1). */
   strain = 0;
+  /** Seconds since the nitrous was first armed for the pull (the switches on the dash), or -1. */
+  private armed = -1;
   private path = new Path(BRIDGE.pts);
   private pullTime = 0;
   private creak = 0;
@@ -606,6 +624,19 @@ export class BridgeFinale {
   private stopAt = 0;
   private lane = 0;
   private pack: PackCar[] = [];
+  /** After the pull: seconds of the charge, the wall's cruisers still to start up (and when). */
+  private chargeTime = 0;
+  private wave: { pos: THREE.Vector3; delay: number }[] = [];
+  private reyesCalled = false;
+  /** The flail: the handbrake last frame, the cooldown, and the swing being steered home. */
+  private handbrakeWas = false;
+  private flailCool = 0;
+  private flailFor = 0;
+  private flailTarget: Vehicle | null = null;
+  /** Cruisers sent over the rail. */
+  overboards = 0;
+  /** The last scene: what it does once it's over (the game's ending). */
+  onLast?: (at: THREE.Vector3, forced: boolean) => void;
 
   constructor(
     private ctx: MomentContext,
@@ -625,6 +656,16 @@ export class BridgeFinale {
     return this.state === 'pull';
   }
 
+  /** The vault is flying at something on a flail swing (leave it be). */
+  get flinging(): boolean {
+    return this.flailFor > 0;
+  }
+
+  /** The head-on fight on the bridge (no getting busted in it). */
+  get fighting(): boolean {
+    return this.state === 'charge' || this.state === 'last';
+  }
+
   update(dt: number): void {
     const { player, hud, director } = this.ctx;
     const p = player.position;
@@ -632,7 +673,7 @@ export class BridgeFinale {
     if (this.state === 'idle') {
       // Out of sight at the far end, as soon as the convoy is on the bridge.
       if (!onBridge(p)) return;
-      const s = BRIDGE.goalAlong - 75;
+      const s = WALL_AT;
       const width = (BRIDGE.hw - 1.2) * 2;
       this.block.set(this.path.at(s), this.path.tangent(s), width, Math.max(5, Math.round(width / 3.6)), 2);
       this.state = 'set';
@@ -647,9 +688,130 @@ export class BridgeFinale {
       this.strainPull(dt);
       return;
     }
-    // Alone: point them at the wall.
-    const ahead = this.block.ahead(p);
-    hud.hint(ahead > 0 && ahead < 260 ? 'SMASH THROUGH THE BLOCKADE  —  SPACE SWINGS THE VAULT' : '');
+    if (this.state === 'charge') this.charge(dt);
+    void hud;
+  }
+
+  /** After the pull: the wall comes at them, Reyes comes up behind, and the vault's a flail. */
+  private charge(dt: number): void {
+    const { ctx } = this;
+    const { player, police, reyes, hud } = ctx;
+    this.chargeTime += dt;
+    // The wall's cruisers start up and come head-on, the nearer row first.
+    for (let i = this.wave.length - 1; i >= 0; i--) {
+      const w = this.wave[i];
+      if (this.chargeTime < w.delay) continue;
+      police.spawnAt(w.pos, this.heading(this.path.project(w.pos)) + Math.PI);
+      this.wave.splice(i, 1);
+    }
+    if (!this.reyesCalled && this.chargeTime > 3.5) {
+      this.reyesCalled = true;
+      reyes.arrive(this.path, player);
+      say(ctx, 'MIA', 'Reyes is on the bridge! Two black SUVs coming up behind you, and they’re armed!');
+    }
+    // The nose comes up as it launches, and down again.
+    player.wheelie = this.chargeTime < 1.2 ? 0.2 * Math.sin((Math.PI * this.chargeTime) / 1.2) : 0;
+    this.flail(dt);
+    hud.hint(reyes.boss ? 'SWING THE VAULT INTO REYES’S SUV  —  SPACE' : 'HERE THEY COME  —  SPACE SWINGS THE VAULT INTO THEM');
+  }
+
+  /**
+   * The flail: SPACE throws the vault at whatever's nearest it (Reyes's SUV first),
+   * paying out cable, and steers it home for a moment (set-piece magnetism, as with
+   * the bank) so the swing lands.
+   */
+  private flail(dt: number): void {
+    const { player, vault, cables, police, reyes, fx, sound, director } = this.ctx;
+    this.flailCool -= dt;
+    this.flailFor -= dt;
+    const pressed = player.controls.handbrake && !this.handbrakeWas;
+    this.handbrakeWas = player.controls.handbrake;
+    if (this.flailFor <= 0 && this.flailTarget) {
+      this.flailTarget = null;
+      vault.ghostHeroes(false);
+    }
+    if (!pressed || this.flailCool > 0) return;
+    const vp = vault.position.setY(0);
+    const options: { v: Vehicle; score: number }[] = [];
+    for (const c of police.cops) if (!c.wrecked) options.push({ v: c.v, score: c.v.position.distanceTo(vp) });
+    for (const s of reyes.suvs) if (!s.wrecked && !s.plunge && s.reeling <= 0) options.push({ v: s.v, score: s.v.position.distanceTo(vp) * (s.boss ? 0.8 : 0.9) });
+    options.sort((a, b) => a.score - b.score);
+    const target = options[0]?.score < 20 ? options[0].v : null;
+    if (!target) return;
+    const tv = target.body.linvel();
+    const aim = target.position.add(new THREE.Vector3(tv.x, 0, tv.z).multiplyScalar(0.3));
+    const to = aim.clone().sub(vp);
+    const dir = to.clone().normalize();
+    const speed = THREE.MathUtils.clamp(Math.sqrt(2 * 5 * to.length()) + 4, 14, 27);
+    vault.body.setLinvel({ x: dir.x * speed, y: 3, z: dir.z * speed }, true);
+    for (const c of cables) c.payOut(THREE.MathUtils.clamp(c.car.towPoint().distanceTo(aim) + 6, 14, 34), 1.2);
+    vault.ghostHeroes(true);
+    this.flailTarget = target;
+    this.flailFor = 0.55;
+    this.flailCool = 1.1;
+    fx.burst(vp.clone().setY(0.4), 0.6);
+    sound.clank();
+    director.shake = Math.max(director.shake, 0.5);
+  }
+
+  /** Per physics step: a flail swing steered on to its target. */
+  step(dt: number): void {
+    const t = this.flailTarget;
+    if (!t || this.flailFor <= 0) return;
+    const { vault } = this.ctx;
+    const vv = vault.body.linvel();
+    const to = t.position.sub(vault.position.setY(0));
+    if (to.length() < 1) return;
+    const want = to.normalize().multiplyScalar(Math.max(Math.hypot(vv.x, vv.z), 14));
+    const k = Math.min(1, dt * 7);
+    vault.body.setLinvel({ x: vv.x + (want.x - vv.x) * k, y: vv.y, z: vv.z + (want.z - vv.z) * k }, true);
+  }
+
+  /** Where `p` is against the bridge's rails: the way out over the nearer one, and how far it is (m); null off the deck. */
+  railOf(p: THREE.Vector3): { out: THREE.Vector3; toRail: number } | null {
+    if (!onBridge(p)) return null;
+    const s = this.path.project(p);
+    const t = this.path.tangent(s);
+    const left = leftOf(t);
+    const x = p.clone().sub(this.path.at(s)).dot(left);
+    return { out: left.multiplyScalar(Math.sign(x) || 1), toRail: Math.max(0, BRIDGE.hw + 0.8 - Math.abs(x)) };
+  }
+
+  /** A cruiser wrecked by the vault in the fight: near the rail, over it goes, into the bay. */
+  wrecked(car: Vehicle, byVault: boolean): void {
+    if (this.state !== 'charge' || !byVault) return;
+    const r = this.railOf(car.position);
+    if (!r || r.toRail > 7.5) return;
+    if (!this.ctx.police.overboard(car, r.out, r.toRail)) return;
+    if (++this.overboards === 1) this.bayShot(car, r.out);
+  }
+
+  /** The first one over the rail, in slow motion: from the deck, watching it go. */
+  private bayShot(car: Vehicle, out: THREE.Vector3): void {
+    const { director } = this.ctx;
+    const at = car.position;
+    const t = this.path.tangent(this.path.project(at));
+    const from = at.clone().addScaledVector(t, -10).addScaledVector(out, -4).setY(2.4);
+    director.slowmo(0.35, 2.4);
+    director.play({ duration: 2.4, frame: (k) => ({ pos: from.clone().addScaledVector(t, k * 2), look: at.clone().addScaledVector(out, 3 + k * 6).setY(1 - k * 3.5), fov: 48 }) });
+  }
+
+  /** A car hit the water. */
+  splash(at: THREE.Vector3): void {
+    const { fx, sound, hud } = this.ctx;
+    fx.splash(at, 1.2);
+    sound.splash();
+    this.ctx.reward(500, 0.2);
+    hud.banner('INTO THE BAY', this.overboards > 1 ? `x${this.overboards}  +500` : '+500', 1.8);
+    if (this.overboards <= 1) setTimeout(() => hud.news(NEWS.bay), 1200);
+  }
+
+  /** The vault slammed into Reyes's SUV (or he swerved into it, `forced`): the last scene. */
+  lastSwing(at: THREE.Vector3, forced: boolean): void {
+    if (this.state !== 'charge') return;
+    this.state = 'last';
+    this.ctx.hud.hint('');
+    this.onLast?.(at, forced);
   }
 
   private split(): void {
@@ -658,6 +820,42 @@ export class BridgeFinale {
     ctx.hud.hint('');
     ctx.holdPolice(true);
     ctx.cutscene(this.splitShots(), () => this.afterSplit());
+  }
+
+  /**
+   * Debug start (?at=fight): straight to the fight, as if the split and the pull had
+   * happened here: the wall set, the partner gone, the vault just rolling free.
+   */
+  debugCharge(): void {
+    const { ctx } = this;
+    if (this.state === 'idle') {
+      const width = (BRIDGE.hw - 1.2) * 2;
+      this.block.set(this.path.at(WALL_AT), this.path.tangent(WALL_AT), width, Math.max(5, Math.round(width / 3.6)), 2);
+    }
+    this.cutLoose();
+    const s = this.path.project(ctx.player.position);
+    this.drive(ctx.partner, Math.max(20, s - 120), -ctx.crew.side * 5, this.heading(s) + Math.PI, -22);
+    ctx.partnerDriver.leave(this.path);
+    for (const c of ctx.cables) c.clutch = false;
+    this.state = 'pull';
+    this.rollFree();
+  }
+
+  /** Debug start (?at=finale): Reyes's SUVs right behind, and the last swing landing on his a moment later. */
+  debugLast(): void {
+    const { reyes, player, vault } = this.ctx;
+    this.reyesCalled = true;
+    reyes.arrive(this.path, player, 16);
+    setTimeout(() => {
+      const boss = reyes.suvs.find((s) => s.boss);
+      if (!boss) return;
+      // Alongside the vault, toward the middle of the deck, where a swing finds it.
+      const s = this.path.project(vault.position);
+      const x = vault.position.sub(this.path.at(s)).dot(leftOf(this.path.tangent(s)));
+      const at = this.at(s, x + (x > 0 ? -4.5 : 4.5));
+      boss.v.place(at, this.heading(s));
+      this.lastSwing(at, false);
+    }, 1200);
   }
 
   /** A point on the bridge `s` m along it and `x` m left of its middle. */
@@ -784,7 +982,7 @@ export class BridgeFinale {
           movePack(dt);
           this.block.update(dt);
         },
-        camera: (k) => ({ pos: this.at(s1 - 2, lane + 0.8, 3.2 + k * 0.2), look: this.at(BRIDGE.goalAlong - 75, 0, 1.2), fov: 7 - k }),
+        camera: (k) => ({ pos: this.at(s1 - 2, lane + 0.8, 3.2 + k * 0.2), look: this.at(WALL_AT, 0, 1.2), fov: 7 - k }),
         lines: [[0.3, other, 'That’s every cruiser they’ve got left.']],
       },
       {
@@ -792,7 +990,7 @@ export class BridgeFinale {
         duration: 4.6,
         update: (_t, dt) => movePack(dt),
         camera: (k) => ({ pos: this.at(s1 + 4, lane + side, 4.6 - k * 0.4), look: this.at(s1 - 120 + k * 20, lane, 1), fov: 24 }),
-        lines: [[0.3, other, 'And more behind us. There’s too many of them. We’ll need to split up!']],
+        lines: [[0.3, other, 'And they’re stacking up behind us. We can’t drag this through all of them. Split up: I’ll take the pack!']],
       },
       {
         // Down by the partner's cable as it comes off.
@@ -804,7 +1002,7 @@ export class BridgeFinale {
             this.cutLoose();
           }
         },
-        camera: (k) => ({ pos: this.at(s1 - TOW + 4.5 + k * 0.5, pX - side * 3.2, 1 + k * 0.2), look: this.at(s1 - 2.6, pX, 0.7), fov: 50 }),
+        camera: (k) => ({ pos: this.at(s1 + 0.5 - k * 0.4, pX - side * 3.6, 1.0 + k * 0.15), look: this.at(s1 - 5.5, pX - side * 0.4, 0.6), fov: 52 }),
         lines: [[0.3, me, 'Then unhook. I’ll take it from here.']],
       },
       {
@@ -874,6 +1072,15 @@ export class BridgeFinale {
     this.pullTime += dt;
     const lit = player.nosActive;
     const gas = player.controls.throttle;
+    // The first touch of the nitrous flicks the three switches on the dash and lights the button.
+    if (lit && this.armed < 0) this.armed = 0;
+    if (this.armed >= 0) {
+      const was = this.armed;
+      this.armed += dt;
+      const step = (s: number) => (s < 0.12 ? 0 : s < 0.3 ? 1 : s < 0.48 ? 2 : s < 0.7 ? 3 : 4);
+      if (step(this.armed) !== step(was)) sound.ping(step(this.armed) === 4 ? 880 : 2300, step(this.armed) === 4 ? 0.12 : 0.06, 0.08);
+      this.ctx.hud.nosArm(this.armed < 2.4 ? step(this.armed) : -1);
+    }
     const cap = this.pullTime > 15 ? 1 : 0.3;
     if (lit) this.strain += dt * 0.45;
     else if (gas > 0.1 && this.strain < cap) this.strain = Math.min(cap, this.strain + dt * (this.pullTime > 15 ? 0.04 : 0.12) * gas);
@@ -896,25 +1103,32 @@ export class BridgeFinale {
   private rollFree(): void {
     const { ctx } = this;
     const { vault, player, director, sound, fx, hud } = ctx;
-    this.state = 'alone';
+    this.state = 'charge';
+    this.chargeTime = 0;
+    hud.nosArm(-1);
+    // The wall starts its engines: the near row comes first, the far row after it.
+    const near = this.path.project(player.position);
+    this.wave = this.block.release().map((pos) => ({ pos, delay: this.path.project(pos) - WALL_AT < 4 ? 0.3 : 1.9 }));
+    void near;
+    ctx.police.launch = 1.7;
     hud.meter(null);
     for (const c of ctx.cables) c.clutch = true;
     vault.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
     const dir = player.position.sub(vault.position.setY(0)).setY(0).normalize();
     const m = vault.body.mass();
     vault.body.applyImpulse({ x: dir.x * m * 6, y: m * 0.5, z: dir.z * m * 6 }, true);
-    // Low behind the vault on the open side of the deck (where the partner's car was), looking
-    // up the cable past the car to the wall at the far end.
+    // Low ahead of the car on the open side of the deck (where the partner's car was), looking
+    // back (the low sun behind the camera): the nose comes up and ten tons lurch after it.
     const open = leftOf(dir).multiplyScalar(-ctx.crew.side);
     director.slowmo(0.3, 1.6);
     director.shake = 1.2;
     director.play({
       duration: 1.6,
       frame: (k) => {
-        const v = vault.position.setY(0);
+        const c = player.position.setY(0);
         return {
-          pos: v.clone().addScaledVector(dir, -6 + k).addScaledVector(open, 3.5).setY(1.3 + k * 0.3),
-          look: v.clone().lerp(player.position, 0.6).setY(1.1),
+          pos: c.clone().addScaledVector(dir, 9 - k * 1.5).addScaledVector(open, 3.4).setY(1.05 + k * 0.25),
+          look: c.clone().lerp(vault.position.setY(0), 0.45).setY(1.0),
           fov: 50,
         };
       },
@@ -925,7 +1139,7 @@ export class BridgeFinale {
     hud.banner('SOLO PULL', 'TEN TONS, ONE CAR  +750');
     ctx.reward(750, 0.4);
     ctx.holdPolice(false);
-    say(ctx, 'MIA', 'It’s moving! Now break through that wall!');
+    say(ctx, 'MIA', 'It’s moving! And the wall’s moving too: they’re coming right at you! Swing that thing!');
   }
 }
 

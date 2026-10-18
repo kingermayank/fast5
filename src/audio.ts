@@ -282,6 +282,18 @@ export class Sound {
     this.burst(0.2, 300, 0.4);
   }
 
+  /** Hydraulics working: a long hiss with a low groan under it. */
+  hiss(seconds = 0.8): void {
+    this.burst(seconds, 2600, 0.3, 'bandpass');
+    this.burst(seconds * 0.8, 420, 0.18);
+  }
+
+  /** Something big going into the water. */
+  splash(power = 1): void {
+    this.burst(1.4, 700, 0.8 * power);
+    this.burst(0.9, 2200, 0.35 * power, 'bandpass');
+  }
+
   /** A heavy metallic thud when the cables snap taut. */
   clank(): void {
     if (!this.ready) return;

@@ -236,27 +236,76 @@ export class Vault {
     const box = new THREE.Mesh(new THREE.BoxGeometry(HALF.x * 2, HALF.y * 2, HALF.z * 2), steel);
     box.castShadow = box.receiveShadow = true;
     this.mesh.add(box);
-    // Door, hinges and wheel lock on the +z face.
-    const door = new THREE.Mesh(new THREE.BoxGeometry(2.3, 2.0, 0.12), dark);
-    door.position.z = HALF.z + 0.06;
-    door.castShadow = true;
+    // Behind the door: the dark inside (seen when it swings open), and the money, if there is any.
+    const cavity = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 1.8), new THREE.MeshBasicMaterial({ map: cavityTexture() }));
+    cavity.position.z = HALF.z + 0.005;
+    this.mesh.add(cavity);
+    const cash = new THREE.Group();
+    cash.name = 'cash';
+    cash.visible = false;
+    const notes = new THREE.MeshStandardMaterial({ color: 0x6f9a62, roughness: 0.8 });
+    const band = new THREE.MeshStandardMaterial({ color: 0xe8dcb5, roughness: 0.7 });
+    for (let y = -0.75; y < 0.8; y += 0.21) {
+      for (let x = -0.85; x < 0.9; x += 0.42) {
+        const brick = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.17, 0.5), notes);
+        brick.position.set(x + (Math.random() - 0.5) * 0.05, y, HALF.z - 0.15 + Math.random() * 0.12);
+        brick.rotation.y = (Math.random() - 0.5) * 0.12;
+        const strap = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.175, 0.505), band);
+        brick.add(strap);
+        cash.add(brick);
+      }
+    }
+    this.mesh.add(cash);
+    // Door, hinges and wheel lock on the +z face; the door swings on its hinges at the left.
+    const door = new THREE.Group();
+    door.name = 'door';
+    door.position.set(-1.15, 0, HALF.z + 0.06);
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(2.3, 2.0, 0.12), dark);
+    slab.position.x = 1.15;
+    slab.castShadow = true;
     const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.06, 8, 20), steel);
-    wheel.position.z = HALF.z + 0.16;
+    wheel.position.set(1.15, 0, 0.1);
     const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.2, 10).rotateX(Math.PI / 2), steel);
-    hub.position.z = HALF.z + 0.16;
+    hub.position.set(1.15, 0, 0.1);
+    door.add(slab, wheel, hub);
     for (let i = 0; i < 3; i++) {
       const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.06, 0.06), steel);
-      spoke.position.z = HALF.z + 0.16;
+      spoke.position.set(1.15, 0, 0.1);
       spoke.rotation.z = (i * Math.PI) / 3;
-      this.mesh.add(spoke);
+      door.add(spoke);
     }
     for (const y of [-0.6, 0.6]) {
       const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.35, 8), dark);
       hinge.position.set(-1.15, y, HALF.z + 0.12);
       this.mesh.add(hinge);
     }
-    this.mesh.add(door, wheel, hub);
+    this.mesh.add(door);
   }
+}
+
+/** Open the door of a vault's mesh (this one, or a copy of it) by `k` (0 shut, 1 swung wide); `cash` shows the money inside. */
+export function openVault(mesh: THREE.Object3D, k: number, cash = false): void {
+  const door = mesh.getObjectByName('door');
+  // All three angles: a copy of an open vault's mesh can carry its door's turn as x = z = 180°.
+  if (door) door.rotation.set(0, -1.95 * k, 0);
+  const money = mesh.getObjectByName('cash');
+  if (money) money.visible = cash && k > 0.02;
+}
+
+/** The inside of an empty vault: dark, a little lighter at the edges where the light gets in. */
+function cavityTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(32, 30, 4, 32, 32, 44);
+  g.addColorStop(0, '#040404');
+  g.addColorStop(0.7, '#0d0e10');
+  g.addColorStop(1, '#2a2c30');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 /** Cable stiffness (N/m) and damping (N·s/m): steel with a little give, so a yank is firm but not instant. */

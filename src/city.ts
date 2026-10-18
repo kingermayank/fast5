@@ -45,6 +45,76 @@ export interface Prop {
   hit: boolean;
   /** A parked car: heavy enough to jam the rig if it's shoved in there (see rig.ts). */
   heavy?: boolean;
+  /** Drawn as one copy in an instanced set (see PropInstances): `mesh` is then only a stand-in holding its pose. */
+  instance?: { set: PropInstances; index: number };
+  /** Glass that shatters the first time it's knocked loose (a bus shelter's panes). */
+  glass?: THREE.Object3D;
+}
+
+/** Café furniture is light and goes everywhere when hit, but the pieces of a terrace pass through each other. */
+const FURNITURE_BIT = 0x0010;
+const FURNITURE_GROUPS = (FURNITURE_BIT << 16) | (0xffff & ~FURNITURE_BIT);
+/** Café terraces along the route, at most. */
+const MAX_CAFES = 44;
+/** Parasol canvas: cream, terracotta, bottle green, navy, red, mustard, teal. */
+const CANOPIES = [0xf3ead2, 0xc8643c, 0x2f6b4a, 0x253a5e, 0xc0302a, 0xe0a82e, 0x2a8a8a];
+const WHITE = new THREE.Color(0xffffff);
+
+/**
+ * Many copies of a small prop drawn as instanced meshes (one draw per part for all of
+ * them), each copy with its own physics body. A copy's matrix is rewritten only while its
+ * body is awake. Parts marked `tinted` take a colour per copy.
+ */
+class PropInstances {
+  readonly meshes: THREE.InstancedMesh[];
+  private n = 0;
+  private dirty = false;
+  private readonly m = new THREE.Matrix4();
+
+  constructor(
+    parts: { geo: THREE.BufferGeometry; mat: THREE.Material; tinted?: boolean }[],
+    readonly capacity: number,
+  ) {
+    this.meshes = parts.map(({ geo, mat, tinted }) => {
+      const im = new THREE.InstancedMesh(geo, mat, capacity);
+      im.count = 0;
+      im.castShadow = im.receiveShadow = true;
+      // The copies are spread along the route and fly about when hit: never culled as a whole.
+      im.frustumCulled = false;
+      im.userData.tinted = !!tinted;
+      return im;
+    });
+  }
+
+  get full(): boolean {
+    return this.n >= this.capacity;
+  }
+
+  /** A new copy at the pose `o` holds (in `colour` if the set is tinted); returns its index. */
+  add(o: THREE.Object3D, colour = WHITE): number {
+    const i = this.n++;
+    this.m.compose(o.position, o.quaternion, o.scale);
+    for (const im of this.meshes) {
+      im.count = this.n;
+      im.setMatrixAt(i, this.m);
+      if (im.userData.tinted) im.setColorAt(i, colour);
+    }
+    return i;
+  }
+
+  /** Move copy `i` to the pose `o` holds. */
+  set(i: number, o: THREE.Object3D): void {
+    this.m.compose(o.position, o.quaternion, o.scale);
+    for (const im of this.meshes) im.setMatrixAt(i, this.m);
+    this.dirty = true;
+  }
+
+  /** Upload the copies that moved this frame. */
+  flush(): void {
+    if (!this.dirty) return;
+    this.dirty = false;
+    for (const im of this.meshes) im.instanceMatrix.needsUpdate = true;
+  }
 }
 
 /** Deterministic PRNG so the city is the same every run. */
@@ -195,6 +265,60 @@ function tint(geo: THREE.BufferGeometry, color: THREE.Color): THREE.BufferGeomet
   return geo;
 }
 
+const IRON = new THREE.Color(0x26292e);
+const RATTAN = new THREE.Color(0xb98b55);
+
+/** A bistro table: a pale stone top on a cast-iron pedestal. Origin in the middle of its collider, 0.38 m up. */
+function cafeTableGeometry(): THREE.BufferGeometry {
+  return mergeGeometries([
+    tint(new THREE.CylinderGeometry(0.4, 0.4, 0.035, 16).toNonIndexed().translate(0, 0.36, 0), new THREE.Color(0xeee8dc)),
+    tint(new THREE.CylinderGeometry(0.03, 0.03, 0.63, 6).toNonIndexed().translate(0, 0.025, 0), IRON),
+    tint(new THREE.CylinderGeometry(0.2, 0.23, 0.04, 12).toNonIndexed().translate(0, -0.31, 0), IRON),
+  ])!;
+}
+
+/** A bistro chair facing +z: a rattan seat and back on a thin iron frame. Origin in the middle of its collider, 0.43 m up. */
+function cafeChairGeometry(): THREE.BufferGeometry {
+  const parts = [
+    tint(new THREE.BoxGeometry(0.4, 0.04, 0.4).toNonIndexed().translate(0, 0.02, 0), RATTAN),
+    tint(new THREE.BoxGeometry(0.4, 0.34, 0.035).toNonIndexed().translate(0, 0.25, -0.19), RATTAN),
+  ];
+  for (const [x, z] of [[-0.17, -0.17], [0.17, -0.17], [-0.17, 0.17], [0.17, 0.17]]) {
+    parts.push(tint(new THREE.BoxGeometry(0.03, 0.45, 0.03).toNonIndexed().translate(x, -0.205, z), IRON));
+  }
+  for (const x of [-0.18, 0.18]) parts.push(tint(new THREE.BoxGeometry(0.03, 0.4, 0.03).toNonIndexed().translate(x, 0.22, -0.2), IRON));
+  return mergeGeometries(parts)!;
+}
+
+/** A parasol's pole and its weighted base. Origin 1.25 m up (the middle of the pole's collider). */
+function parasolPoleGeometry(): THREE.BufferGeometry {
+  return mergeGeometries([
+    tint(new THREE.CylinderGeometry(0.025, 0.025, 2.56, 6).toNonIndexed().translate(0, 0.08, 0), new THREE.Color(0xd9d4c8)),
+    tint(new THREE.CylinderGeometry(0.28, 0.3, 0.05, 12).toNonIndexed().translate(0, -1.225, 0), IRON),
+    tint(new THREE.SphereGeometry(0.05, 8, 6).toNonIndexed().translate(0, 1.38, 0), new THREE.Color(0xd9d4c8)),
+  ])!;
+}
+
+/**
+ * A parasol's canvas: an eight-panel cone with a short valance round its rim, the panels in
+ * two shades (each café's colour comes from the instance colour). Same origin as the pole.
+ */
+function parasolCanopyGeometry(): THREE.BufferGeometry {
+  const shade = (geo: THREE.BufferGeometry, trisPerPanel: number) => {
+    const n = geo.attributes.position.count;
+    const c = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const panel = Math.floor(i / (3 * trisPerPanel));
+      c.fill(panel % 2 ? 0.84 : 1, i * 3, i * 3 + 3);
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    return geo;
+  };
+  const cone = shade(new THREE.ConeGeometry(1.2, 0.36, 8, 1, true).toNonIndexed().translate(0, 1.18, 0), 1);
+  const valance = shade(new THREE.CylinderGeometry(1.2, 1.2, 0.14, 8, 1, true).toNonIndexed().translate(0, 0.93, 0), 2);
+  return mergeGeometries([cone, valance])!;
+}
+
 export class City {
   readonly group = new THREE.Group();
   readonly props: Prop[] = [];
@@ -241,6 +365,14 @@ export class City {
   readonly lamps: THREE.Object3D[] = [];
   /** Park and street trees and shrubs, instanced per square. */
   private trees = new Trees(() => this.rand());
+  /** Shopfront bays facing the street, where a café can put its tables out (see buildCafes). */
+  private cafeSpots: { at: THREE.Vector3; along: THREE.Vector3; out: THREE.Vector3; width: number }[] = [];
+  /** Props drawn instanced (the café furniture). */
+  private instanced: PropInstances[] = [];
+  /** Where the café tables stand (for tests). */
+  readonly cafes: THREE.Vector3[] = [];
+  /** Called when a prop's glass shatters, with where and how fast it was going. */
+  onShatter?: (at: THREE.Vector3, velocity: THREE.Vector3) => void;
 
   constructor(private world: RAPIER.World) {
     this.ground = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
@@ -255,6 +387,7 @@ export class City {
     this.buildTunnel();
     this.buildWalls();
     this.buildProps();
+    this.buildCafes();
     this.buildFiller();
     this.flushBatches();
     this.trees.build();
@@ -352,13 +485,23 @@ export class City {
   }
 
   /** True if (x, z) is on a drivable street (or the bridge). */
+  /** True if (x, z) is inside a building (or within `margin` m of one). */
+  indoors(x: number, z: number, margin = 0): boolean {
+    return this.inBuilding(x, z, margin);
+  }
+
   isStreet(x: number, z: number): boolean {
     return MAP.onRoad(new THREE.Vector3(x, 0, z));
   }
 
   /** Sync meshes of props that are moving; show scenery near the camera only. */
   render(camera?: THREE.Camera): void {
-    for (const p of this.props) if (!p.body.isSleeping()) syncMesh(p.mesh, p.body);
+    for (const p of this.props) {
+      if (p.body.isSleeping()) continue;
+      syncMesh(p.mesh, p.body);
+      if (p.instance) p.instance.set.set(p.instance.index, p.mesh);
+    }
+    for (const s of this.instanced) s.flush();
     if (camera) {
       const c = camera.position;
       for (const o of this.scenery) o.visible = Math.abs(o.position.x - c.x) < 320 && Math.abs(o.position.z - c.z) < 320;
@@ -374,6 +517,11 @@ export class City {
       if (v.x * v.x + v.y * v.y + v.z * v.z > 4) {
         p.hit = true;
         dmg += p.value;
+        if (p.glass?.visible) {
+          p.glass.visible = false;
+          const t = p.body.translation();
+          this.onShatter?.(new THREE.Vector3(t.x, t.y + 0.4, t.z), new THREE.Vector3(v.x, Math.max(1, v.y), v.z));
+        }
       }
     }
     return dmg;
@@ -804,7 +952,11 @@ export class City {
           const bays = Math.max(1, Math.round(len / 6));
           for (let k = 0; k < bays; k++) {
             const at = a.clone().lerp(b2, (k + 0.5) / bays);
-            if (shops && this.rand() < 0.75) this.batch(awning(at.clone().addScaledVector(out, 0.12), along, out, Math.min(4.6, (len / bays) * 0.85), Math.floor(this.rand() * 4)), this.awningMat);
+            if (shops && this.rand() < 0.75) {
+              const width = Math.min(4.6, (len / bays) * 0.85);
+              this.batch(awning(at.clone().addScaledVector(out, 0.12), along, out, width, Math.floor(this.rand() * 4)), this.awningMat);
+              this.cafeSpots.push({ at: at.clone(), along: along.clone(), out: out.clone(), width });
+            }
             for (let y = 4; y < h - 2.5; y += 4) {
               if (this.rand() > balconies) continue;
               const bal = balcony(at, along, out, y, 3.2, 1.1);
@@ -1082,8 +1234,100 @@ export class City {
     g.add(roof, back, ad, bench);
     // The open side faces the street.
     const heading = Math.atan2(-side.out.x, -side.out.z);
-    this.addProp(g, pos.clone().setY(1.15), RAPIER.ColliderDesc.cuboid(2, 1.15, 0.9).setMass(400), 6000, heading);
+    const prop = this.addProp(g, pos.clone().setY(1.15), RAPIER.ColliderDesc.cuboid(2, 1.15, 0.9).setMass(400), 6000, heading);
+    // Its glass back goes in a shower the first time it's hit.
+    prop.glass = back;
     this.scenery.push(g);
+  }
+
+  /**
+   * Café terraces outside some of the shops along Mia's route: a bistro table or two on the
+   * sidewalk under the awning, two chairs to a table, a parasol over each. They're light, so
+   * the vault (or a car) sends the lot flying. Drawn instanced: a handful of draws for all of
+   * them. Placed with their own random stream, so the rest of the city stays as it was.
+   */
+  private buildCafes(): void {
+    const rand = mulberry32(77);
+    const route = PLAN.map((n) => n.pos);
+    const onRoute = (p: THREE.Vector3) => route.some((q, i) => i < route.length - 1 && segDist(p, q, route[i + 1]) < 50);
+    // Keep clear of the curb props (palms, lamps, benches, shelters, parked cars) and of each other.
+    const taken = this.props.map((p) => {
+      const t = p.body.translation();
+      return new THREE.Vector3(t.x, 0, t.z);
+    });
+    const clear = (p: THREE.Vector3) =>
+      !MAP.onRoad(p, 1.6) && !this.inBuilding(p.x, p.z, 1.1) && !inTunnel(p, 12) && p.distanceTo(BANK.corner) > 40 && taken.every((q) => q.distanceToSquared(p) > 2.4 * 2.4);
+    const spots: { at: THREE.Vector3; along: THREE.Vector3; colour: THREE.Color }[] = [];
+    let cafes = 0;
+    for (const s of this.cafeSpots) {
+      if (cafes >= MAX_CAFES) break;
+      if (rand() > 0.55 || !onRoute(s.at)) continue;
+      const colour = new THREE.Color(CANOPIES[Math.floor(rand() * CANOPIES.length)]);
+      let tables = 0;
+      for (const k of s.width > 3.4 ? [-1, 1] : [0]) {
+        for (const d of [2.1, 2.6, 3.1, 3.7]) {
+          const p = s.at.clone().addScaledVector(s.along, k * 1.25).addScaledVector(s.out, d).setY(0);
+          if (!clear(p)) continue;
+          spots.push({ at: p, along: s.along, colour });
+          taken.push(p);
+          tables++;
+          break;
+        }
+      }
+      if (tables) cafes++;
+    }
+    if (!spots.length) return;
+    const furniture = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.15 });
+    const canvas = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide });
+    const tables = new PropInstances([{ geo: cafeTableGeometry(), mat: furniture }], spots.length);
+    const chairs = new PropInstances([{ geo: cafeChairGeometry(), mat: furniture }], spots.length * 2);
+    const parasols = new PropInstances(
+      [
+        { geo: parasolPoleGeometry(), mat: furniture },
+        { geo: parasolCanopyGeometry(), mat: canvas, tinted: true },
+      ],
+      spots.length,
+    );
+    for (const s of [tables, chairs, parasols]) {
+      this.instanced.push(s);
+      for (const m of s.meshes) this.group.add(m);
+    }
+    for (const { at, along, colour } of spots) {
+      this.cafes.push(at);
+      const turn = Math.atan2(along.x, along.z);
+      this.instancedProp(tables, at.clone().setY(0.38), [RAPIER.ColliderDesc.cylinder(0.38, 0.4).setMass(16)], 250, turn + rand() * Math.PI);
+      for (const side of [1, -1]) {
+        // Facing the table, a little askew.
+        const c = at.clone().addScaledVector(along, side * 0.64);
+        this.instancedProp(chairs, c.setY(0.43), [RAPIER.ColliderDesc.cuboid(0.2, 0.43, 0.2).setMass(7)], 120, turn + (side > 0 ? Math.PI : 0) + (rand() - 0.5) * 0.5);
+      }
+      // The parasol stands through the table on its own base: a pole, and the canopy up top.
+      this.instancedProp(
+        parasols,
+        at.clone().setY(1.25),
+        [RAPIER.ColliderDesc.cylinder(1.2, 0.06).setMass(9), RAPIER.ColliderDesc.cylinder(0.08, 1.05).setTranslation(0, 1.0, 0).setMass(3)],
+        200,
+        rand() * Math.PI,
+        colour,
+      );
+    }
+  }
+
+  /** A prop drawn as a copy in an instanced set: its body, and a stand-in object for its pose. */
+  private instancedProp(set: PropInstances, pos: THREE.Vector3, colliders: RAPIER.ColliderDesc[], value: number, heading: number, colour?: THREE.Color): void {
+    if (set.full) return;
+    const body = this.world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(pos.x, pos.y, pos.z)
+        .setRotation({ x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) })
+        .setSleeping(true)
+        .setAngularDamping(0.4),
+    );
+    for (const c of colliders) this.world.createCollider(c.setFriction(0.5).setCollisionGroups(FURNITURE_GROUPS), body);
+    const stand = new THREE.Object3D();
+    syncMesh(stand, body);
+    const index = set.add(stand, colour);
+    this.props.push({ body, mesh: stand, value, hit: false, instance: { set, index } });
   }
 
   private static parkedColors = [0xc0392b, 0x2e86de, 0xf1c40f, 0xecf0f1, 0x16a085, 0x7f8c8d, 0x8e44ad, 0x1f2a36, 0xd35400];

@@ -17,6 +17,8 @@ const PROFILES: Record<string, Profile> = {
   ELENA: { pitch: 1.0, rate: 1.0, female: true },
   HAN: { pitch: 0.85, rate: 0.95, female: false },
   ROMAN: { pitch: 0.75, rate: 1.12, female: false },
+  GISELE: { pitch: 1.05, rate: 0.98, female: true },
+  TEJ: { pitch: 0.8, rate: 1.05, female: false },
 };
 
 const FEMALE_HINTS = /female|samantha|victoria|karen|zira|susan|moira|tessa|fiona|serena|allison|ava|joanna|salli|kimberly/i;

@@ -12,11 +12,11 @@ export interface VehicleSpec {
   /** How fast sideways sliding is cancelled (1/s). */
   grip: number;
   model: CarModelOptions;
+  /** Collider half extents, if not a car's (a motorbike's is narrow). */
+  half?: { x: number; y: number; z: number };
 }
 
 const HALF = { x: 1.0, y: 0.55, z: 2.5 };
-/** Body origin sits this high above the ground. */
-const RIDE_HEIGHT = HALF.y + 0.15;
 /** Local-space tow point at the rear winch. */
 export const TOW_POINT = { x: 0, y: -0.25, z: -HALF.z - 0.1 };
 
@@ -65,6 +65,8 @@ export class Vehicle {
   tireBlown = 0;
   /** Rear wheels spinning without traction (pulling against the vault). */
   wheelspin = 0;
+  /** Nose up off the rear axle (rad), on a hard launch. Drawn only. */
+  wheelie = 0;
   /**
    * How fast steering moves toward the input (1/s): toward full lock, and back
    * to center. The player's keyboard steering eases in so taps aren't twitchy.
@@ -78,6 +80,8 @@ export class Vehicle {
   pivot = 0;
   private lastSpeed = 0;
   private accel = 0;
+  /** The body's origin sits this high above the road (its collider's half height, and a little). */
+  readonly ride: number;
 
   constructor(
     private world: RAPIER.World,
@@ -88,16 +92,18 @@ export class Vehicle {
     model?: CarModel,
   ) {
     this.model = model ?? buildCarModel(spec.model);
+    const half = spec.half ?? HALF;
+    this.ride = half.y + 0.15;
     this.body = world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(position.x, RIDE_HEIGHT, position.z)
+        .setTranslation(position.x, this.ride, position.z)
         .setRotation(yawQuat(heading))
         .enabledRotations(false, true, false)
         .setCcdEnabled(true)
         .setAngularDamping(1),
     );
     this.collider = world.createCollider(
-      RAPIER.ColliderDesc.cuboid(HALF.x, HALF.y, HALF.z)
+      RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z)
         .setMass(spec.mass)
         .setFriction(0)
         .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
@@ -131,7 +137,7 @@ export class Vehicle {
   }
 
   place(position: THREE.Vector3, heading: number): void {
-    this.body.setTranslation({ x: position.x, y: RIDE_HEIGHT, z: position.z }, true);
+    this.body.setTranslation({ x: position.x, y: this.ride, z: position.z }, true);
     this.body.setRotation(yawQuat(heading), true);
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
@@ -240,7 +246,7 @@ export class Vehicle {
     const t = this.body.translation();
     const r = this.body.rotation();
     const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
-    return [-0.86, 0.86].map((x) => new THREE.Vector3(x, -RIDE_HEIGHT + 0.05, -1.5).applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z)));
+    return [-0.86, 0.86].map((x) => new THREE.Vector3(x, -this.ride + 0.05, -1.5).applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z)));
   }
 
   /** All four tire contact points. */
@@ -249,7 +255,7 @@ export class Vehicle {
     const r = this.body.rotation();
     const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
     return [[-0.86, 1.55], [0.86, 1.55], [-0.86, -1.5], [0.86, -1.5]].map(([x, z]) =>
-      new THREE.Vector3(x, -RIDE_HEIGHT + 0.05, z).applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z)),
+      new THREE.Vector3(x, -this.ride + 0.05, z).applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z)),
     );
   }
 
@@ -258,12 +264,17 @@ export class Vehicle {
     const t = this.body.translation();
     const r = this.body.rotation();
     const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
-    return [-0.55, 0.55].map((x) => new THREE.Vector3(x, -RIDE_HEIGHT + 0.4, -2.65).applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z)));
+    return [-0.55, 0.55].map((x) => new THREE.Vector3(x, -this.ride + 0.4, -2.65).applyQuaternion(q).add(new THREE.Vector3(t.x, t.y, t.z)));
   }
 
   /** Update the visual model. Call once per rendered frame. */
   render(dt: number): void {
-    syncMesh(this.model.group, this.body, -RIDE_HEIGHT);
+    syncMesh(this.model.group, this.body, -this.ride);
+    if (this.wheelie > 1e-3) {
+      // Pivot on the rear wheels: tip back, and lift so they stay on the road.
+      this.model.group.rotateX(-this.wheelie);
+      this.model.group.position.y += 1.5 * Math.sin(this.wheelie);
+    }
     const roll = THREE.MathUtils.clamp(-this.lateralSpeed * 0.012 - this.steer * this.forwardSpeed * 0.0015, -0.08, 0.08);
     this.model.body.rotation.z += (roll - this.model.body.rotation.z) * Math.min(1, 8 * dt);
     // Squat under power, dive under braking.

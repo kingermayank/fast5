@@ -209,8 +209,12 @@ export class Hud {
   cinematic(on: boolean): void {
     this.cutsceneEl.classList.toggle('hidden', !on);
     this.screens.cinematic = on;
-    if (on) this.showHud(false);
-    else this.syncScreen();
+    if (on) {
+      this.showHud(false);
+      // A scene starts clean: no gameplay banner or radio box left over on top of it.
+      this.bannerTimer = Math.min(this.bannerTimer, 1e-3);
+      this.radioTimer = Math.min(this.radioTimer, 1e-3);
+    } else this.syncScreen();
   }
 
   subtitle(who: string, text: string): void {
@@ -272,6 +276,14 @@ export class Hud {
     this.ui?.set('bannerSub', sub);
     this.ui?.set('bannerOn', true);
     this.ui?.fire('banner');
+  }
+
+  /** The nitrous switches on the dash for the solo pull: `step` switches on (0..3), 4 lights the button; -1 hides it. */
+  nosArm(step: number): void {
+    const el = $('nos-arm');
+    el.classList.toggle('hidden', step < 0);
+    el.querySelectorAll('.sw').forEach((sw, i) => sw.classList.toggle('on', step > i));
+    el.querySelector('.btn')!.classList.toggle('lit', step >= 4);
   }
 
   /** Center meter for a moment (null label hides it). */

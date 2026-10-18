@@ -84,7 +84,8 @@ cars and the vault (a car you overtake, a cruiser that cuts in) is crushed and t
 can't jam the rig. Nosed into a wall? Hold the gas and steer: the car spins round on the spot in a
 burnout. If the crew still gets nowhere for a few seconds, it's lined back up on the street.
 
-0. **Cutscene:** Hobbs and Elena ram the station wall in an armored truck; you back in and hook up.
+0. **Cutscene:** Hobbs and Elena smash through the barrier and ram the station wall in an armored
+   truck, then hold the cops off while you back in and hook up.
 1. **The Pull:** hold the throttle to fill the STRAIN meter until the vault tears out through the wall.
    Watch for the spike strip (take the gap Mia calls) and the bank on the corner (handbrake through the
    turn to throw the vault into the lobby). See [`docs/MOMENTS.md`](docs/MOMENTS.md) for all set pieces.
@@ -96,10 +97,18 @@ burnout. If the crew still gets nowhere for a few seconds, it's lined back up on
    more, and every wreck refills nitrous. Watch for civilian traffic. Heat rises with time and destruction, and the news follows.
    Once the heat is up, the police throw a roadblock across your route, and another a while after
    each one: ram it or swing the vault through it.
-   **The swap:** past the bank, the expressway dives into a tunnel where Han and Roman wait with a
-   box truck and a decoy. Drive in: Han drops the gate behind you, the real vault is winched up into
-   the truck and your cables go onto the decoy (a cutscene; Enter skips it). From there you're
-   dragging an empty safe, and the cops come through the gate after it.
+   Halfway across town, two police cars that aren't come up behind you (green markers): Roman and
+   Han, ramming real cruisers off the road for half a minute before they go on ahead.
+   Once the heat's up, police motorbikes come in pairs: quick, weaving up either side of you, and
+   one touch of the vault throws the rider clear (BIKE DOWN). At one crossing a city bus pulls out
+   across your path: go round its tail for a NEAR MISS. People on the corners scatter as you come
+   through, café tables and parasols go flying, and bus shelters lose their glass.
+   **The swap:** past the bank, the expressway dives into a tunnel. Han drops the gate behind you,
+   and Gisele's garbage truck rolls ahead with its hopper up and its ramp down: in slow motion, line
+   the vault up with the ramp (the LINE UP meter and the line on the road). Then the cars straddle the
+   truck, the vault rides up into it, and your trailing hooks catch the decoy waiting under a tarp
+   further on (a cutscene; Enter skips it). From there you're dragging an empty safe, and the cops
+   come through the gate after it, straight past the garbage truck.
 3. **Don't get boxed in:** if cops pin you at low speed, the BUSTED meter fills (a tip tells you
    how to break out).
 4. **Bridge:** Mia's route runs down Ponce de León, left onto the Piñero expressway, through the
@@ -107,8 +116,11 @@ burnout. If the crew still gets nowhere for a few seconds, it's lined back up on
    two rows of cruisers, and more are coming up behind. Partway across your partner calls it: too
    many, you have to split up. They unhook, spin round and lead the pack away, and you're left with
    the vault stopped dead on one cable: hold **Shift** for nitrous to fill the SOLO PULL meter and get
-   it rolling (gas alone won't do it). Then it swings like a wrecking ball: break the wall and reach
-   the yellow gantry out over the lagoon.
+   it rolling (gas alone won't do it). Then the wall comes at you head-on, and Reyes's black SUVs
+   come up behind with gunmen in the sunroofs. **Space** is a flail now: it throws the vault at
+   whatever's nearest (Reyes first). Cruisers you hit near the rail go into the bay. Swing it into
+   Reyes's SUV (the red marker) for the last scene: Hobbs, a day's head start, and what's really in
+   that safe.
 5. **Rank:** the end screen grades the run (S, A, B or C) on style, takedowns, damage, time and
    challenges, and shows your best. The first runs coach you through the controls; every run starts
    by listing its three challenges.
@@ -141,7 +153,9 @@ Debug URL flags: `?crew=dom|brian` skips the menu and cutscene (add `&intro` to 
 `?autopilot` follows the GPS (`?autopilot=detour` disobeys it at random intersections to test
 rerouting, `?autopilot=wander` turns at random), `?nocops` disables police, `?at=bank`, `?at=tunnel`,
 `?at=bridge` and `?at=split` start the chase short of the bank, short of the tunnel, at the foot of
-the bridge, and just short of where the crew splits up (the last two with the swap done), `?roadblock`
+the bridge, and just short of where the crew splits up (the last two with the swap done), `?at=fight` drops you into the fight on the
+bridge as the vault rolls free (the swap done, the partner gone), `?at=finale` straight to the last
+swing and the closing scene, `?bikes` makes the first police a pair of motorbikes, `?roadblock`
 sets up a roadblock as soon as there's a straight for it,
 `?timescale=4&renderEvery=8` runs the simulation faster for automated tests, `?cam=x,y,z,lookX,lookY,lookZ`
 holds the title-screen camera at a point (for looking round the map), and `?capture` steps the
@@ -151,8 +165,9 @@ console returns a state snapshot, including partner-quality stats (`partnerQuali
 partner is currently doing (`partnerThinks`), hard hits on the player's car (`impacts`), time spent
 stuck (`stuck`: the player pushing but not moving, the vault wedged, the partner out of place), cars
 thrown out of the rig (`rigThrows`), automatic resets after getting stuck (`resets`), the set pieces'
-state (`bank`, `roadblock`, `swap`, `finale` with the solo pull's strain, `policeHeld`) and the GPS
-reroute log (`rerouteLog`).
+state (`bank`, `roadblock`, `swap` and `lineup`, `finale` with the solo pull's strain and the cars
+sent into the bay, `reyes`, `allies`, `lastScene`, `policeHeld`), the street life (`cafes` knocked over,
+`bikes` and how far off they are, `people` scattered, the `bus`) and the GPS reroute log (`rerouteLog`).
 
 ## Code layout
 
@@ -168,8 +183,17 @@ reroute log (`rerouteLog`).
 - `src/roadmap.ts`: the map (`src/map/sanjuan.json`): street graph, "where am I on the road" queries, set-piece frames
 - `src/roads.ts`: the street network as the AI sees it (lanes along curved streets, intersections, route turns, bend speeds)
 - `src/gps.ts`: GTA-style navigation: shortest route over the street graph, live rerouting
-- `src/moments.ts`: the set pieces (The Pull, Spike Strip, Bank Job, roadblocks, the bridge finale: the split and the solo pull)
-- `src/tunnel.ts`: the swap in the tunnel (Han and Roman's truck, the decoy, the gate, the cutscene)
+- `src/moments.ts`: the set pieces (The Pull, Spike Strip, Bank Job, roadblocks, the bridge finale: the split, the solo pull, the head-on fight and the flail)
+- `src/tunnel.ts`: the rolling swap in the tunnel (the line-up, the gate, the garbage truck, the decoy under its tarp, the cutscene and the drive-by)
+- `src/garbageTruck.ts`: the swap truck (hopper on rams, ramp, beacons; a made-up city livery)
+- `src/reyes.ts`: Reyes's SUVs on the bridge (driving alongside, the gunmen and their fire, being hit by the vault)
+- `src/finale.ts`: the last scene (the last swing, Hobbs, the head start, the empty vault, payday in the hideout)
+- `src/allies.ts`: Roman and Han's fake police cars that ram real ones mid-chase
+- `src/overboard.ts`: cars thrown over the bridge rail into the bay
+- `src/people.ts`: the little crew figures (overalls, poses: wave, beckon, cheer)
+- `src/bikes.ts`: the police motorbikes (model, rider, the rider thrown clear and sitting up)
+- `src/pedestrians.ts`: people on the route's corners who stare, scatter and dive (drawn instanced)
+- `src/bus.ts`: the city bus that pulls across a crossing on the route, passengers watching
 - `src/director.ts`: slow motion and cinematic camera shots for big moments
 - `src/broadcast.ts`, `src/chopper.ts`: RIO 24H's news breaks, and its helicopter and searchlight
 - `src/traffic.ts`: civilian cars driving the lanes round the chase

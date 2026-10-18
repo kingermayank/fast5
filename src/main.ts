@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { angleTo, seek } from './ai';
+import { Allies } from './allies';
 import { loadModels, model } from './assets';
 import { Sound } from './audio';
 import { BreachScene } from './breach';
@@ -7,6 +8,7 @@ import { NEWS, wreckNews } from './broadcast';
 import { Chopper, SPOT_RADIUS } from './chopper';
 import { CAR_STARTS, City, LAMP_HEAD, STATION_FACADE_X, VAULT_START, VAULT_START_HEADING } from './city';
 import { Cutscene, type Shot } from './cutscene';
+import { Finale } from './finale';
 import { Coach } from './coach';
 import { CUTAWAY } from './cutaway';
 import { Director } from './director';
@@ -24,10 +26,13 @@ import { curveSpeed, exits, lanePath, leftOf, nextIntersection, Path, roadDir, r
 import { BANK, BRIDGE, GOAL, inTunnel, MAP, onBridge, PLAN, SPIKES, TUNNEL } from './roadmap';
 import { FIXED_DT, initPhysics, RAPIER } from './physics';
 import { Police } from './police';
+import { Reyes } from './reyes';
 import { Rig } from './rig';
 import { RiveUi } from './riveui';
 import { Run } from './run';
 import { Traffic } from './traffic';
+import { BusCrossing } from './bus';
+import { Pedestrians } from './pedestrians';
 import { TunnelSwap } from './tunnel';
 import { Cable, CABLE_TOW_LENGTH, Vault } from './vault';
 import { Vehicle, type VehicleSpec } from './vehicle';
@@ -85,6 +90,9 @@ async function start(): Promise<void> {
   useStatueModel(gfx.statue);
   const city = new City(world);
   scene.add(city.group);
+  // People on the corners of the route's crossings, who scatter as the convoy comes through.
+  const pedestrians = new Pedestrians((p) => city.indoors(p.x, p.z, 0.3));
+  scene.add(pedestrians.group);
   const fx = new Effects();
   scene.add(fx.group);
   const groundFx = new GroundFx();
@@ -102,6 +110,9 @@ async function start(): Promise<void> {
   const gps = new Gps();
   const police = new Police(world, scene, city);
   const director = new Director();
+  const reyes = new Reyes(world, scene, fx, sound, director);
+  // A city bus pulling across a crossing on the route just as the convoy gets there.
+  const bus = new BusCrossing(world, scene);
   const chopper = new Chopper();
   scene.add(chopper.group, chopper.light, chopper.light.target);
   const run = new Run();
@@ -127,6 +138,63 @@ async function start(): Promise<void> {
     style += 100;
     input.rumble(0.25, 120);
     takedown(at, car, byVault);
+    // In the fight on the bridge, one hit near the rail goes over into the bay.
+    bridge?.wrecked(car, byVault);
+  };
+  police.onSplash = (at) => bridge?.splash(at);
+  police.onBikes = () => say('MIA', 'Bikes! Two of them, coming up either side of you. They can’t take a hit. Give them the vault.');
+  bus.visible = (p) => isVisible(p);
+  // Bikes ride up the road the convoy took, rather than cutting through buildings to it.
+  police.trail = () => (partnerAi ? partnerAi.playerTrail : []);
+  police.heroes = () => (player ? (partnerAi?.released ? [player.position] : [player.position, partner.position]) : []);
+  bus.onPullOut = () => say('MIA', 'Bus! It’s pulling across right in front of you! Go round its tail!');
+  bus.onNearMiss = (at) => {
+    style += 150;
+    hud.banner('NEAR MISS', 'THREADED THE BUS  +150', 1.4);
+    if (!director.busy && isVisible(at)) director.slowmo(0.4, 0.8);
+  };
+  bus.onKnock = (at) => {
+    sound.crash(0.9);
+    fx.burst(at.clone().setY(1.2), 0.8);
+    director.shake = Math.max(director.shake, 0.6);
+    damage += 4000;
+  };
+  // A thrown rider coming down: a thump and a puff of dust (they sit up a moment later).
+  police.onRiderDown = (at) => {
+    if (!isVisible(at)) return;
+    fx.puff(at, 4);
+    sound.crash(0.25);
+  };
+  // A bus shelter's glass going: a shower of it, and the sound.
+  city.onShatter = (at, v) => {
+    if (!isVisible(at)) return;
+    fx.shatter(at, v.multiplyScalar(0.6), 70);
+    sound.shatter();
+  };
+  police.onShoot = (from, to) => {
+    if (!isVisible(from) && !isVisible(to)) return;
+    fx.muzzle(from);
+    fx.scrape(to, to.clone().sub(from).normalize().multiplyScalar(-4), 0.4);
+    sound.gunshot();
+    if (Math.random() < 0.3) sound.ping(2400 + Math.random() * 1600, 0.05, 0.12);
+  };
+  reyes.onSplash = (at) => bridge?.splash(at);
+  reyes.onWreck = (at) => {
+    style += 600;
+    nos = Math.min(1, nos + 0.3);
+    input.rumble(0.8, 300);
+    director.shake = 1.1;
+    hud.banner('REYES’S MEN', 'ONE SUV DOWN  +600', 2);
+    if (isVisible(at)) director.hitStop(0.12);
+  };
+  reyes.onBossHit = (at, forced) => bridge?.lastSwing(at, forced);
+  reyes.onBossDamaged = (at, left) => {
+    style += 800;
+    nos = Math.min(1, nos + 0.35);
+    input.rumble(0.9, 300);
+    hud.banner('REYES IS HIT', left > 1 ? `TWO MORE  +800` : `ONE MORE  +800`, 1.8);
+    say('MIA', left > 1 ? 'You hurt him! He’s still coming. Again!' : 'He’s smoking! One more swing!');
+    if (isVisible(at)) director.hitStop(0.14);
   };
 
   let state: State = 'select';
@@ -159,6 +227,7 @@ async function start(): Promise<void> {
   let bridge: BridgeFinale | null = null;
   let roadblock: Roadblock | null = null;
   let swap: TunnelSwap | null = null;
+  let allies: Allies | null = null;
   let momentCtx: MomentContext | null = null;
   /** A set piece has the police off the road (the tunnel swap, the split on the bridge). */
   let policeHeld = false;
@@ -174,6 +243,7 @@ async function start(): Promise<void> {
       voice,
       director,
       police,
+      reyes,
       player,
       partner,
       partnerDriver: partnerAi,
@@ -205,7 +275,10 @@ async function start(): Promise<void> {
     spikes = new SpikeStrip(ctx);
     bankJob = new BankJob(ctx);
     swap = new TunnelSwap(ctx);
+    allies = new Allies(ctx);
+    allies.allowed = () => !!swap?.pending && swap.state !== 'lineup';
     bridge = new BridgeFinale(ctx, cutLoose, (at, cars) => blockadeBust(at, cars, true));
+    bridge.onLast = (at, forced) => startFinale(at, forced);
     roadblock = new Roadblock(ctx, (at, cars) => blockadeBust(at, cars, false));
   }
 
@@ -255,6 +328,29 @@ async function start(): Promise<void> {
       finish();
       enter('chase');
       hud.showHud(true);
+    });
+  }
+
+  /**
+   * The last scene on the bridge (finale.ts): from the last swing to payday. When it
+   * ends (or is skipped) the run is over and the end screen comes straight up.
+   */
+  let finale: Finale | null = null;
+  function startFinale(at: THREE.Vector3, forced: boolean): void {
+    if (finale || !momentCtx) return;
+    finale = new Finale(momentCtx, BRIDGE_PATH, !!swap?.done, at);
+    run.stats.finished = true;
+    coach.stop();
+    style += forced ? 1500 : 3000;
+    director.cut();
+    hud.hint('');
+    hud.meter(null);
+    enter('cutscene');
+    cutscene = new Cutscene(finale.shots(), hud, voice, () => {
+      cutscene = null;
+      finale?.finish();
+      if (bridge) bridge.state = 'done';
+      enter('outro');
     });
   }
 
@@ -395,6 +491,18 @@ async function start(): Promise<void> {
   let autoPlan: { corner: THREE.Vector3; exit: THREE.Vector3 | null; detour: boolean } | null = null;
   function autopilotControls(dt: number): ControlState {
     if (bridge?.pulling) return { throttle: 1, brake: 0, steer: 0, handbrake: false, nos: true };
+    if (bridge?.fighting) {
+      // Down the middle of the bridge, swinging the vault at anything that comes near it.
+      const s = BRIDGE_PATH.project(player.position);
+      const target = BRIDGE_PATH.at(Math.min(BRIDGE_PATH.length - 30, s + 25));
+      const vp = vault.position.setY(0);
+      const near = police.cops.some((c) => !c.wrecked && c.v.position.distanceTo(vp) < 14) || reyes.suvs.some((x) => !x.wrecked && x.v.position.distanceTo(vp) < 14);
+      // A press held for a moment (the flail looks for the press once a frame), now and then.
+      autoSwing -= dt;
+      if (near && autoSwing < -0.6 && Math.random() < dt * 2.5) autoSwing = 0.2;
+      const c = seek(world, player, target, 0.75);
+      return { ...c, handbrake: autoSwing > 0 };
+    }
     const p = player.position;
     const d = roadDir(p, player.forward);
     const side = CHARACTERS[character].side;
@@ -428,7 +536,8 @@ async function start(): Promise<void> {
     // Otherwise keep to our side of the street, nearer the middle where it's narrow.
     const street = MAP.locate(p, d)?.edge;
     const gap = spikes?.gapOffset() ?? null;
-    const want = gap !== null && d.dot(SPIKES.z) > 0.9 ? gap : side * THREE.MathUtils.clamp((street?.hw ?? 5) - 2.4, 0, 3);
+    const lineup = swap?.lineupOffset() ?? null;
+    const want = gap !== null && d.dot(SPIKES.z) > 0.9 ? gap : lineup !== null && inTunnel(p, 60) ? lineup : side * THREE.MathUtils.clamp((street?.hw ?? 5) - 2.4, 0, 3);
     // Change lanes gradually, as a driver would with four tons behind them.
     autoLane += THREE.MathUtils.clamp(want - autoLane, -2.5 * dt, 2.5 * dt);
     const lane = autoLane;
@@ -461,6 +570,7 @@ async function start(): Promise<void> {
       handbrake: bankSwing,
     };
   }
+  let autoSwing = 0;
   let autoBlocked = 0;
   let autoReverse = 0;
   let autoReverseSteer = 1;
@@ -495,6 +605,7 @@ async function start(): Promise<void> {
     const rammers = new Set<number>();
     for (const c of police.cops) rammers.add(c.v.collider.handle);
     for (const c of traffic.cars) rammers.add(c.v.collider.handle);
+    for (const s of reyes.suvs) rammers.add(s.v.collider.handle);
     for (const { car, v, w } of before) {
       let hit = false;
       world.contactPairsWith(car.collider, (other) => {
@@ -568,6 +679,12 @@ async function start(): Promise<void> {
       partner.step(dt);
     }
 
+    if (state === 'chase') {
+      reyes.step(dt, player, vault, (p) => bridge?.railOf(p) ?? null);
+      bridge?.step(dt);
+      allies?.step(dt);
+      bus.step(dt, player, [partner, vault]);
+    }
     if (state === 'chase' && !noCops && !policeHeld) {
       police.step(dt, player, vault, heat, onBridge(player.position));
     } else if (state === 'outro' || state === 'busted' || state === 'lost') {
@@ -582,7 +699,7 @@ async function start(): Promise<void> {
     if (state === 'chase') clearRig();
 
     // Swung on purpose (the handbrake, the throw at the bank): leave the vault be.
-    const swinging = player.controls.handbrake || !!bankJob?.flinging;
+    const swinging = player.controls.handbrake || !!bankJob?.flinging || !!bridge?.flinging;
     if ((state === 'chase' || state === 'outro') && !swinging) vault.overrun(dt, partnerAi.released ? [player] : [player, partner]);
     if (state === 'chase') {
       // The vault follows the road the cars drove (unless the player swings it), and never stays wedged.
@@ -627,6 +744,7 @@ async function start(): Promise<void> {
       spikes?.update(dt);
       bankJob?.update(dt);
       swap?.update(dt);
+      allies?.update(dt, chaseTime);
       bridge?.update(dt);
       roadblock?.update(dt);
       placeRoadblock();
@@ -635,6 +753,7 @@ async function start(): Promise<void> {
     if (state === 'breach' && vault.position.x > STATION_FACADE_X + 3) {
       enter('chase');
       breach.shooting = false;
+      breach.covering = false;
       heat = 1;
       say('MIA', 'It’s out! Every cop in Rio is coming. Follow my route, or find your own. I’ll guide you.');
       startChase();
@@ -647,13 +766,22 @@ async function start(): Promise<void> {
         placeConvoy(BRIDGE_PATH.at(s), BRIDGE_PATH.tangent(s));
         swap?.skipAhead();
       }
+      if (at === 'fight' || at === 'finale') {
+        placeConvoy(BRIDGE_PATH.at(SPLIT_AT + 5), BRIDGE_PATH.tangent(SPLIT_AT + 5));
+        swap?.skipAhead();
+        bridge?.debugCharge();
+        // ?at=finale: Reyes up close at once, and the last swing lands a moment later.
+        if (at === 'finale') bridge?.debugLast();
+      }
       if (at === 'tunnel') {
         const road = new Path(TUNNEL.road);
         const s = road.project(TUNNEL.frame.origin) - 130;
         placeConvoy(road.at(s), road.tangent(s));
       }
-      if (at === 'bank') {
-        const k = PLAN.findIndex((n) => n.pos.distanceTo(BANK.corner) < 5);
+      if (at === 'bank' || at === 'bus') {
+        // ?at=bus: 150 m short of the crossing where the bus pulls out.
+        const mark = at === 'bus' ? bus.at : BANK.corner;
+        const k = mark ? PLAN.findIndex((n) => n.pos.distanceTo(mark) < 5) : -1;
         const edge = k > 0 ? MAP.between(PLAN[k - 1], PLAN[k]) : null;
         if (edge) {
           const avenue = new Path(MAP.from(edge, PLAN[k - 1]));
@@ -689,7 +817,8 @@ async function start(): Promise<void> {
       gps.update(dt, player.position, travelDir());
       calloutTurn();
 
-      const pinned = police.closeTo(player.position, 9) >= 2 && Math.abs(player.forwardSpeed) < 4;
+      // No getting boxed in during the fight on the bridge: it's head-on, and it's the finale.
+      const pinned = !bridge?.fighting && police.closeTo(player.position, 9) >= 2 && Math.abs(player.forwardSpeed) < 4;
       busted = THREE.MathUtils.clamp(busted + (pinned ? dt / 3.5 : -dt / 2), 0, 1);
       if (busted >= 1) {
         enter('busted');
@@ -699,7 +828,7 @@ async function start(): Promise<void> {
         hud.result(null);
       }
 
-      if (atSwapPoint(player.position)) {
+      if (atSwapPoint(player.position) && !bridge?.fighting && bridge?.state !== 'done') {
         enter('outro');
         run.stats.finished = true;
         coach.stop();
@@ -709,9 +838,21 @@ async function start(): Promise<void> {
       }
     }
 
-    if (state === 'outro' && stateTime > 4 && stateTime - dt <= 4) {
+    // After the last scene the end screen comes straight up; reaching the gantry, after a look round.
+    const endsAt = finale ? 0.3 : 4;
+    if (state === 'outro' && stateTime > endsAt && stateTime - dt <= endsAt) {
       const stats = `Time ${Hud.time(chaseTime)}   Cops wrecked ${police.wreckedCount}   Property damage ${Hud.money(damage)}   Style ${style.toLocaleString('en-US')}`;
-      if (swap?.done) {
+      if (finale?.decoy) {
+        hud.showOverlay(
+          'PAYDAY',
+          'Reyes went down on the bridge, and the safe the police opened there was empty.\n' +
+            'The real one came home in a garbage truck. Hobbs gave you a day’s head start: use it.\n\n' +
+            stats,
+          'Press Enter to play again',
+        );
+      } else if (finale) {
+        hud.showOverlay('SO CLOSE', 'Reyes went down on the bridge, but the safe was the real one, and Hobbs has it now.\nNext time, make the swap in the tunnel.\n\n' + stats, 'Press Enter to play again');
+      } else if (swap?.done) {
         hud.showOverlay(
           'THE DECOY',
           'Every cop in Rio chased that vault across the bridge, and it was empty.\n' +
@@ -728,7 +869,7 @@ async function start(): Promise<void> {
       }
       hud.result(run.finish());
     }
-    if ((state === 'busted' || state === 'lost' || (state === 'outro' && stateTime > 4)) && input.wasPressed('Enter')) {
+    if ((state === 'busted' || state === 'lost' || (state === 'outro' && stateTime > endsAt)) && input.wasPressed('Enter')) {
       const url = new URL(location.href);
       url.searchParams.set('crew', character);
       location.href = url.toString();
@@ -848,7 +989,7 @@ async function start(): Promise<void> {
     const p = player.position;
     if (!bridgeCalled && gps.nodes[0] === BRIDGE_FOOT_POS && p.distanceTo(BRIDGE_FOOT_POS) < 110) {
       bridgeCalled = true;
-      say('MIA', 'Bridge ahead. Get to the yellow gantry at the far end.');
+      say('MIA', swap?.done ? 'Bridge ahead. Drag that decoy across, and make it look good.' : 'Bridge ahead. Get to the yellow gantry at the far end.');
       return;
     }
     const turn = gps.nextTurn(p, travelDir());
@@ -1034,6 +1175,7 @@ async function start(): Promise<void> {
   /** A cruiser wrecked by a deliberate swing (the vault hit it within this long of the handbrake, s) is worth more. */
   const SWING_WINDOW = 2;
   const SWING_BONUS = 150;
+  const BIKE_BONUS = 50;
   let lastWreckAt = -10;
   let streak = 0;
   let lastWreckShot = -100;
@@ -1050,8 +1192,13 @@ async function start(): Promise<void> {
     // Swung into it on purpose: the move the whole game is built around.
     const swung = byVault && chaseTime - lastSwingAt < SWING_WINDOW;
     if (swung) style += SWING_BONUS;
+    // A bike's worth a little more: they're quick and hard to catch.
+    const bike = police.isBike(car);
+    if (bike) style += BIKE_BONUS;
     if (STREAK_CALLOUTS[streak]) {
       hud.banner(STREAK_CALLOUTS[streak], `+${bonus + (swung ? SWING_BONUS : 0)}`, 1.3);
+    } else if (bike && !hud.bannerBusy && isVisible(at)) {
+      hud.banner('BIKE DOWN', `+${100 + BIKE_BONUS + (swung ? SWING_BONUS : 0)}`, 1.2);
     } else if (n === 1) {
       hud.banner('TAKEDOWN', 'WRECKED COPS REFILL YOUR NITROUS  +100', 1.8);
     } else if (swung && !hud.bannerBusy) {
@@ -1131,7 +1278,10 @@ async function start(): Promise<void> {
     groundFx.begin();
     groundFx.viewFrom(camera.position, camLook);
     // Mia's route, painted on the road ahead.
-    if (player && state === 'chase' && gps.nodes.length) groundFx.route(gps.path(player.position), performance.now() / 1000);
+    // Lining up for the swap, the line to drive instead.
+    const guide = state === 'chase' ? swap?.guide() : null;
+    if (guide) groundFx.route(guide, performance.now() / 1000);
+    else if (player && state === 'chase' && gps.nodes.length) groundFx.route(gps.path(player.position), performance.now() / 1000);
     if (player && state !== 'select') {
       for (const lamp of city.lamps) {
         if (Math.abs(lamp.position.x - camLook.x) > 140 || Math.abs(lamp.position.z - camLook.z) > 140) continue;
@@ -1260,6 +1410,11 @@ async function start(): Promise<void> {
       look = new THREE.Vector3(195, 0, 158);
       fov = 40;
       k = 1;
+    } else if (state === 'outro' && finale) {
+      // After the last scene the camera stays where it ended: on the money, or on the open vault.
+      ({ pos, look } = finale.outroCamera(stateTime));
+      fov = 46;
+      k = 1;
     } else if (state === 'outro') {
       const t = stateTime * 0.25;
       const c = player.position;
@@ -1315,19 +1470,23 @@ async function start(): Promise<void> {
     camera.updateMatrixWorld();
     frustum.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     // Shadows around what's on screen: the overhead view looks well ahead of the car.
-    gfx.follow(state === 'cutscene' || !player || view === 'overhead' ? camLook.clone().setY(0) : player.position);
+    gfx.follow(state === 'cutscene' || state === 'outro' || !player || view === 'overhead' ? camLook.clone().setY(0) : player.position);
 
     // From overhead: see through buildings around the player, and keep the tilt-shift band on them.
     const above = view === 'overhead' && !!player && !shot && state !== 'select' && state !== 'cutscene' && state !== 'outro';
     CUTAWAY.radius.value = 0;
     if (above) {
-      const at = player.position.setY(1);
+      // Lining up in the tunnel, the window through the roof is centred between the car and the truck ahead.
+      const focus = swap?.focus();
+      const at = (focus ? player.position.lerp(focus, 0.5) : player.position).setY(1);
       const eye = at.clone().applyMatrix4(camera.matrixWorldInverse);
       const ndc = at.clone().project(camera);
       const buf = gfx.renderer.getDrawingBufferSize(new THREE.Vector2());
       CUTAWAY.screen.value.set((ndc.x * 0.5 + 0.5) * buf.x, (ndc.y * 0.5 + 0.5) * buf.y);
-      CUTAWAY.radius.value = buf.y * 0.24;
-      CUTAWAY.depth.value = -eye.z;
+      // Lining up in the tunnel, a wider window through its roof, so the truck ahead shows.
+      CUTAWAY.radius.value = buf.y * (swap?.state === 'lineup' ? 0.42 : 0.24);
+      // ...and reaches back past the truck, so its roof is cut too.
+      CUTAWAY.depth.value = focus ? Math.max(-eye.z, 5 - focus.clone().setY(1).applyMatrix4(camera.matrixWorldInverse).z) : -eye.z;
       gfx.overhead(true, ndc.y * 0.5 + 0.5);
     } else {
       // The title screen's orbit gets the same look.
@@ -1381,6 +1540,8 @@ async function start(): Promise<void> {
   let frameCount = 0;
   // Debug: ?nocops=1 disables police (for testing the route and ending); ?at=bridge starts the chase on the bridge.
   const noCops = params.has('nocops');
+  // ?bikes: the first police to come are a pair of motorbikes, whatever the heat.
+  police.forceBikes = params.has('bikes');
   const preset = params.get('crew');
   if (preset === 'dom' || preset === 'brian') {
     begin(preset, !params.has('intro'));
@@ -1410,7 +1571,17 @@ async function start(): Promise<void> {
     vaultRescues,
     bank: bankJob ? (bankJob.smashed ? 'smashed' : !bankJob.pending ? 'missed' : bankJob.flinging ? 'flinging' : 'pending') : null,
     swap: swap?.state ?? null,
-    finale: bridge ? { state: bridge.state, strain: +bridge.strain.toFixed(2) } : null,
+    lineup: swap ? +swap.quality.toFixed(2) : 0,
+    finale: bridge ? { state: bridge.state, strain: +bridge.strain.toFixed(2), overboards: bridge.overboards } : null,
+    reyes: reyes.active ? { suvs: reyes.suvs.map((s) => (s.boss ? 'R' : 'G') + (s.wrecked ? 'x' : s.plunge ? 'w' : '')), escort: +reyes.escortTime.toFixed(1), hit: reyes.bossHit, gap: player ? Math.round(reyes.suvs[0].v.position.distanceTo(player.position)) : 0 } : null,
+    lastScene: finale ? (finale.decoy ? 'decoy' : 'real') : null,
+    cafes: { tables: city.cafes.length, knocked: city.props.filter((p) => p.instance && p.hit).length, first: city.cafes[0]?.toArray().map(Math.round) },
+    bikes: player
+      ? police.cops.filter((c) => c.bike).map((c) => `${c.wrecked ? 'x' : 'b'}${Math.round(c.v.position.distanceTo(player.position))}@${Math.round(c.v.forwardSpeed)}#${c.v.position.x.toFixed(0)},${c.v.position.z.toFixed(0)}`)
+      : [],
+    people: { n: pedestrians.count, scattered: pedestrians.scattered },
+    bus: { state: bus.state, at: bus.at?.toArray().map(Math.round), gap: player && bus.position ? Math.round(bus.position.distanceTo(player.position)) : null },
+    allies: allies ? `${allies.state}:${allies.cars.map((a) => a.name[0] + a.takedowns).join(',')}` : null,
     policeHeld,
     roadblock: roadblock && player ? { state: roadblock.state, at: roadblock.at.toArray().map(Math.round), ahead: Math.round(roadblock.ahead(player.position)), fastest: +roadblock.fastest.toFixed(1) } : null,
     partnerQuality: {
@@ -1496,8 +1667,9 @@ async function start(): Promise<void> {
   function updateBeacons(time: number): void {
     const pulse = 0.7 + 0.3 * Math.sin(time * 2.6);
     bankBeacon.visible = state === 'chase' && !!bankJob?.pending;
-    tunnelBeacon.visible = state === 'chase' && !!swap?.pending;
-    goalBeacon.visible = state === 'chase' || state === 'outro';
+    tunnelBeacon.visible = state === 'chase' && !!swap?.pending && swap.state !== 'lineup';
+    // Not in the fight on the bridge: then it's Reyes you're after, not the gantry.
+    goalBeacon.visible = (state === 'chase' || state === 'outro') && !bridge?.fighting && !finale;
     (bankBeacon.material as THREE.MeshBasicMaterial).opacity = pulse;
     (tunnelBeacon.material as THREE.MeshBasicMaterial).opacity = pulse;
     (goalBeacon.material as THREE.MeshBasicMaterial).opacity = pulse;
@@ -1507,8 +1679,10 @@ async function start(): Promise<void> {
   function objective(): string {
     if (state === 'breach') return 'Rip the vault out of the station';
     if (bridge?.pulling) return 'Get the vault rolling on your own';
+    if (bridge?.state === 'charge') return reyes.boss ? 'Swing the vault into Reyes’s SUV' : 'Smash through the cruisers coming at you';
+    if (swap?.state === 'lineup') return 'Line the vault up with the truck’s ramp';
     const decoy = !!swap?.done;
-    if (onBridge(player.position)) return decoy ? 'Get the decoy to the gantry' : 'Reach the swap point';
+    if (onBridge(player.position)) return decoy ? 'Drag the decoy across the bridge' : 'Reach the swap point';
     return decoy ? 'Drag the decoy to the bridge' : 'Get the vault to the tunnel';
   }
 
@@ -1561,6 +1735,9 @@ async function start(): Promise<void> {
       }
       player.render(dt);
       partner.render(dt);
+      reyes.update(dt, player, state === 'chase');
+      pedestrians.update(dt, camera.position, player.position, Math.abs(player.forwardSpeed), vault.position);
+      bus.render(dt, player.position);
       for (const car of [player, partner]) car.model.brake.emissiveIntensity = car.controls.brake > 0 ? 4 : 1.2;
       for (const c of cables) c.render();
       police.render(dt);
@@ -1605,6 +1782,8 @@ async function start(): Promise<void> {
         blips: [
           ...(bankJob?.pending ? [{ pos: BANK_BLIP, color: '#3ddc84', label: '$' }] : []),
           ...(swap?.pending ? [{ pos: TUNNEL_BLIP, color: '#ff9440', label: 'T' }] : []),
+          ...(reyes.boss && !reyes.bossHit ? [{ pos: reyes.boss.v.position, color: '#ff3b3b', label: 'R' }] : []),
+          ...(allies?.blips ?? []).map((pos) => ({ pos, color: '#3dff6a', label: 'A' })),
         ],
       });
     } else {

@@ -552,3 +552,80 @@ body.rive-select #select > :not(.credits):not(.build) {
     animation: none;
   }
 }
+
+/* Arming the nitrous for the solo pull: three switches flick on, then the button lights. */
+#nos-arm {
+  position: fixed;
+  top: 47%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 18px;
+  background: linear-gradient(180deg, rgba(24, 26, 30, 0.92), rgba(10, 11, 13, 0.92));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  z-index: 4;
+  pointer-events: none;
+}
+#nos-arm.hidden {
+  display: none;
+}
+#nos-arm .sw {
+  position: relative;
+  width: 26px;
+  height: 46px;
+  border-radius: 5px;
+  background: #2a2d33;
+  border: 1px solid #44484f;
+}
+#nos-arm .sw i {
+  position: absolute;
+  left: 9px;
+  width: 8px;
+  height: 22px;
+  top: 20px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #9aa0a6, #e5e8eb, #9aa0a6);
+  transform-origin: 50% 100%;
+  transform: rotate(32deg);
+  transition: transform 0.08s ease-out, top 0.08s ease-out;
+}
+#nos-arm .sw b {
+  position: absolute;
+  left: 8px;
+  top: -14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #12331a;
+  box-shadow: inset 0 0 2px #000;
+}
+#nos-arm .sw.on i {
+  top: 2px;
+  transform: rotate(-32deg);
+}
+#nos-arm .sw.on b {
+  background: #45ff7a;
+  box-shadow: 0 0 10px #45ff7a, 0 0 20px rgba(69, 255, 122, 0.6);
+}
+#nos-arm .btn {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font: 800 13px/1 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  letter-spacing: 2px;
+  color: #ffd6d6;
+  background: radial-gradient(circle at 40% 35%, #6a1d1d, #2b0a0a);
+  border: 3px solid #4a4e55;
+  transition: background 0.1s, box-shadow 0.1s;
+}
+#nos-arm .btn.lit {
+  background: radial-gradient(circle at 40% 35%, #ff7a7a, #c41414);
+  box-shadow: 0 0 18px rgba(255, 60, 60, 0.9), 0 0 40px rgba(255, 40, 40, 0.5);
+  color: #fff;
+}

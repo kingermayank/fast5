@@ -29,6 +29,9 @@ export const NEWS = {
   blockade: ['BREAKING', 'THE BRIDGE BLOCKADE IS DOWN', 'One car and a ten-ton safe just broke a wall of police cruisers  •  The second car has broken away'],
   finish: ['BREAKING', 'POLICE SURROUND THE SAFE ON THE BRIDGE', 'Officers have the vault  •  Both drivers still at large  •  More at the top of the hour'],
   empty: ['BREAKING', 'THE SAFE IS EMPTY', 'Police stopped the vault on the bridge and opened it: there is nothing inside  •  Both drivers still at large'],
+  bay: ['LIVE', 'A POLICE CAR GOES OFF THE BRIDGE', 'Our helicopter saw a patrol car thrown over the rail into the bay  •  Divers are on the way  •  The safe is still moving'],
+  reyes: ['BREAKING', 'GUNFIRE ON THE BRIDGE', 'Armed men in black SUVs are firing on the getaway car  •  Witnesses name businessman Hernan Reyes  •  Police are closing the bridge'],
+  reyesDown: ['BREAKING', 'REYES TAKEN INTO CUSTODY', 'The businessman whose fortune was in the safe has been arrested on the bridge  •  Both drivers got away']
 } satisfies Record<string, NewsBreak | (NewsBreak | null)[]>;
 
 /** A milestone in police cars wrecked, e.g. 10, 25, 50. */

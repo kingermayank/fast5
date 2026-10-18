@@ -40,6 +40,8 @@ class ParticlePool {
     /** HDR multiplier so additive sparks trigger bloom. */
     private brightness = 1,
     private opacity = 1,
+    /** Falling particles bounce off this height (the road); -Infinity: they fall on through. */
+    private floor = 0.03,
   ) {
     this.positions = new Float32Array(capacity * 3);
     this.colors = new Float32Array(capacity * 3);
@@ -98,8 +100,8 @@ class ParticlePool {
       p.vel.y -= this.gravity * dt;
       p.vel.multiplyScalar(1 - this.drag * dt);
       p.pos.addScaledVector(p.vel, dt);
-      if (p.pos.y < 0.03 && this.gravity > 0) {
-        p.pos.y = 0.03;
+      if (p.pos.y < this.floor && this.gravity > 0) {
+        p.pos.y = this.floor;
         p.vel.y *= -0.3;
         p.vel.x *= 0.6;
         p.vel.z *= 0.6;
@@ -136,11 +138,13 @@ export class Effects {
   private glass = new ParticlePool(700, new THREE.Color(0.75, 0.9, 1.0), 16, 0.6, true, 0, 3);
   private cash = new ParticlePool(500, new THREE.Color(0.45, 0.75, 0.45), 1.6, 2.5, false, 0, 1, 1);
   private nos = new ParticlePool(300, new THREE.Color(0.35, 0.55, 1.0), -0.5, 3, true, 1.5, 6);
+  /** Spray thrown up off the bay (it falls back through the surface). */
+  private water = new ParticlePool(500, new THREE.Color(0.86, 0.93, 1.0), 13, 0.45, false, 1.1, 1.25, 0.9, -Infinity);
   readonly skids = new SkidMarks();
   private flashes: { light: THREE.PointLight; life: number }[] = [];
 
   constructor() {
-    this.group.add(this.sparks.points, this.dust.points, this.smoke.points, this.glass.points, this.cash.points, this.nos.points, this.skids.mesh);
+    this.group.add(this.sparks.points, this.dust.points, this.smoke.points, this.glass.points, this.cash.points, this.nos.points, this.water.points, this.skids.mesh);
     for (let i = 0; i < 3; i++) {
       const light = new THREE.PointLight(0xffb060, 0, 18, 2);
       this.group.add(light);
@@ -212,6 +216,22 @@ export class Effects {
     }
   }
 
+  /** Something heavy hitting the water: a column and a crown of spray, and mist rolling off it. */
+  splash(at: THREE.Vector3, power = 1): void {
+    for (let i = 0; i < 160 * power; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random();
+      const v = new THREE.Vector3(Math.cos(a) * (1 + r * 6), 7 + Math.random() * 11 * (1 - r * 0.6), Math.sin(a) * (1 + r * 6));
+      const p = at.clone().add(new THREE.Vector3(Math.cos(a) * r * 2, 0.2, Math.sin(a) * r * 2));
+      this.water.emit(p, v, 0.9 + Math.random() * 1.1, 0.22 + Math.random() * 0.35);
+    }
+    for (let i = 0; i < 14 * power; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = new THREE.Vector3(Math.cos(a) * 3, 0.6 + Math.random(), Math.sin(a) * 3);
+      this.smoke.emit(at.clone().add(new THREE.Vector3(Math.cos(a) * 2, 0.4, Math.sin(a) * 2)), v, 1.8 + Math.random(), 1.6 + Math.random());
+    }
+  }
+
   /** Blue nitrous flame from an exhaust, thrown backwards. */
   nosFlame(at: THREE.Vector3, backward: THREE.Vector3): void {
     for (let i = 0; i < 3; i++) {
@@ -227,6 +247,7 @@ export class Effects {
     this.glass.update(dt);
     this.cash.update(dt);
     this.nos.update(dt);
+    this.water.update(dt);
     for (const f of this.flashes) {
       f.life -= dt;
       f.light.intensity = f.life > 0 ? 60 : 0;
