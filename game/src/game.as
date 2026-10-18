@@ -10,7 +10,7 @@ import { KeyboardEvent, GamepadEvent } from "rive/events";
 import { ViewModel } from "rive/data";
 import { Color } from "rive/color";
 import { clock } from "rive/os";
-import { MapData } from "./map";
+import { MapData, MapLoader } from "./map";
 import { CityMesh } from "./citymesh";
 import { StaticWorld } from "./world";
 import { PhysicsWorld } from "./physics";
@@ -98,6 +98,7 @@ export class Game extends Layout {
 
   // Loading.
   mapBytes: ArrayBuffer? = null;
+  loader: MapLoader? = null;
   map: MapData? = null;
   city: CityMesh? = null;
   cityGpu: GpuMesh? = null;
@@ -151,6 +152,9 @@ export class Game extends Layout {
   wasTaut: StaticArray<bool> = [false, false];
   slowest: f64 = 0;
   loadedFrames: i32 = 0;
+  uploaded: bool = false;
+  /** Set by headless test runs (view model `headless` = 1): the CLI's data dump has no GPU to upload to. */
+  headless: bool = false;
   drawTime: f64 = 0;
   drawFrames: i32 = 0;
   debugFrames: i32 = 0;
@@ -182,19 +186,23 @@ export class Game extends Layout {
 
   // ------------------------------------------------------------ loading
 
-  /** Parse the map, then build the city a slice per frame. True once it's all there. */
+  /** Read the map, then build the city, a slice per frame. True once it's all there. */
   load(): bool {
     let city = this.city!;
     if (city.done && this.loadedFrames++ > 0) return true;
     if (city.done) return false;
     let map = this.map;
     if (map == null) {
-      let parsed = MapData.parse(this.mapBytes!);
-      if (parsed == null) {
+      if (this.loader == null) this.loader = new MapLoader(this.mapBytes!);
+      let loader = this.loader!;
+      if (loader.failed || !loader.step(0.03)) return false;
+      if (loader.failed) {
         this.log("map blob unreadable");
         return false;
       }
-      this.map = parsed;
+      this.map = loader.map;
+      this.loader = null;
+      this.mapBytes = null;
       return false;
     }
     if (city.step(map, 0.04)) {
@@ -237,7 +245,7 @@ export class Game extends Layout {
     physics.solvers.push(left);
     physics.solvers.push(right);
     physics.solvers.push(vault);
-    this.partner = new Partner(mate, player, right, world, -1);
+    this.partner = new Partner(mate, player, right, left, world, -1);
 
     this.place(true);
     this.ready = true;
@@ -254,26 +262,19 @@ export class Game extends Layout {
     this.camera.reset(x, z);
   }
 
-  /** Puts the convoy back together: at the start, or lined up where the player is. */
+  /**
+   * Puts the convoy back together: at the start, or lined up where the player is.
+   * The start is outside the station on Avenida Juan Ponce de León, heading north
+   * up its long straight with the vault in line behind (a side-on first pull
+   * would swing the cars' tails round before they got going).
+   */
   place(start: bool): void {
-    let player = this.player!;
-    let mate = this.partnerCar!;
-    let vault = this.vault!;
     if (start) {
-      vault.body.place(177, 150, 1.5708);
-      player.body.place(202.5, 158, 0);
-      mate.body.place(196.5, 158, 0);
-    } else {
-      let b = player.body;
-      let fx = b.fwdX(), fz = b.fwdZ(), lx = b.leftX(), lz = b.leftZ();
-      let cx = b.x - lx * 3, cz = b.z - lz * 3;
-      let a = b.a;
-      player.body.place(cx + lx * 3, cz + lz * 3, a);
-      mate.body.place(cx - lx * 3, cz - lz * 3, a);
-      vault.body.place(cx - fx * (this.cableParams.length + 5), cz - fz * (this.cableParams.length + 5), a);
+      this.placeAt(200, 160, 0);
+      return;
     }
-    for (let i = 0; i < this.cables.length; i++) this.cables[i].hook(0.6);
-    this.camera.reset(player.body.x, player.body.z);
+    let b = this.player!.body;
+    this.placeAt(b.x - b.leftX() * 3, b.z - b.leftZ() * 3, b.a);
   }
 
   // ------------------------------------------------------------ input
@@ -404,32 +405,33 @@ export class Game extends Layout {
     }
   }
 
-  /** Scripted laps for headless tests (view model `autopilot` = 1). */
+  /**
+   * Scripted run for headless tests (view model `autopilot` = 1), from the start
+   * up Avenida Juan Ponce de León: pull away, swerve across the lanes so the
+   * vault swings, a firm stop so it slides up on the cars, then pull away again.
+   */
   private drive(c: Controls, t: f64): void {
-    c.throttle = 1;
+    let b = this.player!.body;
+    let s = t - 4;
+    // Hold a line up the avenue (north, x 203), shifted a lane each way to swerve.
+    let lane: f64 = 203;
+    if (s > 3 && s < 7) lane += 3.5 * Math.sin((s - 3) * 1.5708);
+    let want = Math.atan2(lane - b.x, 14 + Math.abs(this.player!.forwardSpeed) * 0.6);
+    let err = want - b.a;
+    while (err > 3.14159) err -= 6.28318;
+    while (err < -3.14159) err += 6.28318;
+    c.steer = clamp(err * 2, -1, 1);
+    c.throttle = 0;
     c.brake = 0;
     c.handbrake = false;
     c.nos = false;
-    c.steer = 0;
-    let s = t - 4;
     if (s < 0) {
-      c.throttle = 0;
-    } else if (s < 5) {
-      c.steer = 0;
     } else if (s < 7) {
-      c.steer = 0.7;
-    } else if (s < 10) {
-      c.steer = 0;
-    } else if (s < 12) {
-      c.steer = -0.8;
-      c.handbrake = s > 11;
-    } else if (s < 14) {
-      c.throttle = 0;
-      c.brake = 1;
-    } else if (s < 15) {
-      c.throttle = 0;
-    } else {
-      c.nos = true;
+      c.throttle = 1;
+    } else if (s < 9.5) {
+      c.brake = 0.5;
+    } else if (s >= 10.5) {
+      c.throttle = 1;
     }
   }
 
@@ -460,6 +462,16 @@ export class Game extends Layout {
     if (vm != null) {
       let ap = vm.getNumber("autopilot");
       if (ap != null) this.autopilot = ap.value;
+      let hl = vm.getNumber("headless");
+      if (hl != null) this.headless = hl.value > 0;
+    }
+    // GPU resources, a budgeted slice per frame (the city's buffers are big).
+    if (!this.uploaded && !this.headless) {
+      let t1 = clock();
+      this.uploaded = this.uploadStep(this.context!);
+      let took = clock() - t1;
+      if (took > 0.05) this.log("upload slice: " + fmt(took * 1000, 1) + " ms");
+      if (!this.uploaded) return true;
     }
 
     let player = this.player!;
@@ -508,8 +520,8 @@ export class Game extends Layout {
     if (this.autopilot > 0 && this.debugFrames % 30 == 0) {
       let cA = this.cables[0], cB = this.cables[1];
       this.log("t " + fmt(this.time, 1) + " player v " + fmt(player.forwardSpeed, 2) + " lat " + fmt(player.lateralSpeed, 2) + " w " + fmt(player.body.w, 2) +
-        " slipR " + fmt(player.slipRear, 3) + " spin " + fmt(player.wheelspin, 2) + " | mate v " + fmt(mate.forwardSpeed, 2) + " slipR " + fmt(mate.slipRear, 3) +
-        " | vault v " + fmt(vault.sliding, 2) + " | cables " + fmt(cA.tension / 1000, 1) + "/" + fmt(cB.tension / 1000, 1) + " kN len " + fmt(cA.length, 1) + "/" + fmt(cB.length, 1) +
+        " slipR " + fmt(player.slipRear, 3) + " spin " + fmt(player.wheelspin, 2) + " | mate v " + fmt(mate.forwardSpeed, 2) + " slipR " + fmt(mate.slipRear, 3) + " @ " + fmt(mate.body.x, 1) + "," + fmt(mate.body.z, 1) +
+        " | vault v " + fmt(vault.sliding, 2) + " @ " + fmt(vault.body.x, 1) + "," + fmt(vault.body.z, 1) + " | cables " + fmt(cA.tension / 1000, 1) + "/" + fmt(cB.tension / 1000, 1) + " kN len " + fmt(cA.length, 1) + "/" + fmt(cB.length, 1) +
         " | fx " + this.fx.count.toString() + " | pos " + fmt(player.body.x, 1) + "," + fmt(player.body.z, 1));
     }
 
@@ -691,8 +703,9 @@ export class Game extends Layout {
 
   drawLoading(renderer: Renderer): void {
     let map = this.map;
-    // Building the city is most of the bar, putting it on the GPU the rest.
-    let p = map != null ? this.city!.progress(map) * 0.85 : 0;
+    let loader = this.loader;
+    // Reading the map, then building the city (most of the bar), then putting it on the GPU.
+    let p = map != null ? 0.1 + this.city!.progress(map) * 0.75 : loader != null ? loader.progress() * 0.1 : 0;
     if (this.ready) p = 0.85 + 0.15 * this.city!.uploadProgress();
     let w = this.width, h = this.height;
     let bw = Math.min(420, w * 0.5);
@@ -730,8 +743,7 @@ export class Game extends Layout {
       this.drawLoading(renderer);
       return;
     }
-    // GPU resources, a budgeted slice per frame (the city's buffers are big).
-    if (!this.uploadStep(context)) {
+    if (!this.uploaded) {
       this.drawLoading(renderer);
       return;
     }

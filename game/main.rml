@@ -8,6 +8,7 @@
         <ViewModelPropertyNumber name="speed" id="2:10"/>
         <ViewModelPropertyString name="speedText" id="2:11"/>
         <ViewModelPropertyNumber name="autopilot" id="2:20"/>
+        <ViewModelPropertyNumber name="headless" id="2:67"/>
         <ViewModelPropertyNumber name="nos" id="2:21"/>
         <ViewModelPropertyNumber name="vaultSpeed" id="2:22"/>
         <ViewModelPropertyNumber name="vaultGrind" id="2:23"/>
@@ -43,6 +44,7 @@
             <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:10"/>
             <ViewModelInstanceString propertyValue="0" viewModelPropertyId="2:11"/>
             <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:20"/>
+            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:67"/>
             <ViewModelInstanceNumber propertyValue="1" viewModelPropertyId="2:21"/>
             <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:22"/>
             <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="2:23"/>

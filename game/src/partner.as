@@ -1,7 +1,7 @@
 // The partner's driver: holds formation beside the player (the two cars side
 // by side, the vault trailing between them), matching speed, steering for a
-// point ahead of its slot, easing off when its own cable is about to go, and
-// steering away from walls it is about to hit.
+// point ahead of its slot, taking its share of the pull, easing off when its
+// own cable is about to go, and steering away from walls it is about to hit.
 import { Car } from "./car";
 import { Cable } from "./cable";
 import { StaticWorld } from "./world";
@@ -11,15 +11,24 @@ export class Partner {
   car: Car;
   leader: Car;
   cable: Cable;
+  /** The leader's cable, to match its pull. */
+  leaderCable: Cable;
   world: StaticWorld;
   /** +1 holds the leader's left, -1 its right. */
   side: f64;
   gap: f64 = 5.6;
+  /**
+   * How far ahead of its slot it drives to take its share of the pull (m).
+   * Beside the leader, the vault just turns until the cables' pulls balance
+   * however unequal they are, so the partner creeps ahead until they're equal.
+   */
+  lead: f64 = 0;
 
-  constructor(car: Car, leader: Car, cable: Cable, world: StaticWorld, side: f64) {
+  constructor(car: Car, leader: Car, cable: Cable, leaderCable: Cable, world: StaticWorld, side: f64) {
     this.car = car;
     this.leader = leader;
     this.cable = cable;
+    this.leaderCable = leaderCable;
     this.world = world;
     this.side = side;
   }
@@ -30,9 +39,13 @@ export class Partner {
     let lf = this.leader.forwardSpeed;
     let fx = lead.fwdX(), fz = lead.fwdZ();
     let lx = lead.leftX(), lz = lead.leftZ();
+    // Its share of the pull.
+    let towing = lf > 2 && !this.cable.broken && !this.leaderCable.broken;
+    if (towing) this.lead = clamp(this.lead + (this.leaderCable.tension - this.cable.tension) / 10000 * dt, -1, 4);
+    else this.lead = Math.max(0, this.lead - 2 * dt);
     // The slot beside the leader, and a point to aim for ahead of it.
-    let slotX = lead.x + lx * this.side * this.gap;
-    let slotZ = lead.z + lz * this.side * this.gap;
+    let slotX = lead.x + lx * this.side * this.gap + fx * this.lead;
+    let slotZ = lead.z + lz * this.side * this.gap + fz * this.lead;
     let ahead = Math.max(7, Math.abs(lf) * 0.7);
     let aimX = slotX + fx * ahead, aimZ = slotZ + fz * ahead;
     let want = Math.atan2(aimX - me.x, aimZ - me.z);

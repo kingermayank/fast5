@@ -2,7 +2,7 @@
 //
 // The load goes through an elastic tether between the two ends: it only pulls,
 // its stiffness is how much the cable stretches under load (elasticity), and
-// its damping takes the ring out of a yank. It's solved as an XPBD distance
+// its damping (on the spring-back) takes the ring out of a yank. It's solved as an XPBD distance
 // constraint inside the physics substeps, so the vault's weight reaches the
 // car as a real pull at the hitch: it slows the car, swings its tail toward
 // the vault and lightens the nose.
@@ -14,7 +14,7 @@
 //
 // The winch has a slip clutch: past `slipForce` it pays cable out (no faster
 // than it can spool), and reels it back to the tow length once the strain
-// eases. A cable snatched or held past its strength snaps: overloads build up
+// eases. It also winds in slack when the vault slides up on the car. A cable snatched or held past its strength snaps: overloads build up
 // damage, a hard yank breaks it outright, and the two halves whip back.
 import { Car } from "./car";
 import { Vault, ANCHOR_Y } from "./vault";
@@ -30,7 +30,7 @@ export class CableParams {
   /** Damping along the cable (N s/m). */
   damping: f64 = 9000;
   /** It snaps outright past this pull (N); well below it, hard pulls fray it. */
-  breakForce: f64 = 140000;
+  breakForce: f64 = 120000;
   /** The winch clutch slips (pays out) past this pull (N). */
   slipForce: f64 = 95000;
   /** 0 stiff steel rope ... 1 floppy string. */
@@ -38,8 +38,13 @@ export class CableParams {
 }
 
 const MAX_LENGTH: f64 = 40;
+/** The winch never winds the vault in closer than this (m). */
+const MIN_LENGTH: f64 = 5;
+/** Slack it leaves when winding in (m). */
+const SNUG: f64 = 0.3;
 const PAYOUT_SPEED: f64 = 7;
 const REEL_SPEED: f64 = 3.5;
+const LET_OUT_SPEED: f64 = 1.5;
 /**
  * The most the winch pulls while winding in (N): parked, only the slack (less
  * than the vault's grip on the pavement); on the move, it shortens the tow.
@@ -161,7 +166,10 @@ export class Cable extends Solver {
         // Separation speed of the ends (from this substep's predicted motion).
         let vsep = (vb.pointVX(bx, bz) - car.pointVX(ax, az)) * nx + (vb.pointVZ(bx, bz) - car.pointVZ(ax, az)) * nz;
         let at = 1 / (p.stiffness * h * h);
-        let gamma = (p.damping / p.stiffness) / h;
+        // The damping is the rope's hysteresis: it soaks up the spring-back, so
+        // a yank doesn't ring. Stretching, the rope is only its spring; a damper
+        // there would hit with damping x speed the instant slack snaps taut.
+        let gamma = vsep < 0 ? (p.damping / p.stiffness) / h : 0;
         let w = car.invMassAt(ax, az, nx, nz) + vb.invMassAt(bx, bz, nx, nz);
         let dl = (-c - gamma * vsep * h) / ((1 + gamma) * w + at);
         if (dl < 0) {
@@ -295,14 +303,22 @@ export class Cable extends Solver {
       if (over > 0) this.damage += over * over * dt * 6;
       else if (ratio < 0.2) this.damage = Math.max(0, this.damage - dt * 0.01);
       if (ratio > 1 || this.damage >= 1) this.snap();
-      // The winch winds back to the tow length once nothing is yanking on it,
-      // stalling against anything heavier than it can pull.
       this.reelDelay -= dt;
       let moving = this.car.forwardSpeed > 3;
-      if (this.reelDelay <= 0 && this.length > p.length && this.tension < (moving ? WINCH_PULL_MOVING : WINCH_PULL)) {
+      let span = this.span();
+      if (span + SNUG < this.length && this.length > MIN_LENGTH) {
+        // Slack: the vault has slid up on the car, as it does when the cars
+        // brake. The winch winds it in (no faster than it spools), so pulling
+        // away again doesn't take a run-up at the vault and snatch the cable.
+        this.length = Math.max(Math.max(MIN_LENGTH, span + SNUG), this.length - REEL_SPEED * dt);
+      } else if (this.reelDelay <= 0 && this.length > p.length && this.tension < (moving ? WINCH_PULL_MOVING : WINCH_PULL)) {
+        // Long, after the clutch paid out: back to the tow length once nothing
+        // is yanking on it, stalling against anything heavier than it can pull.
         this.length = Math.max(p.length, this.length - REEL_SPEED * dt);
+      } else if (this.length < p.length && moving && this.tension > 0) {
+        // Short, after taking up slack: let back out to the tow length under way.
+        this.length = Math.min(p.length, this.length + LET_OUT_SPEED * dt);
       }
-      if (this.reelDelay <= 0 && this.length < p.length) this.length = p.length;
     }
     this.paying *= 0.5;
     this.heat = Math.max(0, this.heat - dt * 0.6);

@@ -1,6 +1,7 @@
 // The street map, read from the map.bin blob that tools/rive/pack-map.mjs
 // writes from the OpenStreetMap data (© OpenStreetMap contributors, ODbL).
 // Coordinates are metres on the ground plane: x east-ish, z north-ish.
+import { clock } from "rive/os";
 
 class Reader {
   u: Uint32Array;
@@ -107,16 +108,76 @@ export class MapData {
   nodeZ(i: i32): f64 {
     return this.nodes[i * 2 + 1];
   }
+}
 
-  static parse(bytes: ArrayBuffer): MapData? {
-    let r = new Reader(bytes);
-    if (r.word() != 0x504d3546) return null;
-    if (r.word() != 2) return null;
-    let m = new MapData();
-    m.nodes = r.points();
+/**
+ * Reads the map a slice at a time: a native runtime stops any script call
+ * that runs past 200 ms, and reading it all at once comes close.
+ */
+export class MapLoader {
+  r: Reader;
+  map: MapData = new MapData();
+  /** 0 header, 1 edges, 2 buildings, 3 areas, 4 land, 5 walls. */
+  stage: i32 = 0;
+  /** Items left in this stage. */
+  left: i32 = 0;
+  done: bool = false;
+  failed: bool = false;
 
-    let edges = r.int();
-    for (let k = 0; k < edges; k++) {
+  constructor(bytes: ArrayBuffer) {
+    this.r = new Reader(bytes);
+  }
+
+  /** Reads for about `budget` seconds; true once the whole map is in (or it failed). */
+  step(budget: f64): bool {
+    let start = clock();
+    while (!this.done) {
+      if (this.left == 0) {
+        this.next();
+        continue;
+      }
+      this.item();
+      this.left--;
+      if ((this.left & 31) == 0 && clock() - start > budget) return false;
+    }
+    return true;
+  }
+
+  progress(): f64 {
+    return this.done ? 1 : <f64>this.r.i / <f64>this.r.u.length;
+  }
+
+  /** On to the next stage: its count, or the header before it, or the small tail after the last. */
+  private next(): void {
+    let r = this.r;
+    let m = this.map;
+    this.stage++;
+    if (this.stage == 1) {
+      if (r.word() != 0x504d3546 || r.word() != 2) {
+        this.failed = true;
+        this.done = true;
+        return;
+      }
+      m.nodes = r.points();
+      this.left = r.int();
+    } else if (this.stage <= 5) {
+      this.left = r.int();
+    } else {
+      let plan = r.int();
+      for (let k = 0; k < plan; k++) m.plan.push(r.int());
+      m.foot = r.int();
+      m.goal = r.int();
+      r.num(); r.num(); r.num(); r.num(); // spikes
+      m.bank = r.points();
+      m.bankHeading = r.num();
+      this.done = true;
+    }
+  }
+
+  private item(): void {
+    let r = this.r;
+    let m = this.map;
+    if (this.stage == 1) {
       let e = new Edge();
       e.a = r.int();
       e.b = r.int();
@@ -125,10 +186,7 @@ export class MapData {
       e.bridge = r.word() != 0;
       e.pts = r.points();
       m.edges.push(e);
-    }
-
-    let buildings = r.int();
-    for (let k = 0; k < buildings; k++) {
+    } else if (this.stage == 2) {
       let b = new Building();
       b.h = r.num();
       b.kind = r.int();
@@ -136,19 +194,14 @@ export class MapData {
       b.tris = r.tris();
       bounds(b);
       m.buildings.push(b);
-    }
-
-    let areas = r.int();
-    for (let k = 0; k < areas; k++) {
+    } else if (this.stage == 3) {
       let a = new Area();
       a.kind = r.int();
       a.pts = r.points();
       a.tris = r.tris();
       m.areas.push(a);
-    }
-
-    let land = r.int();
-    for (let k = 0; k < land; k++) {
+    } else if (this.stage == 4) {
+      // A land polygon: its outer ring, then any holes (not drawn).
       let rings = r.int();
       for (let j = 0; j < rings; j++) {
         let ring = new Area();
@@ -156,19 +209,9 @@ export class MapData {
         ring.tris = r.tris();
         if (j == 0) m.land.push(ring);
       }
+    } else {
+      m.walls.push(r.points());
     }
-
-    let walls = r.int();
-    for (let k = 0; k < walls; k++) m.walls.push(r.points());
-
-    let plan = r.int();
-    for (let k = 0; k < plan; k++) m.plan.push(r.int());
-    m.foot = r.int();
-    m.goal = r.int();
-    r.num(); r.num(); r.num(); r.num(); // spikes
-    m.bank = r.points();
-    m.bankHeading = r.num();
-    return m;
   }
 }
 
@@ -223,67 +266,4 @@ export function pointInPolygon(p: StaticArray<f64>, x: f64, z: f64): bool {
     j = i;
   }
   return inside;
-}
-
-/** Ear clipping: triangle indices (into the polygon's points) for a simple polygon of positive winding. */
-export function triangulate(p: StaticArray<f64>): Array<i32> {
-  let n = p.length / 2;
-  let out: Array<i32> = [];
-  if (n < 3) return out;
-  let idx: Array<i32> = [];
-  for (let i = 0; i < n; i++) idx.push(i);
-  let guard = 0;
-  while (idx.length > 3 && guard < n * n) {
-    guard++;
-    let found = false;
-    let m = idx.length;
-    for (let k = 0; k < m; k++) {
-      let ia = idx[(k + m - 1) % m], ib = idx[k], ic = idx[(k + 1) % m];
-      let ax = p[ia * 2], az = p[ia * 2 + 1];
-      let bx = p[ib * 2], bz = p[ib * 2 + 1];
-      let cx = p[ic * 2], cz = p[ic * 2 + 1];
-      // Convex corner (same orientation as the polygon: this is minus its signed area)?
-      let cross = (cx - bx) * (az - bz) - (ax - bx) * (cz - bz);
-      if (cross >= -1e-9) continue;
-      let ear = true;
-      for (let q = 0; q < m; q++) {
-        let iq = idx[q];
-        if (iq == ia || iq == ib || iq == ic) continue;
-        if (inTriangle(p[iq * 2], p[iq * 2 + 1], ax, az, bx, bz, cx, cz)) {
-          ear = false;
-          break;
-        }
-      }
-      if (!ear) continue;
-      out.push(ia);
-      out.push(ib);
-      out.push(ic);
-      idx.splice(k, 1);
-      found = true;
-      break;
-    }
-    if (!found) break;
-  }
-  if (idx.length == 3) {
-    out.push(idx[0]);
-    out.push(idx[1]);
-    out.push(idx[2]);
-  } else if (idx.length > 3) {
-    // Self-touching outline: fan the rest rather than leave a hole.
-    for (let k = 1; k + 1 < idx.length; k++) {
-      out.push(idx[0]);
-      out.push(idx[k]);
-      out.push(idx[k + 1]);
-    }
-  }
-  return out;
-}
-
-function inTriangle(px: f64, pz: f64, ax: f64, az: f64, bx: f64, bz: f64, cx: f64, cz: f64): bool {
-  let d1 = (px - bx) * (az - bz) - (ax - bx) * (pz - bz);
-  let d2 = (px - cx) * (bz - cz) - (bx - cx) * (pz - cz);
-  let d3 = (px - ax) * (cz - az) - (cx - ax) * (pz - az);
-  let neg = d1 < 0 || d2 < 0 || d3 < 0;
-  let pos = d1 > 0 || d2 > 0 || d3 > 0;
-  return !(neg && pos);
 }

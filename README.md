@@ -46,6 +46,14 @@ banners, radio calls, end screens) are drawn by [Rive](https://rive.app), from t
 is in the repo. `rive ui` opens a live preview that rebuilds as you edit. `ui/CONTRACT.md` lists the
 values the game sends it. Without the file (or with `?htmlhud`) the game falls back to its HTML HUD.
 
+### The Rive build (in progress)
+
+`game/` is the game being rebuilt entirely in Rive: the city, the Chargers, the vault and its cables
+(elastic, fraying, snapping) run as AnimaScript inside one Rive file, drawn through Rive's GPU API.
+So far it's the tow: drag the vault up Avenida Ponce de León without snapping the cables. With the
+[Rive CLI](https://rive.app/docs/cli/overview) installed, `rive game` from the repo root opens it in
+a window. See [`game/README.md`](game/README.md) for the keys and the test runs.
+
 ### The map
 
 `src/map/sanjuan.json` is built from OpenStreetMap by `tools/map/`:

@@ -6,23 +6,49 @@ import { clock } from "rive/os";
 import { GpuMesh } from "./render";
 import { MapData, Building, KIND_COMMERCIAL, KIND_RETAIL, KIND_HOUSE } from "./map";
 import {
-  MeshBuilder, packNormal, packColor, shade, hash, clamp, Rng, VERTEX_BYTES,
+  packNormal, packColor, shade, hash, clamp, Rng, VERTEX_BYTES, VERTEX_WORDS,
   ROLE_WALL, ROLE_SHOP, ROLE_ROOF, ROLE_ASPHALT, ROLE_CONCRETE, ROLE_GRASS, ROLE_WATER, ROLE_GROUND, ROLE_LINE, ROLE_MATTE,
 } from "./util";
 
 export const CHUNK: f64 = 256;
 
-/** Growable list of u32. */
+/** Growable list of u32 (empty until used: most chunks hold nothing). */
 class U32List {
-  data: Uint32Array = new Uint32Array(1024);
+  data: Uint32Array = new Uint32Array(0);
   length: i32 = 0;
   push(v: u32): void {
     if (this.length == this.data.length) {
-      let next = new Uint32Array(this.data.length * 2);
+      let next = new Uint32Array(this.data.length < 256 ? 256 : this.data.length * 2);
       next.set(this.data);
       this.data = next;
     }
     this.data[this.length++] = v;
+  }
+}
+
+/** Vertex storage in fixed blocks: no big allocation up front, no copying as it grows. */
+export class VertexBlocks {
+  static readonly SIZE: i32 = 65536;
+  words: Array<Uint32Array> = [];
+  floats: Array<Float32Array> = [];
+  vertexCount: i32 = 0;
+
+  vertex(x: f64, y: f64, z: f64, normal: u32, color: u32): u32 {
+    let block = this.vertexCount / VertexBlocks.SIZE;
+    if (block == this.words.length) {
+      let w = new Uint32Array(VertexBlocks.SIZE * VERTEX_WORDS);
+      this.words.push(w);
+      this.floats.push(Float32Array.wrap(w.buffer));
+    }
+    let o = (this.vertexCount % VertexBlocks.SIZE) * VERTEX_WORDS;
+    let f = this.floats[block];
+    f[o] = <f32>x;
+    f[o + 1] = <f32>y;
+    f[o + 2] = <f32>z;
+    let w = this.words[block];
+    w[o + 3] = normal;
+    w[o + 4] = color;
+    return <u32>this.vertexCount++;
   }
 }
 
@@ -53,8 +79,7 @@ const ROOFS: StaticArray<u32> = [0x9a948c, 0x8b857c, 0xa79f93, 0x6d6862, 0xb8b0a
 const CLAY: StaticArray<u32> = [0xb5653f, 0xa45a3a, 0xc07a4e];
 
 export class CityMesh {
-  /** The whole city is about 660k vertices: reserve them once rather than doubling as it grows. */
-  mesh: MeshBuilder = new MeshBuilder(700000, 4);
+  mesh: VertexBlocks = new VertexBlocks();
   lists: Array<U32List> = [];
   chunks: Array<Chunk> = [];
   indexCount: i32 = 0;
@@ -379,12 +404,16 @@ export class CityMesh {
       return false;
     }
     let gpu = this.gpu!;
-    let slice: u32 = 2 * 1024 * 1024;
+    let blockBytes = <u32>VertexBlocks.SIZE * VERTEX_BYTES;
+    // A quarter of a block per write: big writes are slow on some drivers.
+    let piece = blockBytes / 4;
     while (clock() - start < budget) {
       if (this.uploadedBytes < vertexBytes) {
-        let rest = vertexBytes - this.uploadedBytes;
-        let n = rest < slice ? rest : slice;
-        gpu.vbo.update(this.uploadedBytes, this.mesh.words.buffer, n, this.uploadedBytes);
+        let b = this.uploadedBytes / blockBytes;
+        let offset = this.uploadedBytes - b * blockBytes;
+        let n = vertexBytes - this.uploadedBytes;
+        if (n > piece) n = piece;
+        gpu.vbo.update(this.uploadedBytes, this.mesh.words[<i32>b].buffer, n, offset);
         this.uploadedBytes += n;
       } else if (this.uploadedLists < this.lists.length) {
         let i = this.uploadedLists++;
@@ -392,7 +421,7 @@ export class CityMesh {
         if (l.length > 0) gpu.ibo.update(<u32>this.chunks[i].first * 4, l.data.buffer, <u32>l.length * 4, 0);
       } else {
         // The GPU has it now: let the script's copy go.
-        this.mesh = new MeshBuilder(4, 4);
+        this.mesh = new VertexBlocks();
         this.lists = [];
         this.uploaded = true;
         return true;

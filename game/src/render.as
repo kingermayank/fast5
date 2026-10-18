@@ -431,23 +431,23 @@ export class GameRenderer {
     this.targetH = t.height;
   }
 
-  /** Runs the passes and puts the image on screen. */
+  /**
+   * Runs the passes and puts the image on screen. The scene always renders into
+   * a canvas of its own, composited where the layout draws, so the HUD stays on
+   * top on every host: Rive's own target can be multisampled, and when passes
+   * into it run against the vector drawing differs between hosts.
+   */
   finish(renderer: Renderer, width: f64, height: f64, scale: f64): void {
     let context = this.context;
-    let target: GPUTarget? = context.gpuTarget();
-    let direct = target != null && target.view != null;
-    if (!direct) {
-      let w = <u32>Math.max(1, Math.round(width * scale));
-      let h = <u32>Math.max(1, Math.round(height * scale));
-      let canvas = this.canvas;
-      if (canvas == null || canvas.width != w || canvas.height != h) {
-        canvas = context.gpuCanvas(w, h);
-        this.canvas = canvas;
-      }
-      target = canvas;
+    let w = <u32>Math.max(1, Math.round(width * scale));
+    let h = <u32>Math.max(1, Math.round(height * scale));
+    let canvas = this.canvas;
+    if (canvas == null || canvas.width != w || canvas.height != h) {
+      canvas = context.gpuCanvas(w, h);
+      this.canvas = canvas;
     }
-    if (target == null) return;
-    let t = target!;
+    if (canvas == null) return;
+    let t: GPUTarget = canvas;
     if (!this.ready && !this.failed && !this.setup(t)) return;
     if (!this.ready) return;
     this.ensureTargets(t);
@@ -531,13 +531,10 @@ export class GameRenderer {
     }
     pass.finish();
 
-    let canvas = this.canvas;
-    if (!direct && canvas != null) {
-      renderer.save();
-      let k = <f32>(1 / scale);
-      renderer.transform(Mat2D.withScale(k, k));
-      renderer.drawImage(canvas.image, ImageSampler(), BlendMode.srcOver, 1);
-      renderer.restore();
-    }
+    renderer.save();
+    let k = <f32>(1 / scale);
+    renderer.transform(Mat2D.withScale(k, k));
+    renderer.drawImage(canvas.image, ImageSampler(), BlendMode.srcOver, 1);
+    renderer.restore();
   }
 }
