@@ -4,6 +4,7 @@ import { buildCarModel } from './carModel';
 import { type City, VAULT_START } from './city';
 import type { Director } from './director';
 import type { Effects } from './fx';
+import { NEWS } from './broadcast';
 import { BEACONS } from './groundfx';
 import type { Hud } from './hud';
 import type { Obstacle } from './partner';
@@ -123,6 +124,10 @@ export class ThePull {
  */
 export class SpikeStrip {
   private state: 'idle' | 'armed' | 'done' = 'idle';
+  /** Both cars went through the gap. */
+  clean = false;
+  /** The player's car ran over the spikes. */
+  playerBlown = false;
   /** +1: the gap is on the left. */
   private gapSide = Math.random() < 0.5 ? 1 : -1;
   private group = new THREE.Group();
@@ -255,8 +260,10 @@ export class SpikeStrip {
     sound.bang();
     for (const w of car.wheels()) if (Math.abs(SPIKES.toLocal(w).z) < 1.2) fx.burst(w.setY(0.3), 0.4);
     if (car === player) {
+      this.playerBlown = true;
       hud.banner('TIRE BLOWN', 'SPEED AND GRIP DOWN', 1.6);
       say(this.ctx, 'MIA', 'You lost a tire! Hold it together!');
+      setTimeout(() => hud.news(NEWS.tireBlown), 1800);
     }
   }
 
@@ -265,7 +272,9 @@ export class SpikeStrip {
     this.state = 'done';
     hud.hint('');
     if (this.hit.size === 0) {
+      this.clean = true;
       hud.banner('SPIKES DODGED', 'CLEAN THROUGH THE GAP  +400');
+      setTimeout(() => hud.news(NEWS.spikesDodged), 1500);
       this.ctx.reward(400, 0.35);
       this.ctx.sound.ping(1800, 0.15, 0.4);
     } else if (!this.hit.has(this.ctx.player)) {
@@ -287,6 +296,8 @@ export class SpikeStrip {
  */
 export class BankJob {
   private state: 'idle' | 'hinted' | 'done' = 'idle';
+  /** The vault went through the lobby. */
+  smashed = false;
   private swungAt = -10;
   private time = 0;
   private shatterCooldown = 0;
@@ -405,6 +416,7 @@ export class BankJob {
   private smash(): void {
     const { vault, director, fx, sound, hud } = this.ctx;
     this.state = 'done';
+    this.smashed = true;
     vault.ghostHeroes(false);
     hud.hint('');
     const vp = vault.position;
@@ -430,6 +442,7 @@ export class BankJob {
     this.ctx.reward(1000, 0.4);
     hud.banner('BANK JOB', '+$2,500,000 DAMAGE  +1,000');
     setTimeout(() => say(this.ctx, 'BRIAN', 'Did we just drive a vault through a bank?'), 1600);
+    setTimeout(() => hud.news(NEWS.bank), 2600);
   }
 }
 

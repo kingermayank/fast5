@@ -73,8 +73,10 @@ export class Vehicle {
     readonly spec: VehicleSpec,
     position: THREE.Vector3,
     heading: number,
+    /** A ready-made model (traffic); otherwise one is built from `spec.model`. */
+    model?: CarModel,
   ) {
-    this.model = buildCarModel(spec.model);
+    this.model = model ?? buildCarModel(spec.model);
     this.body = world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(position.x, RIDE_HEIGHT, position.z)

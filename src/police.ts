@@ -33,8 +33,8 @@ const BRIDGE_PATH = new Path(BRIDGE.pts);
 export class Police {
   readonly cops: Cop[] = [];
   wreckedCount = 0;
-  /** Called when a cruiser is wrecked, with where it happened. */
-  onWreck?: (at: THREE.Vector3) => void;
+  /** Called when a cruiser is wrecked, with where it happened and the wreck. */
+  onWreck?: (at: THREE.Vector3, car: Vehicle) => void;
   /** Called when a cruiser rams the player, with where and how hard (0..1). */
   onBump?: (at: THREE.Vector3, strength: number) => void;
   /** Set by the game: true if a point is on screen. Cops never appear where you can see them. */
@@ -153,7 +153,7 @@ export class Police {
     c.wrecked = true;
     c.v.enabled = false;
     this.wreckedCount++;
-    this.onWreck?.(c.v.position);
+    this.onWreck?.(c.v.position, c.v);
     const b = c.v.body;
     b.setEnabledRotations(true, true, true, true);
     if (from) {

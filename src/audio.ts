@@ -124,6 +124,37 @@ export class Sound {
     nsrc.connect(nf).connect(ng).connect(this.master);
     nsrc.start();
     this.nosHiss = ng;
+
+    // Helicopter: low rumble chopped at the blade rate.
+    const rsrc = ctx.createBufferSource();
+    rsrc.buffer = this.noise;
+    rsrc.loop = true;
+    const rf = ctx.createBiquadFilter();
+    rf.type = 'lowpass';
+    rf.frequency.value = 240;
+    const chop = ctx.createGain();
+    chop.gain.value = 0.55;
+    const blade = ctx.createOscillator();
+    blade.type = 'square';
+    blade.frequency.value = 12.5;
+    const bladeAmp = ctx.createGain();
+    bladeAmp.gain.value = 0.45;
+    blade.connect(bladeAmp).connect(chop.gain);
+    const rg = ctx.createGain();
+    rg.gain.value = 0;
+    rsrc.connect(rf).connect(chop).connect(rg).connect(this.master);
+    rsrc.start();
+    blade.start();
+    this.rotorGain = rg;
+  }
+
+  private rotorGain?: GainNode;
+
+  /** The news helicopter's rotor, by its distance from the player (Infinity: silent). */
+  rotor(distance: number): void {
+    if (!this.ready || !this.rotorGain) return;
+    const v = distance < 220 ? Math.pow(1 - distance / 220, 1.5) * 0.55 : 0;
+    this.rotorGain.gain.setTargetAtTime(v, this.ctx!.currentTime, 0.3);
   }
 
   /** Per-frame: engine pitch from speed and throttle, siren from nearest cop, scrape from vault drag. */
@@ -218,6 +249,7 @@ export class Sound {
   quiet(): void {
     this.update(0, 0, 1e9, 0);
     this.tires(0, false);
+    this.rotor(Infinity);
     if (this.engine && this.ready) this.engine.gain.gain.setTargetAtTime(0.03, this.ctx!.currentTime, 0.2);
   }
 

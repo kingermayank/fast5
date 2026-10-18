@@ -97,3 +97,20 @@ corner; leave that space clear (a bezel around it is fine).
 | `resultTitle` | string | `THE SWAP`, `BUSTED` |
 | `resultBody` | string | Stats, may contain line breaks |
 | `resultPrompt` | string | `Press Enter to try again` |
+| `resultRanked` | boolean | A finished run: show the rank, score and challenges (false on busted / vault lost) |
+| `resultGrade` | string | Rank letter: `S`, `A`, `B`, `C` |
+| `resultScore` | string | Score, formatted (`31,450`) |
+| `resultBest` | string | `NEW BEST  (WAS 27,900)` or `BEST 31,450  ·  RANK A` |
+| `ch1Done` … `ch3Done` | string | `DONE   ` for a challenge met, else empty |
+| `ch1Miss` … `ch3Miss` | string | `MISSED   ` for a challenge missed, else empty |
+| `ch1Text` … `ch3Text` | string | The challenge, with progress if missed; each but the last ends in a line break |
+
+## TV news [`newsHeadline`]
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `newsOn` | boolean | True while a news break should show (the game times it) |
+| `newsTag` | string | `BREAKING`, `LIVE`, `EXCLUSIVE` |
+| `newsHeadline` | string | `VAULT TORN OUT OF POLICE HQ` |
+| `newsTicker` | string | The crawl along the bottom of the plate |
+| `news` | trigger | Fired for each new break (replays the entrance and restarts the crawl) |

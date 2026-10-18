@@ -52,8 +52,13 @@ export function seeThrough<T extends THREE.Material>(mat: T): T {
         'void main() {',
         `void main() {
         // Only what's above head height and in front of the player can hide it.
+        // From the oblique camera, buildings between it and the player land below the
+        // player on screen, so the cut reaches further down than up, and wider.
         if (cutRadius > 0.0 && vCutHeight > 2.5 && vViewPosition.z < cutDepth - 3.0) {
-          float k = length(gl_FragCoord.xy - cutScreen) / cutRadius;
+          vec2 d = gl_FragCoord.xy - cutScreen;
+          d.x /= 1.25;
+          d.y /= d.y < 0.0 ? 2.1 : 0.9;
+          float k = length(d) / cutRadius;
           ivec2 b = ivec2(mod(gl_FragCoord.xy, 4.0));
           if (k < 1.0 && (CUT_BAYER[b.x + b.y * 4] + 0.5) / 16.0 > smoothstep(0.65, 1.0, k)) discard;
         }`,

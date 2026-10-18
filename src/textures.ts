@@ -68,6 +68,59 @@ export function asphaltTexture(): THREE.CanvasTexture {
   });
 }
 
+/**
+ * Where the asphalt is wet, as a roughness map (green channel): standing water
+ * in the dips and along the gutters is close to a mirror (dark), the rest damp
+ * and rough. Wet streets catch the evening sky and every lamp and headlight,
+ * which is most of the dusk look. Tile it about 32 m (repeat 0.25 on 8 m UVs).
+ */
+export function asphaltWetTexture(): THREE.CanvasTexture {
+  const tex = canvasTexture(512, 512, (ctx) => {
+    ctx.fillStyle = 'rgb(200,200,200)';
+    ctx.fillRect(0, 0, 512, 512);
+    noise(ctx, 512, 512, 24000, 0.07);
+    // Damp sheen: broad, faint glossier bands.
+    for (let i = 0; i < 6; i++) {
+      const y = Math.random() * 512;
+      const g = ctx.createLinearGradient(0, y - 40, 0, y + 40);
+      g.addColorStop(0, 'rgba(120,120,120,0)');
+      g.addColorStop(0.5, 'rgba(120,120,120,0.35)');
+      g.addColorStop(1, 'rgba(120,120,120,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, y - 40, 512, 80);
+    }
+    // Puddles: soft-edged, a little stretched, wrapped so the tile repeats seamlessly.
+    for (let i = 0; i < 11; i++) {
+      const x = Math.random() * 512;
+      const y = Math.random() * 512;
+      const r = 18 + Math.random() * 46;
+      const stretch = 0.6 + Math.random() * 1.1;
+      const turn = Math.random() * Math.PI;
+      for (const dx of [-512, 0, 512]) {
+        for (const dy of [-512, 0, 512]) {
+          ctx.save();
+          ctx.translate(x + dx, y + dy);
+          ctx.rotate(turn);
+          ctx.scale(stretch, 1);
+          const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+          g.addColorStop(0, 'rgba(14,14,14,0.96)');
+          g.addColorStop(0.55, 'rgba(26,26,26,0.85)');
+          g.addColorStop(0.8, 'rgba(90,90,90,0.4)');
+          g.addColorStop(1, 'rgba(200,200,200,0)');
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    }
+  });
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.repeat.set(0.25, 0.25);
+  return tex;
+}
+
 export function sidewalkTexture(): THREE.CanvasTexture {
   return canvasTexture(128, 128, (ctx) => {
     ctx.fillStyle = '#b9b2a6';

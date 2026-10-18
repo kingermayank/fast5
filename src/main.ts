@@ -3,8 +3,11 @@ import { angleTo, seek } from './ai';
 import { loadModels, model } from './assets';
 import { Sound } from './audio';
 import { BreachScene } from './breach';
+import { NEWS, wreckNews } from './broadcast';
+import { Chopper, SPOT_RADIUS } from './chopper';
 import { CAR_STARTS, City, LAMP_HEAD, STATION_FACADE_X, VAULT_START, VAULT_START_HEADING } from './city';
 import { Cutscene } from './cutscene';
+import { Coach } from './coach';
 import { CUTAWAY } from './cutaway';
 import { Director } from './director';
 import { Effects } from './fx';
@@ -17,10 +20,12 @@ import { BankJob, type MomentContext, SpikeStrip, ThePull } from './moments';
 import { OverheadCamera, OVERHEAD_YAW } from './overhead';
 import { type Obstacle, PartnerDriver } from './partner';
 import { curveSpeed, exits, lanePath, leftOf, nextIntersection, Path, roadDir, roadHalfWidth, routeExit, streetCenter } from './roads';
-import { BANK, BRIDGE, MAP, onBridge, SPIKES } from './roadmap';
+import { BANK, BRIDGE, GOAL, MAP, onBridge, SPIKES } from './roadmap';
 import { FIXED_DT, initPhysics, RAPIER } from './physics';
 import { Police } from './police';
 import { RiveUi } from './riveui';
+import { Run } from './run';
+import { Traffic } from './traffic';
 import { Cable, Vault } from './vault';
 import { Vehicle, type VehicleSpec } from './vehicle';
 import { CUTSCENE_VIDEOS } from './videos';
@@ -96,6 +101,16 @@ async function start(): Promise<void> {
   const gps = new Gps();
   const police = new Police(world, scene, city);
   const director = new Director();
+  const chopper = new Chopper();
+  scene.add(chopper.group, chopper.light, chopper.light.target);
+  const run = new Run();
+  const coach = new Coach(hud);
+  const traffic = new Traffic(world, scene);
+  traffic.visible = (p) => isVisible(p);
+  traffic.onWreck = (at) => {
+    fx.burst(at.setY(0.8), 0.6);
+    sound.crash(0.6);
+  };
   police.visible = (p) => isVisible(p);
   police.onBump = (at, k) => {
     sound.crash(0.25 + k * 0.5);
@@ -103,12 +118,13 @@ async function start(): Promise<void> {
     fx.burst(at.setY(0.9), 0.25 + k * 0.4);
     director.shake = Math.max(director.shake, 0.25 + k * 0.6);
   };
-  police.onWreck = (at) => {
+  police.onWreck = (at, car) => {
     fx.burst(at.clone().setY(1), 1);
     sound.crash(1);
     nos = Math.min(1, nos + 0.15);
     style += 100;
     input.rumble(0.25, 120);
+    takedown(at, car);
   };
 
   let state: State = 'select';
@@ -361,6 +377,7 @@ async function start(): Promise<void> {
     // Everything is "soft": the partner steers around it when there's a free lane but never
     // brakes for it. It's chained to the vault, and the Chargers plow through in the film.
     for (const c of police.cops) list.push({ pos: c.v.position, radius: 2.6, soft: true });
+    for (const t of traffic.cars) list.push({ pos: t.v.position, radius: 2.4, soft: true });
     if (spikes) list.push(...spikes.obstacles());
     const near = partner.position;
     for (const prop of city.props) {
@@ -409,6 +426,12 @@ async function start(): Promise<void> {
       police.step(dt, player, vault, heat, onBridge(player.position));
     }
 
+    if (state === 'chase' || state === 'outro' || state === 'busted' || state === 'lost') {
+      const vv = vault.body.linvel();
+      const blockers = [player.position, partner.position, ...police.cops.map((c) => c.v.position)];
+      traffic.step(dt, player.position, player.forward, blockers, { pos: vault.position.setY(0), vel: new THREE.Vector3(vv.x, 0, vv.z) }, state === 'chase');
+    }
+
     if (state === 'chase' || state === 'outro') for (const c of cables) c.reel(CABLE_TOW_LENGTH, dt);
     for (const c of cables) c.step(dt);
     if (state === 'chase') bankJob?.step(dt);
@@ -449,20 +472,25 @@ async function start(): Promise<void> {
       breach.shooting = false;
       heat = 1;
       say('MIA', 'It’s out! Every cop in Rio is coming. Follow my route, or find your own. I’ll guide you.');
+      startChase();
     }
 
     if ((state === 'breach' || state === 'chase') && inWater()) {
       enter('lost');
+      coach.stop();
+      run.fail();
       hud.showOverlay(
         'VAULT LOST',
         `The vault went over the side and into the bay.\nReyes’s money is at the bottom of Guanabara Bay.\n\nCops wrecked: ${police.wreckedCount}   Damage: ${Hud.money(damage)}`,
         'Press Enter to try again',
       );
+      hud.result(null);
     }
 
     if (input.wasPressed('KeyC')) view = VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length];
     if (state === 'chase') {
       chaseTime += dt;
+      trackRun(dt);
       if (input.wasPressed('KeyR')) resetConvoy();
       if (autopilot) {
         playerStuck = Math.abs(player.forwardSpeed) < 2 ? playerStuck + dt : 0;
@@ -471,7 +499,7 @@ async function start(): Promise<void> {
           resetConvoy();
         }
       }
-      const newDamage = city.collectDamage();
+      const newDamage = city.collectDamage() + traffic.collectDamage();
       if (newDamage > 0) sound.crash(Math.min(1, newDamage / 15000) * 0.6);
       damage += newDamage;
       streetDamage += newDamage;
@@ -484,12 +512,19 @@ async function start(): Promise<void> {
       busted = THREE.MathUtils.clamp(busted + (pinned ? dt / 3.5 : -dt / 2), 0, 1);
       if (busted >= 1) {
         enter('busted');
+        coach.stop();
+        run.fail();
         hud.showOverlay('BUSTED', `They boxed you in.\nCops wrecked: ${police.wreckedCount}   Damage: ${Hud.money(damage)}   Style: ${style.toLocaleString('en-US')}`, 'Press Enter to try again');
+        hud.result(null);
       }
 
       if (atSwapPoint(player.position)) {
         enter('outro');
+        run.stats.finished = true;
+        coach.stop();
+        director.slowmo(0.35, 1.6);
         hud.radio('MIA', 'You made it. Kill the engines.');
+        setTimeout(() => hud.news(NEWS.finish), 1400);
       }
     }
 
@@ -501,12 +536,67 @@ async function start(): Promise<void> {
           `Time ${Hud.time(chaseTime)}   Cops wrecked ${police.wreckedCount}   Property damage ${Hud.money(damage)}   Style ${style.toLocaleString('en-US')}`,
         'Press Enter to play again',
       );
+      hud.result(run.finish());
     }
     if ((state === 'busted' || state === 'lost' || (state === 'outro' && stateTime > 4)) && input.wasPressed('Enter')) {
       const url = new URL(location.href);
       url.searchParams.set('crew', character);
       location.href = url.toString();
     }
+  }
+
+  /** The vault is out of the station: the news picks it up and its helicopter comes. */
+  function startChase(): void {
+    hud.news(NEWS.breakout);
+    // In from the top of the screen, high up, so it arrives during the pull-out.
+    const up = camLook.clone().sub(camPos).setY(0).normalize();
+    chopper.launch(player.position.addScaledVector(up, 240).setY(75), vault.position);
+    establishPending = true;
+    coach.start(run.previousRuns < 2, run.challenges.map((c) => c.text));
+  }
+
+  let lastHeat = 1;
+  let reachedBridge = false;
+  let establishPending = false;
+  let stuckFor = 0;
+  const challengeCallouts: string[] = [];
+
+  /** Per frame of the chase: the run's stats, challenge callouts, news, the bridge shot and coaching. */
+  function trackRun(dt: number): void {
+    const s = run.stats;
+    s.time = chaseTime;
+    s.wrecked = police.wreckedCount;
+    s.damage = damage;
+    s.style = style;
+    if (player.nosActive) s.nosSeconds += dt;
+    s.topSpeedKmh = Math.max(s.topSpeedKmh, Math.abs(player.forwardSpeed) * 3.6);
+    s.maxHeat = Math.max(s.maxHeat, heat);
+    s.bank = !!bankJob?.smashed;
+    s.spikesClean = !!spikes?.clean;
+    s.tireLost ||= !!spikes?.playerBlown;
+    for (const c of run.newlyDone()) challengeCallouts.push(c.text);
+    if (challengeCallouts.length && !hud.bannerBusy) {
+      hud.banner('CHALLENGE COMPLETE', challengeCallouts.shift()!.toUpperCase(), 2);
+      sound.ping(1568, 0.14, 0.5);
+    }
+    if (heat > lastHeat) {
+      lastHeat = heat;
+      const item = NEWS.heat[heat];
+      if (item) hud.news(item);
+    }
+    // The pull-out once the breakout's own slow-motion shot is over.
+    if (establishPending && !director.busy && chaseTime > 0.6) {
+      establishPending = false;
+      establishingShot(3.4, 2.4, camera.fov + 4);
+    }
+    if (!reachedBridge && onBridge(player.position)) {
+      reachedBridge = true;
+      if (!director.busy) bridgeShot();
+      hud.news(NEWS.bridge);
+    }
+    stuckFor = Math.abs(player.forwardSpeed) < 1.5 ? stuckFor + dt : 0;
+    const boxedIn = busted > 0.2;
+    coach.update(dt, { boxedIn, stuck: !boxedIn && stuckFor > 3 });
   }
 
   /** The vault or either car has fallen off the bridge or the seawall. */
@@ -555,6 +645,98 @@ async function start(): Promise<void> {
     if (turnKey(turn) === calledTurn) return;
     calledTurn = turnKey(turn);
     say('MIA', turn.side === 'left' ? 'Next intersection, hang a left!' : 'Next intersection, go right!');
+  }
+
+  // ----------------------------------------------------------- big moments
+
+  /**
+   * The camera pulls up and out from the overhead view and back down again over
+   * `seconds`, still following the player: the whole street, the cops closing in
+   * and the helicopter arriving, without taking the wheel away.
+   */
+  function establishingShot(seconds: number, scale: number, fovTo: number): void {
+    const offset = camPos.clone().sub(camLook);
+    const lead = camLook.clone().sub(player.position).setY(0);
+    const fov0 = camera.fov;
+    director.play({
+      duration: seconds,
+      frame: (k) => {
+        // Out, hold, then back in: 0 -> 1 -> 0, eased at both ends.
+        const out = k < 0.4 ? Math.sin((k / 0.4) * Math.PI * 0.5) : k < 0.65 ? 1 : Math.cos(((k - 0.65) / 0.35) * Math.PI * 0.5);
+        const look = player.position.setY(0).add(lead);
+        const pos = look.clone().addScaledVector(offset, 1 + (scale - 1) * out * out);
+        return { pos, look, fov: fov0 + (fovTo - fov0) * out };
+      },
+    });
+  }
+
+  /** A slow-motion look at a cruiser as it's wrecked, from the street beside it. */
+  function wreckShot(car: Vehicle): void {
+    const at = car.position.setY(1);
+    // From the side the overhead camera is on (so the shot reads), wherever the street is clear.
+    const toCam = camPos.clone().sub(at).setY(0).normalize();
+    let best = toCam;
+    let bestClear = -1;
+    for (const a of [0, 0.7, -0.7, 1.4, -1.4]) {
+      const d = toCam.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), a);
+      const c = clearance(at, at.clone().addScaledVector(d, 11).setY(2));
+      if (c > bestClear + 0.05) {
+        best = d;
+        bestClear = c;
+      }
+    }
+    const dist = Math.max(5, 11 * bestClear);
+    const from = at.clone().addScaledVector(best, dist).setY(2.6);
+    const to = at.clone().addScaledVector(best, dist * 0.75).setY(3.6);
+    director.slowmo(0.28, 1.25);
+    director.play({ duration: 1.25, frame: (k) => ({ pos: from.clone().lerp(to, k), look: car.position.setY(0.9), fov: 50 }) });
+  }
+
+  /** Side-on from over the water as the convoy hits the bridge, in slow motion. */
+  function bridgeShot(): void {
+    const p = player.position;
+    const s = BRIDGE_PATH.project(p);
+    const t = BRIDGE_PATH.tangent(s);
+    const side = new THREE.Vector3(t.z, 0, -t.x);
+    // Whichever side the overhead camera is already on.
+    if (side.dot(camPos.clone().sub(p)) < 0) side.negate();
+    const from = p.clone().addScaledVector(side, 34).addScaledVector(t, 30).setY(5);
+    const to = p.clone().addScaledVector(side, 30).addScaledVector(t, 48).setY(7);
+    director.slowmo(0.45, 2.4);
+    director.play({ duration: 2.6, frame: (k) => ({ pos: from.clone().lerp(to, k), look: player.position.add(vault.position).multiplyScalar(0.5).setY(1.5), fov: 42 }) });
+  }
+
+  /**
+   * Takedowns: a banner for the first and for streaks (wrecks within a few seconds of
+   * each other), slow motion for the big ones, the news at milestones.
+   */
+  const WRECK_MILESTONES = [10, 25, 50, 75, 100];
+  const STREAK_WINDOW = 3;
+  const STREAK_CALLOUTS: Record<number, string> = { 2: 'DOUBLE TAKEDOWN', 3: 'TRIPLE TAKEDOWN', 5: 'RAMPAGE' };
+  let lastWreckAt = -10;
+  let streak = 0;
+  let lastWreckShot = -100;
+  function takedown(at: THREE.Vector3, car: Vehicle): void {
+    if (state !== 'chase') return;
+    streak = chaseTime - lastWreckAt < STREAK_WINDOW ? streak + 1 : 1;
+    lastWreckAt = chaseTime;
+    run.stats.bestStreak = Math.max(run.stats.bestStreak, streak);
+    const n = police.wreckedCount;
+    // Each wreck in a streak is worth a little more, up to a cap.
+    const bonus = Math.min(4, streak - 1) * 75;
+    style += bonus;
+    if (STREAK_CALLOUTS[streak]) {
+      hud.banner(STREAK_CALLOUTS[streak], `+${bonus}`, 1.3);
+    } else if (n === 1) {
+      hud.banner('TAKEDOWN', 'WRECKED COPS REFILL YOUR NITROUS  +100', 1.8);
+    }
+    if (WRECK_MILESTONES.includes(n)) hud.news(wreckNews(n));
+    // The first wreck, a triple now and then, and otherwise one every minute or so: slow motion is a treat.
+    const due = n === 1 || (streak === 3 && chaseTime - lastWreckShot > 30) || chaseTime - lastWreckShot > 75;
+    if (due && !director.busy && isVisible(at)) {
+      lastWreckShot = chaseTime;
+      wreckShot(car);
+    }
   }
 
   // ----------------------------------------------------------- per-frame effects
@@ -616,12 +798,18 @@ async function start(): Promise<void> {
    */
   function paintGround(drag: number): void {
     groundFx.begin();
+    groundFx.viewFrom(camera.position, camLook);
+    // Mia's route, painted on the road ahead.
+    if (player && state === 'chase' && gps.nodes.length) groundFx.route(gps.path(player.position), performance.now() / 1000);
     if (player && state !== 'select') {
       for (const lamp of city.lamps) {
         if (Math.abs(lamp.position.x - camLook.x) > 140 || Math.abs(lamp.position.z - camLook.z) > 140) continue;
         const head = lamp.localToWorld(LAMP_HEAD.clone());
         // Knocked over, it's out.
-        if (head.y > 5) groundFx.pool(head, 6, 0xffc27a, 0.38);
+        if (head.y > 5) {
+          groundFx.pool(head, 6.5, 0xffc27a, 0.5);
+          groundFx.reflect(head, head.y, 0xffc27a, 0.55, 1.1);
+        }
       }
       for (const c of police.cops) {
         const p = c.v.position;
@@ -629,8 +817,17 @@ async function start(): Promise<void> {
         groundFx.shadow(p, c.v.heading, 5.6, 2.9);
         if (c.wrecked) continue;
         groundFx.beam(p.clone().addScaledVector(f, 2.3), c.v.heading, 15, 7, 0xfff0d0, 0.3);
+        groundFx.reflect(p.clone().addScaledVector(f, 2.4), 0.7, 0xfff0d0, 0.35, 1.4);
         // The bar's red half is on the car's left (+x when it faces +z).
         if (c.v.model.lightBar) groundFx.strobes(p, new THREE.Vector3(f.z, 0, -f.x), c.v.model.lightBar);
+      }
+      for (const t of traffic.cars) {
+        const p = t.v.position;
+        const f = t.v.forward;
+        groundFx.shadow(p, t.v.heading, 5, 2.6);
+        if (t.loose) continue;
+        groundFx.beam(p.clone().addScaledVector(f, 2.2), t.v.heading, 13, 6, 0xfff0d0, 0.25);
+        groundFx.reflect(p.clone().addScaledVector(f, 2.2), 0.7, 0xfff0d0, 0.3, 1.3);
       }
       for (const b of BEACONS) {
         const p = b.at.getWorldPosition(new THREE.Vector3());
@@ -643,12 +840,29 @@ async function start(): Promise<void> {
         const f = car.forward;
         groundFx.shadow(p, car.heading, 5.6, 2.9);
         groundFx.beam(p.clone().addScaledVector(f, 2.3), car.heading, 17, 7.5, 0xfff0d0, 0.35);
-        if (car.controls.brake > 0) groundFx.pool(p.clone().addScaledVector(f, -2.7), 2.4, 0xff2a1a, 0.75);
+        // Headlights and tail lights in the wet road.
+        groundFx.reflect(p.clone().addScaledVector(f, 2.4), 0.7, 0xfff0d0, 0.4, 1.5);
+        const braking = car.controls.brake > 0;
+        groundFx.reflect(p.clone().addScaledVector(f, -2.4), 0.8, 0xff2a1a, braking ? 0.9 : 0.25, 1.3);
+        if (braking) groundFx.pool(p.clone().addScaledVector(f, -2.7), 2.4, 0xff2a1a, 0.75);
       }
-      if (player.nosActive) groundFx.pool(player.position.addScaledVector(player.forward, -3.2), 3.6, 0x3d6bff, 1.2 + Math.random() * 0.5);
+      if (player.nosActive) {
+        const at = player.position.addScaledVector(player.forward, -3.2);
+        groundFx.pool(at, 3.6, 0x3d6bff, 1.2 + Math.random() * 0.5);
+        groundFx.reflect(at, 0.6, 0x5a86ff, 0.8, 1.6);
+      }
+      // The helicopter's searchlight: a hot spot in a soft halo (its SpotLight lights the cars).
+      if (chopper.on > 0) {
+        groundFx.pool(chopper.spot, SPOT_RADIUS * 1.3, 0xd8e4ff, 0.35 * chopper.on);
+        groundFx.pool(chopper.spot, SPOT_RADIUS * 0.6, 0xffffff, 0.3 * chopper.on);
+      }
       const v = vault.position;
       groundFx.shadow(v, 0, 4.6, 4.6);
-      if (drag > 4) groundFx.pool(v, 3.8, 0xff8a2a, Math.min(1.4, drag / 12) * (0.6 + Math.random() * 0.4));
+      if (drag > 4) {
+        const k = Math.min(1.4, drag / 12) * (0.6 + Math.random() * 0.4);
+        groundFx.pool(v, 3.8, 0xff8a2a, k);
+        groundFx.reflect(v, 0.5, 0xff9a3a, k * 0.7, 2.2);
+      }
     }
     groundFx.end();
   }
@@ -776,7 +990,7 @@ async function start(): Promise<void> {
       const ndc = at.clone().project(camera);
       const buf = gfx.renderer.getDrawingBufferSize(new THREE.Vector2());
       CUTAWAY.screen.value.set((ndc.x * 0.5 + 0.5) * buf.x, (ndc.y * 0.5 + 0.5) * buf.y);
-      CUTAWAY.radius.value = buf.y * 0.2;
+      CUTAWAY.radius.value = buf.y * 0.24;
       CUTAWAY.depth.value = -eye.z;
       gfx.overhead(true, ndc.y * 0.5 + 0.5);
     } else {
@@ -868,6 +1082,7 @@ async function start(): Promise<void> {
     autoDetourIn: autoPlan?.detour ? Math.round(autoPlan.corner.distanceTo(player.position)) : null,
     rerouteLog: gps.log,
     cops: police.cops.length,
+    traffic: player ? traffic.cars.map((c) => Math.round(c.v.position.distanceTo(player.position)) * (c.loose ? -1 : 1)) : [],
     wrecked: police.wreckedCount,
     damage,
     busted: +busted.toFixed(2),
@@ -876,6 +1091,11 @@ async function start(): Promise<void> {
     vaultSpeed: +Math.hypot(vault.body.linvel().x, vault.body.linvel().z).toFixed(1),
     pulled: pull?.done ?? false,
     style,
+    score: run.score(),
+    grade: run.grade(),
+    challenges: run.challenges.map((c) => `${c.id}:${c.done(run.stats) ? 'done' : '-'}`),
+    chopper: chopper.flying ? chopper.position.toArray().map(Math.round) : null,
+    log: hud.log,
     nos: +nos.toFixed(2),
     timeScale: +director.timeScale.toFixed(2),
     blown: [player?.tireBlown ?? 0, partner?.tireBlown ?? 0].map((x) => +x.toFixed(1)),
@@ -884,6 +1104,38 @@ async function start(): Promise<void> {
   });
 
   const BANK_BLIP = BANK.frame.toWorld(BANK.w / 2, BANK.d / 2);
+
+  /** A column of light over a set piece, so you can see where the story goes next from blocks away. */
+  function beaconColumn(color: number): THREE.Mesh {
+    const c = document.createElement('canvas');
+    c.width = 4;
+    c.height = 128;
+    const ctx = c.getContext('2d')!;
+    const g = ctx.createLinearGradient(0, 128, 0, 0);
+    g.addColorStop(0, 'rgba(255,255,255,0.85)');
+    g.addColorStop(0.3, 'rgba(255,255,255,0.3)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 4, 128);
+    const mat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 80, 24, 1, true).translate(0, 40, 0), mat);
+    mesh.visible = false;
+    scene.add(mesh);
+    return mesh;
+  }
+  const bankBeacon = beaconColumn(0x3ddc84);
+  bankBeacon.position.copy(BANK_BLIP).setY(0);
+  const goalBeacon = beaconColumn(0xffc23a);
+  goalBeacon.position.copy(GOAL.pos).setY(0);
+
+  /** The beacons pulse gently; the bank's goes out once it's been hit (or missed). */
+  function updateBeacons(time: number): void {
+    const pulse = 0.7 + 0.3 * Math.sin(time * 2.6);
+    bankBeacon.visible = state === 'chase' && !!bankJob?.pending;
+    goalBeacon.visible = state === 'chase' || state === 'outro';
+    (bankBeacon.material as THREE.MeshBasicMaterial).opacity = pulse;
+    (goalBeacon.material as THREE.MeshBasicMaterial).opacity = pulse;
+  }
 
   /** HUD guidance: an arrow toward the route 40 m ahead, and the next turn or the distance left. */
   function navigation(): { arrow: number | null; distance: string } {
@@ -928,11 +1180,16 @@ async function start(): Promise<void> {
         }
       }
       updateGame(dt);
+      if (chopper.flying) {
+        const vv = vault.body.linvel();
+        chopper.update(dt, vault.position, new THREE.Vector3(vv.x, 0, vv.z), camLook.clone().sub(camPos).setY(0).normalize());
+      }
       player.render(dt);
       partner.render(dt);
       for (const car of [player, partner]) car.model.brake.emissiveIntensity = car.controls.brake > 0 ? 4 : 1.2;
       for (const c of cables) c.render();
       police.render(dt);
+      traffic.render(dt);
     }
     const drag = updateEffects(dt);
     fx.update(dt);
@@ -941,9 +1198,11 @@ async function start(): Promise<void> {
     city.update(dt);
     updateCamera(dt);
     paintGround(drag);
+    updateBeacons(performance.now() / 1000);
 
     if (state === 'breach' || state === 'chase') {
       sound.update(player.forwardSpeed, player.controls.throttle, nearestCopDistance(), drag);
+      sound.rotor(chopper.flying ? chopper.position.distanceTo(player.position) : Infinity);
     } else if (state === 'cutscene') {
       sound.update(0, 0, Infinity, drag);
     } else {

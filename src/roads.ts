@@ -128,7 +128,7 @@ export class Path {
 }
 
 /** Shift a polyline sideways by `offset` (positive = left of its direction of travel). */
-function offsetLine(pts: THREE.Vector3[], offset: number): THREE.Vector3[] {
+export function offsetLine(pts: THREE.Vector3[], offset: number): THREE.Vector3[] {
   if (!offset || pts.length < 2) return pts.map((p) => p.clone());
   return pts.map((p, i) => {
     const a = pts[Math.max(0, i - 1)];

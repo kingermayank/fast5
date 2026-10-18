@@ -8,12 +8,16 @@ import { GOAL, MAP, PLAN } from './roadmap';
  * back with speed, so there's always road to read.
  */
 
-/** Degrees below the horizon the camera looks. */
-const PITCH = THREE.MathUtils.degToRad(58);
+/**
+ * Degrees below the horizon the camera looks: low enough that the street's
+ * facades, awnings and lamp posts stand up off the map (the 2.5D look), with a
+ * long lens so the city reads as a diorama rather than a wide-angle swirl.
+ */
+const PITCH = THREE.MathUtils.degToRad(50);
 /** Distance from the point it looks at (m), parked and at full pull-back. */
-const NEAR = 46;
-const FAR = 92;
-const FOV = 38;
+const NEAR = 62;
+const FAR = 112;
+const FOV = 30;
 
 /** The main street direction, as a bearing mod 90 degrees, weighted by length. */
 function gridBearing(): number {

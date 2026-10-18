@@ -7,14 +7,15 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 /**
- * Golden hour: a low sun from the west-southwest, about 24 degrees up. Any
- * lower and, seen from above, nearly every street sits in shadow.
+ * Late golden hour turning to dusk: a low sun from the west-southwest, about 17
+ * degrees up. Long shadows give the streets depth from the oblique camera, and
+ * the city's own lights (lamps, headlights, shop windows, strobes) carry the rest.
  */
-export const SUN_DIR = new THREE.Vector3(-0.596, 0.407, -0.692).normalize();
+export const SUN_DIR = new THREE.Vector3(-0.596, 0.28, -0.692).normalize();
 const HAZE = 0xd9a47c;
 /** Haze for the chase camera, and thicker for the overhead view, whose distances are short. */
 const FOG_CHASE = 0.0003;
-const FOG_OVERHEAD = 0.0018;
+const FOG_OVERHEAD = 0.0015;
 
 /**
  * Tilt-shift: a blur that grows toward the top and bottom of the screen around
@@ -65,9 +66,9 @@ const GradeShader = {
     varying vec2 vUv;
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
-      // Golden-hour grade: shadows toward teal, highlights toward amber, a touch more contrast.
+      // Dusk grade: shadows toward deep teal-blue, highlights toward amber, a touch more contrast.
       float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-      c.rgb += mix(vec3(-0.015, 0.012, 0.035), vec3(0.045, 0.015, -0.03), smoothstep(0.15, 0.85, l));
+      c.rgb += mix(vec3(-0.03, 0.006, 0.05), vec3(0.05, 0.016, -0.035), smoothstep(0.12, 0.8, l));
       c.rgb = mix(vec3(l), c.rgb, saturation);
       c.rgb = (c.rgb - 0.5) * contrast + 0.5;
       float d = distance(vUv, vec2(0.5));
@@ -129,16 +130,17 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   scene.environment = pmrem.fromScene(gradientSkyScene(), 0.02).texture;
   scene.environmentIntensity = 0.55;
 
-  // Warm key, cool fill: shadows pick up the blue of the sky, as at golden hour.
-  scene.add(new THREE.HemisphereLight(0xa9c2e6, 0x4a3b2e, 0.45));
-  const sun = new THREE.DirectionalLight(0xffb27a, 2.5);
+  // Warm key, cool fill: shadows pick up the blue of the evening sky.
+  scene.add(new THREE.HemisphereLight(0x8fb2ec, 0x3b302a, 0.5));
+  const sun = new THREE.DirectionalLight(0xff9f63, 2.7);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  const S = 75;
+  sun.shadow.mapSize.set(3072, 3072);
+  // Wide enough for the oblique overhead view, which sees well up the street.
+  const S = 112;
   sun.shadow.camera.left = sun.shadow.camera.bottom = -S;
   sun.shadow.camera.right = sun.shadow.camera.top = S;
   sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 500;
+  sun.shadow.camera.far = 650;
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.03;
   scene.add(sun, sun.target);
@@ -150,7 +152,8 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.5, 2.2);
+  // Lamps, headlights, strobes, shop neon and sparks glow; sunlit walls don't.
+  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.78, 0.55, 1.75);
   composer.addPass(bloom);
   const tiltX = new ShaderPass(TiltShiftShader);
   const tiltY = new ShaderPass(TiltShiftShader);
@@ -186,7 +189,7 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
       composer.render();
     },
     follow(focus) {
-      sun.position.copy(focus).addScaledVector(SUN_DIR, 250);
+      sun.position.copy(focus).addScaledVector(SUN_DIR, 320);
       sun.target.position.copy(focus);
     },
     overhead(on, focus = 0.5) {
@@ -198,10 +201,10 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
       }
       fog.density = on ? FOG_OVERHEAD : FOG_CHASE;
       // From above there's no bright sky in shot, so open the exposure up and push the colour.
-      renderer.toneMappingExposure = on ? 0.98 : 0.8;
-      grade.uniforms.vignette.value = on ? 0.45 : 0.35;
-      grade.uniforms.saturation.value = on ? 1.28 : 1.12;
-      grade.uniforms.contrast.value = on ? 1.1 : 1.06;
+      renderer.toneMappingExposure = on ? 1.02 : 0.8;
+      grade.uniforms.vignette.value = on ? 0.5 : 0.35;
+      grade.uniforms.saturation.value = on ? 1.24 : 1.12;
+      grade.uniforms.contrast.value = on ? 1.13 : 1.06;
     },
   };
 }

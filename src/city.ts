@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { awning, balcony, orientedRect, parapet, pitchedRoof } from './architecture';
+import type { CarModel } from './carModel';
 import { seeThrough } from './cutaway';
 import { RAPIER, syncMesh } from './physics';
 import { BANK, BRIDGE, GOAL, MAP, type MapEdge, PLAN, points, RAW } from './roadmap';
 import { leftOf } from './roads';
 import {
-  arrowTexture, asphaltTexture, awningTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, helipadTexture, mosaicTexture, roofTexture, sidewalkTexture, signTexture,
+  arrowTexture, asphaltTexture, asphaltWetTexture, awningTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, helipadTexture, mosaicTexture, roofTexture, sidewalkTexture, signTexture,
   storefrontTexture, tileTexture, waterNormalTexture,
 } from './textures';
 import { palmGeometry, palmMaterials, Trees } from './vegetation';
@@ -214,6 +215,8 @@ export class City {
   /** Pitched clay-tile roofs, tinted per house. */
   private tileMat = new THREE.MeshStandardMaterial({ map: tileTexture(), vertexColors: true, roughness: 0.8 });
   private tankMat = new THREE.MeshStandardMaterial({ color: 0x2f74c0, roughness: 0.45 });
+  /** Skylights: glass that catches the sky. */
+  private glassRoofMat = new THREE.MeshStandardMaterial({ color: 0x4f6f86, roughness: 0.08, metalness: 0.6, emissive: 0x1a2a38, emissiveIntensity: 0.6 });
   /** Plain coloured parts (balconies, penthouses, decks, masts), tinted per piece. */
   private balconyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 });
   private poolMat = new THREE.MeshStandardMaterial({ color: 0x35b6e6, roughness: 0.12, metalness: 0.1, emissive: 0x0b4f6e, emissiveIntensity: 0.5 });
@@ -441,7 +444,10 @@ export class City {
       }
       return;
     }
-    if (office || r.length < 14 || r.width < 10) return;
+    if (office || r.length < 14 || r.width < 10) {
+      if (r.length >= 12 && r.width >= 9) this.roofPlant(r.length, r.width, h, inside, box);
+      return;
+    }
     const roll = this.rand();
     if (roll < 0.3 && inside(-2, 0, 5, 3.2)) {
       // Pool on a wooden deck.
@@ -453,6 +459,44 @@ export class City {
       for (let k = 0; k < 4; k++) {
         const p = at(-2 + (this.rand() - 0.5) * 6, (this.rand() - 0.5) * 4);
         this.batch(tint(new THREE.IcosahedronGeometry(0.8 + this.rand() * 0.5, 1).translate(p.x, h + 0.7, p.z), new THREE.Color(0x3f7a33)), this.balconyMat);
+      }
+    }
+  }
+
+  /**
+   * Plant on a flat commercial roof, which the oblique camera sees a lot of:
+   * air-conditioning units in a row, vents, a skylight strip and a water tank.
+   */
+  private roofPlant(
+    length: number,
+    width: number,
+    h: number,
+    inside: (u: number, v: number, hu: number, hv: number) => boolean,
+    box: (w: number, hh: number, d: number, u: number, v: number, y: number, color: THREE.Color | number, mat?: THREE.Material) => void,
+  ): void {
+    const units = Math.min(8, 2 + Math.floor((length * width) / 260));
+    const rowV = (this.rand() - 0.5) * width * 0.4;
+    for (let k = 0; k < units; k++) {
+      const u = (k / Math.max(1, units - 1) - 0.5) * length * 0.6 + (this.rand() - 0.5) * 1.2;
+      if (!inside(u, rowV, 1.2, 1)) continue;
+      box(2.2, 1.2, 1.6, u, rowV, h, 0xc3c6c8);
+      // The fan grille on top.
+      box(1.2, 0.08, 1.2, u, rowV, h + 1.2, 0x4a4e52);
+    }
+    for (let k = 0; k < 3; k++) {
+      const u = (this.rand() - 0.5) * length * 0.7;
+      const v = (this.rand() - 0.5) * width * 0.7;
+      if (inside(u, v, 0.5, 0.5)) box(0.7, 0.9, 0.7, u, v, h, 0x8d9196);
+    }
+    if (this.rand() < 0.6) {
+      const v = -rowV * 0.8;
+      if (inside(0, v, length * 0.25, 1)) box(length * 0.5, 0.35, 1.6, 0, v, h, 0x6d8fa8, this.glassRoofMat);
+    }
+    if (this.rand() < 0.5) {
+      const u = (this.rand() < 0.5 ? -1 : 1) * length * 0.32;
+      if (inside(u, 0, 1.6, 1.6)) {
+        box(0.25, 2.2, 2.4, u, 0, h, 0x5b5f64);
+        box(2.6, 2.2, 2.6, u, 0, h + 2.2, 0x9aa4ae);
       }
     }
   }
@@ -555,7 +599,12 @@ export class City {
 
   private buildRoads(): void {
     const asphalt = asphaltTexture();
-    const asphaltMat = new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    // Damp asphalt with puddles: they mirror the evening sky, and the streaks
+    // GroundFx paints under every light read as their reflections.
+    const asphaltMat = new THREE.MeshStandardMaterial({
+      map: asphalt, roughnessMap: asphaltWetTexture(), roughness: 1, envMapIntensity: 1.35,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    });
     const mosaicMat = new THREE.MeshStandardMaterial({ map: mosaicTexture(), roughness: 0.85 });
     const walkMat = new THREE.MeshStandardMaterial({ map: sidewalkTexture(), color: 0xe4ddd0, roughness: 0.9 });
     const curbMat = new THREE.MeshStandardMaterial({ color: 0xcfc8bb, roughness: 0.8 });
@@ -960,7 +1009,8 @@ export class City {
   private static postGeo?: THREE.BufferGeometry;
   private static postMats = [
     new THREE.MeshStandardMaterial({ color: 0x3c4148, metalness: 0.6, roughness: 0.5 }),
-    new THREE.MeshStandardMaterial({ color: 0xfff6d8, emissive: 0xffe9a8, emissiveIntensity: 0.6 }),
+    // Bright enough to bloom: from above, a lamp is its glow.
+    new THREE.MeshStandardMaterial({ color: 0xfff6d8, emissive: 0xffd58a, emissiveIntensity: 4.5 }),
   ];
 
   /** `side.out` points away from the street; the arm reaches back over it. */
@@ -1030,26 +1080,92 @@ export class City {
     this.scenery.push(g);
   }
 
-  private static parkedColors = [0xc0392b, 0x2e86de, 0xf1c40f, 0xecf0f1, 0x16a085, 0x7f8c8d, 0x8e44ad];
+  private static parkedColors = [0xc0392b, 0x2e86de, 0xf1c40f, 0xecf0f1, 0x16a085, 0x7f8c8d, 0x8e44ad, 0x1f2a36, 0xd35400];
+  private static parkedGeo?: THREE.BufferGeometry;
+  private static parkedPaints = new Map<number, THREE.Material[]>();
+
+  /**
+   * A small saloon, facing +z with its origin 0.78 m up (the middle of its
+   * collider): the side profile extruded across the car, a dark glasshouse
+   * with a painted roof, wheels, and head and tail lamps. Groups: paint,
+   * glass, tyres, headlamps, tail lamps.
+   */
+  private static parkedGeometry(): THREE.BufferGeometry {
+    const W = 1.72;
+    const across = (shape: THREE.Shape, width: number) =>
+      new THREE.ExtrudeGeometry(shape, { depth: width, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 1 })
+        .rotateY(-Math.PI / 2)
+        .translate(width / 2, 0, 0);
+    const lower = new THREE.Shape();
+    lower.moveTo(-2.12, 0.3);
+    lower.lineTo(-2.18, 0.64);
+    lower.lineTo(-2.02, 0.9);
+    lower.lineTo(-1.25, 0.98);
+    lower.lineTo(1.0, 0.98);
+    lower.lineTo(1.95, 0.84);
+    lower.lineTo(2.16, 0.6);
+    lower.lineTo(2.12, 0.3);
+    lower.lineTo(-2.12, 0.3);
+    const glasshouse = new THREE.Shape();
+    glasshouse.moveTo(-1.2, 0.96);
+    glasshouse.lineTo(-0.78, 1.4);
+    glasshouse.lineTo(0.42, 1.4);
+    glasshouse.lineTo(1.0, 0.96);
+    glasshouse.lineTo(-1.2, 0.96);
+    const paint = mergeGeometries([across(lower, W).toNonIndexed(), new THREE.BoxGeometry(W - 0.22, 0.07, 1.16).translate(0, 1.43, -0.18).toNonIndexed()])!;
+    const glass = across(glasshouse, W - 0.18).toNonIndexed();
+    const tyres = mergeGeometries(
+      [[-0.8, 1.32], [0.8, 1.32], [-0.8, -1.32], [0.8, -1.32]].map(([x, z]) => new THREE.CylinderGeometry(0.33, 0.33, 0.24, 12).rotateZ(Math.PI / 2).translate(x, 0.33, z).toNonIndexed()),
+    )!;
+    const heads = mergeGeometries([-0.58, 0.58].map((x) => new THREE.BoxGeometry(0.36, 0.12, 0.08).translate(x, 0.74, 2.15).toNonIndexed()))!;
+    const tails = mergeGeometries([-0.62, 0.62].map((x) => new THREE.BoxGeometry(0.34, 0.12, 0.08).translate(x, 0.8, -2.17).toNonIndexed()))!;
+    const strip = (g: THREE.BufferGeometry) => {
+      for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+      return g;
+    };
+    return mergeGeometries([paint, glass, tyres, heads, tails].map(strip), true)!.translate(0, -0.78, 0);
+  }
+
+  private static parkedGlass = new THREE.MeshStandardMaterial({ color: 0x18222c, metalness: 0.75, roughness: 0.1 });
+  private static parkedTyre = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 });
+  private static parkedHead = new THREE.MeshStandardMaterial({ color: 0xfff4dd, emissive: 0xffeecc, emissiveIntensity: 0.8 });
+  private static parkedTail = new THREE.MeshStandardMaterial({ color: 0x5a0a0a, emissive: 0xff2a1a, emissiveIntensity: 0.7 });
+
+  private static civilianPaints = new Map<number, THREE.MeshPhysicalMaterial>();
+
+  /**
+   * A car like the parked ones for traffic, as a CarModel with its origin on the
+   * ground. Its tail lamps are its own, so it can show its brake lights.
+   */
+  static civilianCar(color: number): CarModel {
+    City.parkedGeo ??= City.parkedGeometry();
+    let paint = City.civilianPaints.get(color);
+    if (!paint) {
+      paint = new THREE.MeshPhysicalMaterial({ color, metalness: 0.45, roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.25 });
+      City.civilianPaints.set(color, paint);
+    }
+    const brake = City.parkedTail.clone();
+    const mesh = new THREE.Mesh(City.parkedGeo, [paint, City.parkedGlass, City.parkedTyre, City.parkedHead, brake]);
+    mesh.position.y = 0.78;
+    mesh.castShadow = true;
+    const body = new THREE.Group();
+    body.add(mesh);
+    const group = new THREE.Group();
+    group.add(body);
+    return { group, body, spinners: [], frontPivots: [], paint, brake, wheelRadius: 0.33 };
+  }
 
   private addParkedCar(pos: THREE.Vector3, heading: number): void {
     const color = City.parkedColors[Math.floor(this.rand() * City.parkedColors.length)];
-    const paint = new THREE.MeshStandardMaterial({ color, metalness: 0.5, roughness: 0.4 });
-    const glass = new THREE.MeshStandardMaterial({ color: 0x1a2530, metalness: 0.8, roughness: 0.2 });
-    const tire = new THREE.MeshStandardMaterial({ color: 0x111111 });
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.7, 4.2), paint);
-    body.position.y = -0.05;
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.55, 2.1), glass);
-    cabin.position.set(0, 0.55, -0.2);
-    g.add(body, cabin);
-    for (const [x, z] of [[-0.85, 1.3], [0.85, 1.3], [-0.85, -1.3], [0.85, -1.3]]) {
-      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.3, 12).rotateZ(Math.PI / 2), tire);
-      w.position.set(x, -0.4, z);
-      g.add(w);
+    City.parkedGeo ??= City.parkedGeometry();
+    let mats = City.parkedPaints.get(color);
+    if (!mats) {
+      mats = [new THREE.MeshStandardMaterial({ color, metalness: 0.45, roughness: 0.35 }), City.parkedGlass, City.parkedTyre, City.parkedHead, City.parkedTail];
+      City.parkedPaints.set(color, mats);
     }
-    this.addProp(g, pos.clone().setY(0.78), RAPIER.ColliderDesc.cuboid(0.9, 0.75, 2.1).setMass(1300).setFriction(0.8), 15000, heading, true);
-    this.scenery.push(g);
+    const mesh = new THREE.Mesh(City.parkedGeo, mats);
+    this.addProp(mesh, pos.clone().setY(0.78), RAPIER.ColliderDesc.cuboid(0.9, 0.75, 2.1).setMass(1300).setFriction(0.8), 15000, heading, true);
+    this.scenery.push(mesh);
   }
 
   // ---------------------------------------------------------------- set pieces

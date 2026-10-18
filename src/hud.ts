@@ -30,6 +30,22 @@ export interface HudState {
   blips: { pos: THREE.Vector3; color: string; label: string }[];
 }
 
+/** A news break: [tag, headline, crawl]. */
+export type NewsBreak = readonly [string, string, string];
+
+/** How long a news break stays up, and how long before another may replace it (s). */
+const NEWS_SECONDS = 8;
+const NEWS_MIN_SECONDS = 4.5;
+
+/** What the end screen shows of a finished run (see run.ts). */
+export interface ResultCard {
+  grade: string;
+  score: string;
+  /** "NEW BEST" or the best so far. */
+  best: string;
+  challenges: { text: string; done: boolean }[];
+}
+
 const $ = (id: string) => document.getElementById(id)!;
 
 const MAP_SCALE = 0.55; // px per meter
@@ -89,6 +105,13 @@ export class Hud {
   /** The Rive UI, once loaded: it draws everything but the minimap. */
   private ui: RiveUi | null = null;
   private screens = { select: false, hud: false, cinematic: false, overlay: false };
+  /** The last few banners, news breaks and radio lines, for play-tests. */
+  readonly log: string[] = [];
+
+  private note(line: string): void {
+    this.log.push(`${(performance.now() / 1000).toFixed(1)} ${line}`);
+    if (this.log.length > 16) this.log.shift();
+  }
 
   static money(n: number): string {
     return '$' + Math.round(n).toLocaleString('en-US');
@@ -177,6 +200,9 @@ export class Hud {
     this.showHud(false);
     this.radioEl.classList.add('hidden');
     this.ui?.set('radioOn', false);
+    this.newsQueue.length = 0;
+    this.newsTimer = 0;
+    this.ui?.set('newsOn', false);
   }
 
   /** Letterbox bars for cutscenes; hides the gameplay HUD while on. */
@@ -215,6 +241,7 @@ export class Hud {
     this.radioEl.append(b, text);
     this.radioEl.classList.remove('hidden');
     this.radioTimer = 5;
+    this.note(`radio ${who}: ${text}`);
     this.ui?.set('radioWho', who);
     this.ui?.set('radioText', text);
     this.ui?.set('radioOn', true);
@@ -224,6 +251,11 @@ export class Hud {
   // ------------------------------------------------------------ per frame
 
   private bannerTimer = 0;
+
+  /** A banner is on screen (another would cut it short). */
+  get bannerBusy(): boolean {
+    return this.bannerTimer > 0;
+  }
 
   /** Big animated callout for a moment, e.g. ("BANK JOB", "+$2,500,000"). */
   banner(title: string, sub = '', seconds = 2.6): void {
@@ -235,6 +267,7 @@ export class Hud {
     void el.offsetWidth;
     el.classList.remove('hidden');
     this.bannerTimer = seconds;
+    this.note(`banner ${title} / ${sub}`);
     this.ui?.set('bannerTitle', title);
     this.ui?.set('bannerSub', sub);
     this.ui?.set('bannerOn', true);
@@ -254,11 +287,81 @@ export class Hud {
     $('moment-prompt').textContent = prompt;
   }
 
-  /** One-line gameplay hint under the objective ('' hides it). */
+  private momentHint = '';
+  private tipText = '';
+
+  /** One-line gameplay hint under the objective ('' hides it). Moments use it; it outranks tips. */
   hint(text: string): void {
+    this.momentHint = text;
+    this.showHint();
+  }
+
+  /** A coaching tip in the same slot, shown only while no moment needs it ('' clears it). */
+  tip(text: string): void {
+    this.tipText = text;
+    this.showHint();
+  }
+
+  private showHint(): void {
+    const text = this.momentHint || this.tipText;
     this.ui?.set('hint', text);
     $('hint').textContent = text;
     $('hint').classList.toggle('hidden', !text);
+  }
+
+  // ------------------------------------------------------------ TV news
+
+  private newsTimer = 0;
+  private newsQueue: NewsBreak[] = [];
+
+  /**
+   * A TV news break in the top corner (drawn by the Rive UI only): the channel's
+   * tag, a headline and a crawl. One that comes in while another is still fresh
+   * waits its turn; only the latest two wait.
+   */
+  news(item: NewsBreak): void {
+    if (this.newsTimer > NEWS_SECONDS - NEWS_MIN_SECONDS) {
+      this.newsQueue.push(item);
+      if (this.newsQueue.length > 2) this.newsQueue.shift();
+    } else {
+      this.showNews(item);
+    }
+  }
+
+  private showNews([tag, headline, ticker]: NewsBreak): void {
+    this.newsTimer = NEWS_SECONDS;
+    this.note(`news ${tag}: ${headline}`);
+    this.ui?.set('newsTag', tag);
+    this.ui?.set('newsHeadline', headline);
+    this.ui?.set('newsTicker', ticker);
+    this.ui?.set('newsOn', true);
+    this.ui?.fire('news');
+  }
+
+  private updateNews(dt: number): void {
+    if (this.newsTimer <= 0) return;
+    this.newsTimer -= dt;
+    if (this.newsQueue.length && this.newsTimer < NEWS_SECONDS - NEWS_MIN_SECONDS) this.showNews(this.newsQueue.shift()!);
+    else if (this.newsTimer <= 0) this.ui?.set('newsOn', false);
+  }
+
+  /** The end screen's rank, score and challenges (null hides them: busted, or the vault lost). */
+  result(r: ResultCard | null): void {
+    if (!this.ui) {
+      // The HTML end screen gets the same, as text.
+      if (r) $('overlay-body').textContent += `\n\nRANK ${r.grade}   SCORE ${r.score}   ${r.best}\n` + r.challenges.map((c) => `${c.done ? 'DONE' : 'MISSED'}  ${c.text}`).join('\n');
+      return;
+    }
+    this.ui.set('resultRanked', !!r);
+    if (!r) return;
+    this.ui.set('resultGrade', r.grade);
+    this.ui.set('resultScore', r.score);
+    this.ui.set('resultBest', r.best);
+    r.challenges.forEach((c, i) => {
+      this.ui!.set(`ch${i + 1}Done`, c.done ? 'DONE   ' : '');
+      this.ui!.set(`ch${i + 1}Miss`, c.done ? '' : 'MISSED   ');
+      this.ui!.set(`ch${i + 1}Text`, c.text + (i < r.challenges.length - 1 ? '\n' : ''));
+    });
   }
 
   update(dt: number, s: HudState | null): void {
@@ -276,6 +379,7 @@ export class Hud {
         this.ui?.set('radioOn', false);
       }
     }
+    this.updateNews(dt);
     if (!s) return;
     if (this.ui) this.updateRive(this.ui, s);
 

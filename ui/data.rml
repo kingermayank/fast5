@@ -44,6 +44,24 @@
         <ViewModelPropertyString name="resultTitle" id="2:53"/>
         <ViewModelPropertyString name="resultBody" id="2:54"/>
         <ViewModelPropertyString name="resultPrompt" id="2:55"/>
+        <ViewModelPropertyBoolean name="newsOn" id="2:56"/>
+        <ViewModelPropertyString name="newsTag" id="2:57"/>
+        <ViewModelPropertyString name="newsHeadline" id="2:58"/>
+        <ViewModelPropertyString name="newsTicker" id="2:59"/>
+        <ViewModelPropertyTrigger name="news" id="2:60"/>
+        <ViewModelPropertyBoolean name="resultRanked" id="2:61"/>
+        <ViewModelPropertyString name="resultGrade" id="2:62"/>
+        <ViewModelPropertyString name="resultScore" id="2:63"/>
+        <ViewModelPropertyString name="resultBest" id="2:64"/>
+        <ViewModelPropertyString name="ch1Done" id="2:65"/>
+        <ViewModelPropertyString name="ch1Miss" id="2:66"/>
+        <ViewModelPropertyString name="ch1Text" id="2:67"/>
+        <ViewModelPropertyString name="ch2Done" id="2:68"/>
+        <ViewModelPropertyString name="ch2Miss" id="2:69"/>
+        <ViewModelPropertyString name="ch2Text" id="2:70"/>
+        <ViewModelPropertyString name="ch3Done" id="2:71"/>
+        <ViewModelPropertyString name="ch3Miss" id="2:72"/>
+        <ViewModelPropertyString name="ch3Text" id="2:73"/>
 
         <!-- Starting values, and what the CLI preview shows (screen starts off: preview with --data=screen=drive). -->
         <ViewModelInstance exports="true" name="Default" id="2:11">
@@ -81,6 +99,24 @@
             <ViewModelInstanceString propertyValue="THE SWAP" viewModelPropertyId="2:53"/>
             <ViewModelInstanceString propertyValue="While every cop in Rio chased that vault, Roman and Han swapped it for an empty decoy.&#10;Reyes’s money was already gone.&#10;&#10;Time 3:58.2   Cops wrecked 61   Property damage $2,664,300   Style 6,900" viewModelPropertyId="2:54"/>
             <ViewModelInstanceString propertyValue="Press Enter to play again" viewModelPropertyId="2:55"/>
+            <ViewModelInstanceBoolean propertyValue="false" viewModelPropertyId="2:56"/>
+            <ViewModelInstanceString propertyValue="BREAKING" viewModelPropertyId="2:57"/>
+            <ViewModelInstanceString propertyValue="VAULT TORN OUT OF POLICE HQ" viewModelPropertyId="2:58"/>
+            <ViewModelInstanceString propertyValue="Two cars are dragging a ten-ton safe through downtown Rio  •  Police ask drivers to stay off the avenues  •  Live pictures from RIO 24H's helicopter" viewModelPropertyId="2:59"/>
+            <ViewModelInstanceTrigger viewModelPropertyId="2:60"/>
+            <ViewModelInstanceBoolean propertyValue="true" viewModelPropertyId="2:61"/>
+            <ViewModelInstanceString propertyValue="A" viewModelPropertyId="2:62"/>
+            <ViewModelInstanceString propertyValue="31,450" viewModelPropertyId="2:63"/>
+            <ViewModelInstanceString propertyValue="NEW BEST  (WAS 27,900)" viewModelPropertyId="2:64"/>
+            <ViewModelInstanceString propertyValue="DONE   " viewModelPropertyId="2:65"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:66"/>
+            <ViewModelInstanceString propertyValue="Swing the vault through the bank&#10;" viewModelPropertyId="2:67"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:68"/>
+            <ViewModelInstanceString propertyValue="MISSED   " viewModelPropertyId="2:69"/>
+            <ViewModelInstanceString propertyValue="Wreck 30 police cars  (19/30)&#10;" viewModelPropertyId="2:70"/>
+            <ViewModelInstanceString propertyValue="DONE   " viewModelPropertyId="2:71"/>
+            <ViewModelInstanceString propertyValue="" viewModelPropertyId="2:72"/>
+            <ViewModelInstanceString propertyValue="Hit 160 km/h with the vault in tow" viewModelPropertyId="2:73"/>
         </ViewModelInstance>
     </ViewModel>
 </Rive>
