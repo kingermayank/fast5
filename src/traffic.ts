@@ -158,7 +158,8 @@ export class Traffic {
     }
   }
 
-  private wreck(c: Civilian, from: THREE.Vector3 | null): void {
+  /** Wreck a car; hit by something at `from`, it's knocked away from it. */
+  wreck(c: Civilian, from: THREE.Vector3 | null): void {
     c.loose = true;
     c.v.enabled = false;
     const b = c.v.body;

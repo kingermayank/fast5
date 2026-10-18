@@ -28,7 +28,7 @@ export class Coach {
   }
 
   update(dt: number, now: { boxedIn: boolean; stuck: boolean }): void {
-    const nudge = now.boxedIn ? 'BOXED IN!  REVERSE (S) OR HIT NITROUS (SHIFT) TO BREAK OUT' : now.stuck ? 'STUCK?  PRESS R TO LINE THE CREW BACK UP' : '';
+    const nudge = now.boxedIn ? 'BOXED IN!  REVERSE (S) OR HIT NITROUS (SHIFT) TO BREAK OUT' : now.stuck ? 'STUCK?  HOLD GAS AND STEER TO SPIN OUT  —  OR PRESS R' : '';
     if (nudge) {
       this.hud.tip(nudge);
       this.nudging = true;

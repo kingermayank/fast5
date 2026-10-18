@@ -287,6 +287,12 @@ export class SpikeStrip {
 // ---------------------------------------------------------------- Bank job
 
 /**
+ * How long the thrown vault is left to fly into the lobby (s): it's steered onto it,
+ * the cables free-spool, and nothing pulls it back toward the road until it's there.
+ */
+const FLING_TIME = 3;
+
+/**
  * Mia's route turns onto the expressway past a glass-fronted bank. She tells
  * the player to swing the vault through it; a handbrake flick near the corner
  * throws the vault wide (with a helping shove so it reliably connects). When the
@@ -317,7 +323,7 @@ export class BankJob {
    * the cables can't drag it off line.
    */
   step(dt: number): void {
-    if (this.state !== 'hinted' || this.time - this.swungAt > 1.4) return;
+    if (this.state !== 'hinted' || this.time - this.swungAt > FLING_TIME - 0.4) return;
     const { vault } = this.ctx;
     const vv = vault.body.linvel();
     const to = this.target().sub(vault.position.setY(0));
@@ -328,9 +334,9 @@ export class BankJob {
     vault.body.setAngvel({ x: w.x, y: w.y * (1 - k), z: w.z }, true);
   }
 
-  /** The vault is in flight toward the lobby (leave it be). */
+  /** The vault is in flight toward the lobby (leave it be: no steering back to the road, no yanking it back). */
   get flinging(): boolean {
-    return this.state === 'hinted' && this.time - this.swungAt < 1.6;
+    return this.state === 'hinted' && this.time - this.swungAt < FLING_TIME;
   }
 
   /** Not pulled off yet (the bank shows on the minimap until then). */
@@ -397,8 +403,8 @@ export class BankJob {
       const dir = toLobby.normalize();
       const speed = THREE.MathUtils.clamp(Math.sqrt(2 * 5 * dist) + 3, 14, 29);
       vault.body.setLinvel({ x: dir.x * speed, y: 4, z: dir.z * speed }, true);
-      // The winches pay out enough cable for it to get there; they reel back in afterwards.
-      for (const c of this.ctx.cables) c.payOut(THREE.MathUtils.clamp(c.car.towPoint().distanceTo(target) + 8, 22, 40));
+      // The winches pay out enough cable for it to get there, free-spooling until it has; they reel back in afterwards.
+      for (const c of this.ctx.cables) c.payOut(THREE.MathUtils.clamp(c.car.towPoint().distanceTo(target) + 8, 22, 40), FLING_TIME);
       vault.ghostHeroes(true);
       this.ctx.fx.burst(vp.clone().setY(0.3), 0.8);
       this.ctx.sound.clank();
@@ -466,6 +472,8 @@ export class Roadblock {
   private cars: Prop[] = [];
   private bars: { red: THREE.MeshStandardMaterial; blue: THREE.MeshStandardMaterial }[] = [];
   private time = 0;
+  /** The fastest-moving cruiser in it this frame (m/s), for play-tests. */
+  fastest = 0;
 
   constructor(
     private ctx: MomentContext,
@@ -506,9 +514,11 @@ export class Roadblock {
       b.blue.emissiveIntensity = flash ? 0.2 : 4;
     }
     // Broken: a cruiser in the line knocked loose.
+    this.fastest = 0;
     for (const c of this.cars) {
       if (c.body.isSleeping()) continue;
       const v = c.body.linvel();
+      this.fastest = Math.max(this.fastest, Math.hypot(v.x, v.y, v.z));
       if (v.x * v.x + v.y * v.y + v.z * v.z < 25) continue;
       this.state = 'busted';
       for (const b of this.bars) b.red.emissiveIntensity = b.blue.emissiveIntensity = 0.2;
@@ -521,6 +531,15 @@ export class Roadblock {
   /** How far the player is short of it along the convoy's way (negative once past). */
   ahead(p: THREE.Vector3): number {
     return this.at.clone().sub(p).dot(this.dir);
+  }
+
+  /** Take it down unbroken (the convoy went another way): its cruisers and their light go. */
+  clear(): void {
+    for (const c of this.cars) this.ctx.city.removeProp(c);
+    for (let i = BEACONS.length - 1; i >= 0; i--) if (this.bars.includes(BEACONS[i].bar)) BEACONS.splice(i, 1);
+    this.cars = [];
+    this.bars = [];
+    this.state = 'idle';
   }
 }
 

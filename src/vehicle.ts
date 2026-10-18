@@ -35,15 +35,12 @@ const DRIFT_GRIP = 30;
  */
 export const HERO_BIT = 0x0002;
 export const STREET_BIT = 0x0004;
-export const HERO_GROUPS = (HERO_BIT << 16) | (0xffff & ~HERO_BIT & ~STREET_BIT);
+/** A car being thrown out of the rig (see rig.ts): it passes through the hero cars and the vault. */
+export const CAUGHT_BIT = 0x0008;
+export const HERO_GROUPS = (HERO_BIT << 16) | (0xffff & ~HERO_BIT & ~STREET_BIT & ~CAUGHT_BIT);
 /** For signal poles and tree trunks. */
 export const STREET_GROUPS = (STREET_BIT << 16) | 0xffff;
-/**
- * Dominance groups: in a contact, the higher group acts as if infinitely heavy.
- * Hero cars, the vault and parked cars outrank cruisers and street furniture,
- * so a cop can bump you but can't spin you out.
- */
-export const DOMINANT = 1;
+export const CAUGHT_GROUPS = (CAUGHT_BIT << 16) | 0xffff;
 
 /**
  * Rigid-body car with arcade handling: drive, grip and yaw are applied as
@@ -73,6 +70,12 @@ export class Vehicle {
    * to center. The player's keyboard steering eases in so taps aren't twitchy.
    */
   steerRate = { in: 10, out: 10 };
+  /**
+   * Turning on the spot (rad/s at full lock) when the car is barely moving with a pedal
+   * down: a burnout pivot, so a car nosed into a wall, with the vault right behind it,
+   * can always turn its way out. Only the player's car has it.
+   */
+  pivot = 0;
   private lastSpeed = 0;
   private accel = 0;
 
@@ -134,10 +137,13 @@ export class Vehicle {
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }
 
-  /** Hero car: ghosts through the other hero car and outranks cops and props in collisions. */
+  /**
+   * Hero car: ghosts through the other hero car and street furniture. (No dominance
+   * group: in Rapier a dominant body drives straight through lighter ones instead of
+   * shoving them. Cops and traffic are kept from knocking it about in main.ts.)
+   */
   makeHero(): void {
     this.collider.setCollisionGroups(HERO_GROUPS);
-    this.body.setDominanceGroup(DOMINANT);
   }
 
   /** Apply handling forces. Call before world.step(). */
@@ -184,7 +190,13 @@ export class Vehicle {
       true,
     );
 
-    const yaw = Math.sign(this.steer) * Math.min(demand, limit) * Math.sign(vF);
+    let yaw = Math.sign(this.steer) * Math.min(demand, limit) * Math.sign(vF);
+    if (this.pivot > 0 && (c.throttle > 0.3 || c.brake > 0.3) && speed < 4) {
+      // Pivot, fading out as the car gets going (backing up, the tail swings toward the steer).
+      const dir = speed > 0.5 ? Math.sign(vF) : c.throttle > 0.3 ? 1 : -1;
+      const k = 1 - speed / 4;
+      yaw = yaw * (1 - k) + this.steer * this.pivot * dir * k;
+    }
     const w = this.body.angvel();
     this.body.setAngvel({ x: w.x, y: w.y + (yaw - w.y) * Math.min(1, 12 * dt), z: w.z }, true);
 

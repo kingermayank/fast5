@@ -43,6 +43,8 @@ export interface Prop {
   /** Property damage value when first knocked loose. */
   value: number;
   hit: boolean;
+  /** A parked car: heavy enough to jam the rig if it's shoved in there (see rig.ts). */
+  heavy?: boolean;
 }
 
 /** Deterministic PRNG so the city is the same every run. */
@@ -928,22 +930,21 @@ export class City {
     collider: RAPIER.ColliderDesc,
     value: number,
     heading = 0,
-    /** Heavy enough to stop a cruiser dead (parked cars); see DOMINANT in vehicle.ts. */
-    dominant = false,
+    /** A parked car (see Prop.heavy). */
+    heavy = false,
   ): Prop {
     const body = this.world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(pos.x, pos.y, pos.z)
         .setRotation({ x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) })
         .setSleeping(true)
-        .setAngularDamping(0.3)
-        .setDominanceGroup(dominant ? 1 : 0),
+        .setAngularDamping(0.3),
     );
     this.world.createCollider(collider, body);
     syncMesh(mesh, body);
     mesh.traverse((o) => (o.castShadow = true));
     this.group.add(mesh);
-    const prop = { body, mesh, value, hit: false };
+    const prop = { body, mesh, value, hit: false, heavy };
     this.props.push(prop);
     return prop;
   }

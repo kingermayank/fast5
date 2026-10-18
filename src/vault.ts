@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RAPIER, syncMesh, yawQuat } from './physics';
 import type { Vehicle } from './vehicle';
-import { DOMINANT, HERO_BIT, STREET_BIT, TOW_POINT } from './vehicle';
+import { CAUGHT_BIT, HERO_BIT, STREET_BIT, TOW_POINT } from './vehicle';
 
 const HALF = { x: 1.5, y: 1.25, z: 1.5 };
 /** Rounded edges on the collider, so the vault glances off a building's corner instead of hooking on it. */
@@ -10,11 +10,16 @@ export const VAULT_MASS = 4000;
 /** How far sideways it may stray from the cars' trail before it's steered back (m), and how hard (1/s). */
 const TRAIL_SLACK = 1.5;
 const TRAIL_PULL = 1.6;
-/** Wedged this long (s) while the cars pull, it's popped free along their trail. */
+/** Wedged this long (s) while the cars pull, it's popped free along their trail... */
 const WEDGED_FOR = 0.8;
-/** It hits everything but thin street furniture (see STREET_BIT); ghosting, it misses the hero cars too. */
-const VAULT_GROUPS = (0xffff << 16) | (0xffff & ~STREET_BIT);
-const VAULT_GHOST_GROUPS = (0xffff << 16) | (0xffff & ~STREET_BIT & ~HERO_BIT);
+/** ...and after this many pops that leave it where it was, it's put back on the road. */
+const POPS = 2;
+/**
+ * It hits everything but thin street furniture (see STREET_BIT) and a car being thrown
+ * out of the rig (CAUGHT_BIT); ghosting, it misses the hero cars too.
+ */
+const VAULT_GROUPS = (0xffff << 16) | (0xffff & ~STREET_BIT & ~CAUGHT_BIT);
+const VAULT_GHOST_GROUPS = (0xffff << 16) | (0xffff & ~STREET_BIT & ~CAUGHT_BIT & ~HERO_BIT);
 /** Fastest it may run up on a car that's ahead of it (m/s): an overrun brake, as trailers have. */
 const OVERRUN = 1.5;
 
@@ -24,15 +29,18 @@ export class Vault {
   readonly collider: RAPIER.Collider;
   readonly mesh = new THREE.Group();
 
-  constructor(world: RAPIER.World, position: THREE.Vector3, heading: number) {
+  constructor(
+    private world: RAPIER.World,
+    position: THREE.Vector3,
+    heading: number,
+  ) {
     this.body = world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(position.x, HALF.y + 0.02, position.z)
         .setRotation(yawQuat(heading))
         .setCcdEnabled(true)
         .setAngularDamping(0.6)
-        .setLinearDamping(0.05)
-        .setDominanceGroup(DOMINANT),
+        .setLinearDamping(0.05),
     );
     this.collider = world.createCollider(
       RAPIER.ColliderDesc.roundCuboid(HALF.x - ROUNDING, HALF.y - ROUNDING, HALF.z - ROUNDING, ROUNDING)
@@ -77,9 +85,17 @@ export class Vault {
     this.body.setRotation(yawQuat(heading), true);
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.wedged = 0;
+    this.pops = 0;
+    this.wantsRescue = false;
   }
 
   private wedged = 0;
+  /** Hops in a row that left it where it was, and where that is. */
+  private pops = 0;
+  private readonly popFrom = new THREE.Vector3();
+  /** Wedged for good: the game should put it back on the road (see rescue()). */
+  wantsRescue = false;
 
   /**
    * Trailer behaviour, per physics step in the chase: keep the vault on the road the
@@ -120,17 +136,61 @@ export class Vault {
       const dv = (want - vN) * Math.min(1, dt * 2.5);
       this.body.setLinvel({ x: v.x + left.x * dv, y: v.y, z: v.z + left.z * dv }, true);
     }
-    // Wedged on something while the cars strain: hop it free toward them along the trail.
+    // Wedged on something while the cars strain: hop it back onto their trail, a little ahead.
     const speed = Math.hypot(v.x, v.z);
     this.wedged = pulled && speed < 0.8 ? this.wedged + dt : Math.min(this.wedged, 0);
     if (this.wedged > WEDGED_FOR) {
       this.wedged = -0.6;
+      // Hopped a few times without getting anywhere: it needs putting back on the road.
+      if (p.distanceTo(this.popFrom) > 3) {
+        this.pops = 0;
+        this.popFrom.copy(p);
+      }
+      if (++this.pops > POPS) {
+        this.wantsRescue = true;
+        return;
+      }
       let k = best + 1;
-      for (let s = 0; k < trail.length - 1 && s < 8; k++) s += trail[k].distanceTo(trail[k - 1]);
+      for (let s = 0; k < trail.length - 1 && s < 4; k++) s += trail[k].distanceTo(trail[k - 1]);
       const to = trail[k].clone().addScaledVector(left, shift).sub(p).setY(0);
       if (to.lengthSq() > 1e-4) to.setLength(5);
-      this.body.setLinvel({ x: to.x, y: 2, z: to.z }, true);
+      this.body.setLinvel({ x: to.x, y: 2.5, z: to.z }, true);
     }
+  }
+
+  /**
+   * Put the vault back on the cars' trail, at the first spot clear of buildings at least
+   * `back` m behind its newest point. Returns where, or null if there's nowhere.
+   */
+  rescue(trail: readonly THREE.Vector3[], back: number): THREE.Vector3 | null {
+    let walked = 0;
+    for (let i = trail.length - 1; i > 0; i--) {
+      walked += trail[i].distanceTo(trail[i - 1]);
+      if (walked < back) continue;
+      const at = trail[i - 1];
+      const along = trail[i].clone().sub(at);
+      const heading = Math.atan2(along.x, along.z);
+      if (!this.fits(at, heading)) continue;
+      this.place(at, heading);
+      return at.clone();
+    }
+    return null;
+  }
+
+  /** No building where the vault would sit at `p`. */
+  private fits(p: THREE.Vector3, heading: number): boolean {
+    let hit = false;
+    this.world.intersectionsWithShape(
+      { x: p.x, y: HALF.y + 0.2, z: p.z },
+      yawQuat(heading),
+      new RAPIER.Cuboid(HALF.x, HALF.y - 0.1, HALF.z),
+      () => {
+        hit = true;
+        return false;
+      },
+      RAPIER.QueryFilterFlags.ONLY_FIXED,
+    );
+    return !hit;
   }
 
   /**
@@ -266,6 +326,12 @@ export class Cable {
     this.joint = this.createJoint();
   }
 
+  /** Take up the slack at once (after the vault has been moved): as long as the gap, but no shorter than `min`. */
+  fit(min: number): void {
+    this.length = Math.max(min, this.car.towPoint().distanceTo(this.vault.anchorWorld(this.side)) + 0.6);
+    this.syncJoint();
+  }
+
   /** Spring force for this physics step. Call before world.step(). */
   step(dt: number): void {
     const a = this.car.towPoint();
@@ -292,13 +358,13 @@ export class Cable {
     if (this.vault.body.isDynamic()) this.vault.body.applyImpulseAtPoint({ x: -n.x * j, y: -n.y * j, z: -n.z * j }, b, true);
   }
 
-  /** Pay out cable to `length` (the winch reels it back in after a moment). */
-  payOut(length: number): void {
+  /** Pay out cable to `length`, free-spooling for `hold` seconds (the winch reels it back in after). */
+  payOut(length: number, hold = 1.6): void {
     if (length <= this.length) return;
     this.length = length;
     this.syncJoint();
     // Hold the slack long enough for the swing to play out.
-    this.reelTimer = 1.6;
+    this.reelTimer = hold;
   }
 
   /** Winch toward `target` length, without ever loading the spring with a sudden jerk. */

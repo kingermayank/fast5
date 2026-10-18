@@ -79,7 +79,10 @@ our streets are wider than the real ones, and places the bank on the corner wher
 
 Pick **Dom Toretto** (heavy, powerful) or **Brian O'Conner** (light, sharp). Your partner drives
 the other car, chained to the same vault, as your wingman: it holds its place beside you and goes
-wherever you go, tucking in behind you where there's no room.
+wherever you go, tucking in behind you where there's no room. Anything that ends up between your
+cars and the vault (a car you overtake, a cruiser that cuts in) is crushed and thrown clear, so it
+can't jam the rig. Nosed into a wall? Hold the gas and steer: the car spins round on the spot in a
+burnout. If the crew still gets nowhere for a few seconds, it's lined back up on the street.
 
 0. **Cutscene:** Hobbs and Elena ram the station wall in an armored truck; you back in and hook up.
 1. **The Pull:** hold the throttle to fill the STRAIN meter until the vault tears out through the wall.
@@ -88,10 +91,11 @@ wherever you go, tucking in behind you where there's no room.
 2. **Chase:** get to the bridge by any road. The GPS (arrow, minimap line and gold chevrons on
    the road) shows Mia's route, which passes the set pieces, and reroutes the moment you take
    another street; columns of light mark the bank and the swap point. Swing the vault into cop
-   cars to wreck them: wrecks in quick succession are streaks worth more, and every wreck refills
-   nitrous. Watch for civilian traffic. Heat rises with time and destruction, and the news follows.
-   Once the heat is up, the police throw a roadblock across your route: ram it or swing the vault
-   through it.
+   cars to wreck them (handbrake, then let the vault fly wide): a swing that connects is worth
+   extra and now and then gets a slow-motion replay, wrecks in quick succession are streaks worth
+   more, and every wreck refills nitrous. Watch for civilian traffic. Heat rises with time and destruction, and the news follows.
+   Once the heat is up, the police throw a roadblock across your route, and another a while after
+   each one: ram it or swing the vault through it.
 3. **Don't get boxed in:** if cops pin you at low speed, the BUSTED meter fills (a tip tells you
    how to break out).
 4. **Bridge:** Mia's route runs down Ponce de León, left onto the Piñero expressway, through the toll
@@ -136,8 +140,9 @@ game only when `window.fast5Frame(n)` is called (fixed 1/30 s frames) for record
 headlessly. `window.fast5()` in the
 console returns a state snapshot, including partner-quality stats (`partnerQuality`) and what the
 partner is currently doing (`partnerThinks`), hard hits on the player's car (`impacts`), time spent
-stuck (`stuck`: the player pushing but not moving, the vault wedged, the partner out of place) and
-the GPS reroute log (`rerouteLog`).
+stuck (`stuck`: the player pushing but not moving, the vault wedged, the partner out of place), cars
+thrown out of the rig (`rigThrows`), automatic resets after getting stuck (`resets`) and the GPS
+reroute log (`rerouteLog`).
 
 ## Code layout
 
@@ -149,10 +154,11 @@ the GPS reroute log (`rerouteLog`).
 - `src/breach.ts`: the opening set piece (armored truck, station cops, cutscene shots)
 - `src/cutscene.ts`, `src/voice.ts`, `src/videos.ts`: cutscene player, voiceover, optional video cutscenes
 - `src/partner.ts`: the partner as a wingman: holds a place beside you (in from walls, single file where it's tight or a spike strip is in its lane), catches up along your trail, and is put back if wedged
+- `src/rig.ts`: keeps the inside of the rig clear: a car caught between the hero cars and the vault is thrown out of the side
 - `src/roadmap.ts`: the map (`src/map/sanjuan.json`): street graph, "where am I on the road" queries, set-piece frames
 - `src/roads.ts`: the street network as the AI sees it (lanes along curved streets, intersections, route turns, bend speeds)
 - `src/gps.ts`: GTA-style navigation: shortest route over the street graph, live rerouting
-- `src/moments.ts`: the set pieces (The Pull, Spike Strip, Bank Job)
+- `src/moments.ts`: the set pieces (The Pull, Spike Strip, Bank Job, roadblocks, the bridge finale)
 - `src/director.ts`: slow motion and cinematic camera shots for big moments
 - `src/broadcast.ts`, `src/chopper.ts`: RIO 24H's news breaks, and its helicopter and searchlight
 - `src/traffic.ts`: civilian cars driving the lanes round the chase

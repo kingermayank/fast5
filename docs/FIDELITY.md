@@ -115,9 +115,13 @@ respect what the player means to do. This doc covers three things:
 
 - **The partner is ghosted to the player** (collision groups) but still hits cops, props and the
   vault.
-- **Dominance groups.** The hero cars, the vault and parked cars outrank cruisers and street
-  furniture. A cop that rams you gives you a shove, a crunch and a camera kick, not a spin. Cops that
-  ram a parked car stop dead.
+- **Heroes shrug off rams.** A hero car that a cop or a civilian car hits keeps only 30% of the
+  velocity change the contact gives it (as if it were three times heavier), while the other car takes
+  the full hit. A cop that rams you gives you a shove, a crunch and a camera kick, not a spin. (Rapier
+  dominance groups were tried first, but a dominant body drives straight through lighter ones instead
+  of shoving them, which let civilians slip inside the rig and made roadblocks impossible to ram.)
+- **The rig stays clear.** A car caught between the hero cars and the vault is wrecked and thrown out
+  of the side, passing through the rig until it's clear (`src/rig.ts`).
 - **Elastic cables.** A stiff, damped spring that only pulls (60 kN/m, about half critical damping)
   takes the edge off yanks; a rope joint 1.6 m further out stays as a hard stop. The winch reels in at
   4 m/s and stalls under load instead of jerking, and it free-spools while the vault is flung at the

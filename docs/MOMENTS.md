@@ -22,6 +22,7 @@ Every moment follows the same shape:
 | 2 | **Pillar Slam** | Vault slams the pillars leaving the station | Nothing; it's the momentum from #1 | Vault clips a pillar and tumbles, debris | — |
 | 3 | **Spike Strip** | Cops lay spikes; the cars dodge | Mia: "Spikes! Stay left!" Pick the gap in slow motion | Near-miss bonus, nitrous refill | Blown tire: less grip and speed, sparks from the rim for a while |
 | 4 | **Bank Job** | Vault guts a bank lobby | Handbrake-swing through the corner to throw the vault into the glass bank | Slow-mo crash cam, shattering glass, banknotes in the air, alarm, $2.5M damage | You miss the bank; small "missed" note, no penalty |
+| 4b | **Roadblock** | Police wall off the avenue | Mia: "Roadblock dead ahead!" Ram it, or swing the vault through it | Two-shot slow-mo replay (low at the impact, then high over the wreckage) as the cruisers go flying; every one counts as a takedown | — |
 | 5 | **The Alley** | Cops follow into an alley and get crushed | Take the alley shortcut Mia offers | Rear cam: the vault scrapes both walls and flattens the cruisers behind | — |
 | 6 | **Bike Cops** | Motorcycle police flank the cars | Swing the vault to sweep bikes off | Bikes and riders tumble; combo counter | Bikes shoot, heat rises |
 | 7 | **Roman & Han** | Two "cop" cars turn on the police | Survive to the checkpoint; then they take out the pursuit | Allied cruisers ram cops; banter | — |
@@ -51,7 +52,9 @@ Every moment follows the same shape:
 1. **Foundation**: slow motion, camera director, NOS, tire smoke and skid marks, banners. ✅ done
 2. **The Pull**, **Spike Strip** and **Bank Job**. ✅ done (the bank swing pays out cable and flings the
    vault at the lobby so a well-timed handbrake reliably connects)
-3. The Swap and the bridge finale (Cut Loose, Solo NOS Drag, Wrecking Ball, Brian's Return,
-   24 Hours). This also fixes the story order: the swap happens *before* the bridge.
+3. Roadblocks mid-chase and the bridge finale. ✅ done: partway across the bridge you tell your partner
+   to unhook (slow-mo side shot, radio exchange) and take the vault on alone on one cable, then smash
+   the police blockade at the far end (the roadblock's replay, bigger). Still to come: The Swap,
+   Wrecking Ball, Brian's Return, 24 Hours (the swap should happen *before* the bridge).
 4. The Alley, Bike Cops, Roman & Han, Pillar Slam.
 5. Polish: music layers, medals, AI video cutscenes, tuning from playtests.

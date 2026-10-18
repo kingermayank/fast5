@@ -88,9 +88,9 @@ export function fmtTime(t: number): string {
 
 /** A clean, steady run to the bridge is an A; an S takes speed, nitrous and a lot of wrecked cruisers. */
 const GRADES = [
-  ['S', 58000],
-  ['A', 42000],
-  ['B', 28000],
+  ['S', 68000],
+  ['A', 48000],
+  ['B', 32000],
   ['C', 0],
 ] as const;
 

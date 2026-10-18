@@ -79,9 +79,9 @@ mountains around the city on the horizon.
 - **Arcade car handling on top of physics:** drive force, lateral grip and yaw control are applied
   as impulses, so collisions, ropes and pushes from cops all interact naturally. Cornering is
   limited to about 1.9 g (more with the handbrake); asking for more scrubs speed (understeer).
-- **Fair collisions:** the partner is ghosted to the player; hero cars, the vault and parked cars
-  outrank cruisers in contacts (Rapier dominance groups), so a ramming cop shoves you instead of
-  spinning you out.
+- **Fair collisions:** the partner is ghosted to the player; a hero car keeps only part of the push
+  when a cop or a civilian car hits it, so a ramming cop shoves you instead of spinning you out, and
+  a car caught inside the rig is thrown clear rather than jamming it.
 - **GPS:** Dijkstra over the street graph from wherever you are, recomputed when you leave the
   route. Mia's planned streets (with the set pieces) are preferred but never required.
 - **Police AI:** pursue and ram the player cars, spawning behind and in side streets, out of

@@ -33,8 +33,8 @@ const BRIDGE_PATH = new Path(BRIDGE.pts);
 export class Police {
   readonly cops: Cop[] = [];
   wreckedCount = 0;
-  /** Called when a cruiser is wrecked, with where it happened and the wreck. */
-  onWreck?: (at: THREE.Vector3, car: Vehicle) => void;
+  /** Called when a cruiser is wrecked, with where it happened, the wreck, and whether the vault hit it. */
+  onWreck?: (at: THREE.Vector3, car: Vehicle, byVault: boolean) => void;
   /** Called when a cruiser rams the player, with where and how hard (0..1). */
   onBump?: (at: THREE.Vector3, strength: number) => void;
   /** Set by the game: true if a point is on screen. Cops never appear where you can see them. */
@@ -127,9 +127,9 @@ export class Police {
   }
 
   /**
-   * A cruiser ramming the player. Hero cars outrank cruisers in the physics (see
-   * DOMINANT in vehicle.ts) so a hit can't spin you out; instead you get a shove
-   * you can feel and drive through, with a crunch and a camera kick.
+   * A cruiser ramming the player. The hero cars shrug off most of a hit in the
+   * physics (main.ts) so it can't spin you out; instead you get a shove you can
+   * feel and drive through, with a crunch and a camera kick.
    */
   private bump(c: Cop, target: Vehicle): void {
     let touching = false;
@@ -138,7 +138,7 @@ export class Police {
     });
     if (touching && !c.touching && c.closing > 3) {
       const away = target.position.sub(c.v.position).normalize();
-      const push = Math.min(3, c.closing * 0.25) * target.spec.mass;
+      const push = Math.min(1.5, c.closing * 0.12) * target.spec.mass;
       target.body.applyImpulse({ x: away.x * push, y: 0, z: away.z * push }, true);
       this.onBump?.(target.position.add(c.v.position).multiplyScalar(0.5), Math.min(1, c.closing / 20));
     }
@@ -149,11 +149,12 @@ export class Police {
     c.closing = (cv.x - tv.x) * toTarget.x + (cv.z - tv.z) * toTarget.z;
   }
 
-  private wreck(c: Cop, from: THREE.Vector3 | null): void {
+  /** Wreck a cruiser; hit by something at `from`, it's knocked away from it. */
+  wreck(c: Cop, from: THREE.Vector3 | null): void {
     c.wrecked = true;
     c.v.enabled = false;
     this.wreckedCount++;
-    this.onWreck?.(c.v.position, c.v);
+    this.onWreck?.(c.v.position, c.v, from !== null);
     const b = c.v.body;
     b.setEnabledRotations(true, true, true, true);
     if (from) {

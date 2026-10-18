@@ -11,6 +11,11 @@ import { BRIDGE_FOOT, GOAL, MAP, type MapEdge, type MapNode, PLAN } from './road
 
 /** Planned streets cost this fraction of their length, so the GPS prefers Mia's route. */
 const PLAN_DISCOUNT = 0.25;
+/**
+ * Side streets cost more than their length (by rank): two cars abreast and a vault
+ * fill a residential street wall to wall, so a new route goes back to the avenues.
+ */
+const RANK_COST: Record<number, number> = { 4: 1.25, 5: 1.7 };
 /** Extra cost (meters) of turning at an intersection: with a vault in tow, straight is faster. */
 const TURN_COST = 30;
 /** How long the player must be off the route before it's recomputed (ignores brief wobbles). */
@@ -107,7 +112,7 @@ function shortestRoute(start: MapNode, via: MapEdge, ahead: number): { nodes: Ma
     for (const e of s.node.edges) {
       const next = MAP.other(e, s.node);
       const turn = e === s.edge ? U_TURN_COST : turnCost(inDir, MAP.leaving(e, s.node));
-      const c = bc + e.length * (PLANNED.has(e) ? PLAN_DISCOUNT : 1) + turn;
+      const c = bc + e.length * (PLANNED.has(e) ? PLAN_DISCOUNT : (RANK_COST[e.rank] ?? 1)) + turn;
       const t = { node: next, edge: e };
       const tk = key(t);
       if (c < (cost.get(tk) ?? Infinity)) {
