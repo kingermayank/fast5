@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { NIGHT } from './look';
 
 function canvasTexture(
   width: number,
@@ -69,14 +70,153 @@ export function asphaltTexture(): THREE.CanvasTexture {
 }
 
 /**
+ * Worn city asphalt, 16 m to a repeat at 64 px/m: aggregate grain, repair
+ * patches with sealed seams, branching cracks and oil stains, all tiling
+ * seamlessly. Comes with a normal map made from the same surface, so the cracks
+ * and the grain catch the lamps on a wet night as grooves and glints.
+ */
+export function asphaltTextures(): { map: THREE.CanvasTexture; normal: THREE.CanvasTexture } {
+  const N = 1024;
+  let seed = 9;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const tone = new Float32Array(N * N);
+  const height = new Float32Array(N * N);
+  const at = (x: number, y: number) => (((y % N) + N) % N) * N + (((x % N) + N) % N);
+  // Seamless value noise: a lattice of `cells` per side, smoothly interpolated.
+  const lattice = (cells: number) => {
+    const v = Array.from({ length: cells * cells }, rand);
+    const s = N / cells;
+    return (x: number, y: number) => {
+      const fx = x / s;
+      const fy = y / s;
+      const x0 = Math.floor(fx);
+      const y0 = Math.floor(fy);
+      const tx = fx - x0;
+      const ty = fy - y0;
+      const sx = tx * tx * (3 - 2 * tx);
+      const sy = ty * ty * (3 - 2 * ty);
+      const g = (i: number, j: number) => v[(((j % cells) + cells) % cells) * cells + (((i % cells) + cells) % cells)];
+      const a = g(x0, y0) + (g(x0 + 1, y0) - g(x0, y0)) * sx;
+      const b = g(x0, y0 + 1) + (g(x0 + 1, y0 + 1) - g(x0, y0 + 1)) * sx;
+      return a + (b - a) * sy;
+    };
+  };
+  const broad = lattice(6);
+  const mid = lattice(24);
+  const fine = lattice(128);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const i = y * N + x;
+      const grain = rand();
+      tone[i] = 0.235 + (broad(x, y) - 0.5) * 0.06 + (mid(x, y) - 0.5) * 0.035 + (grain - 0.5) * 0.07;
+      height[i] = (fine(x, y) - 0.5) * 0.8 + (grain - 0.5) * 0.9;
+    }
+  }
+  // Cracks and seams: how much darker, and how deep, at each texel (applied once at the end, so
+  // overlapping strokes don't stack up).
+  const dark = new Float32Array(N * N);
+  const groove = new Float32Array(N * N);
+  // A thick line into those, wrapping round the tile.
+  const stroke = (x0: number, y0: number, x1: number, y1: number, width: number, dTone: number, dHeight: number) => {
+    const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0));
+    const r = Math.ceil(width / 2);
+    for (let k = 0; k <= steps; k++) {
+      const x = Math.round(x0 + ((x1 - x0) * k) / Math.max(1, steps));
+      const y = Math.round(y0 + ((y1 - y0) * k) / Math.max(1, steps));
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dy * dy > r * r) continue;
+          const i = at(x + dx, y + dy);
+          dark[i] = Math.max(dark[i], dTone);
+          groove[i] = Math.min(groove[i], dHeight);
+        }
+      }
+    }
+  };
+  // Repair patches: squarer, a different tone, a sealed seam round the edge.
+  for (let n = 0; n < 7; n++) {
+    const w = 70 + rand() * 200;
+    const h = 50 + rand() * 160;
+    const x0 = rand() * N;
+    const y0 = rand() * N;
+    const d = rand() < 0.6 ? -0.035 : 0.03;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) tone[at(x0 + x, y0 + y)] += d;
+    const seam = [[x0, y0, x0 + w, y0], [x0 + w, y0, x0 + w, y0 + h], [x0 + w, y0 + h, x0, y0 + h], [x0, y0 + h, x0, y0]];
+    for (const [a, b, c, e] of seam) stroke(a, b, c, e, 3, 0.07, -0.6);
+  }
+  // Cracks: random walks that wander and fork.
+  const crack = (x: number, y: number, dir: number, length: number, width: number) => {
+    for (let k = 0; k < length; k++) {
+      const step = 3 + rand() * 4;
+      const nx = x + Math.cos(dir) * step;
+      const ny = y + Math.sin(dir) * step;
+      stroke(x, y, nx, ny, width, 0.11, -1.6);
+      x = nx;
+      y = ny;
+      dir += (rand() - 0.5) * 0.7;
+      if (rand() < 0.04 && width > 1.2) crack(x, y, dir + (rand() < 0.5 ? 1 : -1) * (0.6 + rand() * 0.6), length / 2, width * 0.7);
+    }
+  };
+  for (let n = 0; n < 26; n++) crack(rand() * N, rand() * N, rand() * Math.PI * 2, 15 + rand() * 40, 1.3 + rand() * 1.2);
+  // Oil and tyre stains: soft dark blots.
+  for (let n = 0; n < 14; n++) {
+    const cx = rand() * N;
+    const cy = rand() * N;
+    const r = 12 + rand() * 40;
+    for (let y = -r; y <= r; y++) {
+      for (let x = -r; x <= r; x++) {
+        const d = Math.hypot(x, y) / r;
+        if (d < 1) tone[at(cx + x, cy + y)] -= 0.05 * (1 - d * d);
+      }
+    }
+  }
+  for (let i = 0; i < N * N; i++) {
+    tone[i] -= dark[i];
+    height[i] = Math.min(height[i], groove[i]);
+  }
+  const make = (fill: (img: ImageData) => void) =>
+    canvasTexture(N, N, (ctx) => {
+      const img = ctx.createImageData(N, N);
+      fill(img);
+      ctx.putImageData(img, 0, 0);
+    });
+  const map = make((img) => {
+    for (let i = 0; i < N * N; i++) {
+      const v = Math.max(0, Math.min(1, tone[i])) * 255;
+      img.data[i * 4] = v;
+      img.data[i * 4 + 1] = v * 1.01;
+      img.data[i * 4 + 2] = v * 1.06;
+      img.data[i * 4 + 3] = 255;
+    }
+  });
+  const normal = make((img) => {
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        const dx = (height[at(x + 1, y)] - height[at(x - 1, y)]) * 0.5;
+        const dy = (height[at(x, y + 1)] - height[at(x, y - 1)]) * 0.5;
+        const l = Math.hypot(dx, dy, 1);
+        const i = (y * N + x) * 4;
+        img.data[i] = ((-dx / l) * 0.5 + 0.5) * 255;
+        img.data[i + 1] = ((dy / l) * 0.5 + 0.5) * 255;
+        img.data[i + 2] = ((1 / l) * 0.5 + 0.5) * 255;
+        img.data[i + 3] = 255;
+      }
+    }
+  });
+  normal.colorSpace = THREE.NoColorSpace;
+  return { map, normal };
+}
+
+/**
  * Where the asphalt is wet, as a roughness map (green channel): standing water
  * in the dips and along the gutters is close to a mirror (dark), the rest damp
  * and rough. Wet streets catch the evening sky and every lamp and headlight,
- * which is most of the dusk look. Tile it about 32 m (repeat 0.25 on 8 m UVs).
+ * which is most of the dusk look. Tiles every 32 m (repeat 0.5 on the asphalt's 16 m UVs).
  */
 export function asphaltWetTexture(): THREE.CanvasTexture {
   const tex = canvasTexture(512, 512, (ctx) => {
-    ctx.fillStyle = 'rgb(200,200,200)';
+    // Damp all over (a sheen on the whole road), near a mirror in the puddles.
+    ctx.fillStyle = NIGHT ? 'rgb(100,100,100)' : 'rgb(200,200,200)';
     ctx.fillRect(0, 0, 512, 512);
     noise(ctx, 512, 512, 24000, 0.07);
     // Damp sheen: broad, faint glossier bands.
@@ -117,7 +257,7 @@ export function asphaltWetTexture(): THREE.CanvasTexture {
     }
   });
   tex.colorSpace = THREE.NoColorSpace;
-  tex.repeat.set(0.25, 0.25);
+  tex.repeat.set(0.5, 0.5);
   return tex;
 }
 

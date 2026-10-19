@@ -5,10 +5,11 @@ import type { CarModel } from './carModel';
 import { STREET_GROUPS } from './vehicle';
 import { seeThrough } from './cutaway';
 import { RAPIER, syncMesh } from './physics';
+import { mirrorsLamps } from './streetlight';
 import { BANK, BOUNDS, BRIDGE, GOAL, inTunnel, MAP, type MapEdge, PLAN, points, RAW, TUNNEL } from './roadmap';
 import { leftOf } from './roads';
 import {
-  arrowTexture, asphaltTexture, asphaltWetTexture, awningTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, helipadTexture, mosaicTexture, roofTexture, sidewalkTexture, signTexture,
+  arrowTexture, asphaltTexture, asphaltTextures, asphaltWetTexture, awningTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, helipadTexture, mosaicTexture, roofTexture, sidewalkTexture, signTexture,
   storefrontTexture, tileTexture, waterNormalTexture,
 } from './textures';
 import { palmGeometry, palmMaterials, Trees } from './vegetation';
@@ -37,6 +38,8 @@ export const VAULT_START_HEADING = Math.PI / 2; // door faces +x, toward the str
 export const CAR_STARTS = [new THREE.Vector3(196.5, 0, 158), new THREE.Vector3(202.5, 0, 158)];
 /** Where a street lamp's light is, in the lamp's own frame. */
 export const LAMP_HEAD = new THREE.Vector3(0, 3.25, 2.1);
+/** Street lamps are drawn in sets by square of the map this wide (m), so squares off screen are culled. */
+const LAMP_SQUARE = 400;
 /** x of the station facade; the vault is "out" once it crosses this. */
 export const STATION_FACADE_X = STATION.x1;
 
@@ -77,16 +80,23 @@ class PropInstances {
   constructor(
     parts: { geo: THREE.BufferGeometry; mat: THREE.Material; tinted?: boolean }[],
     readonly capacity: number,
+    /** Culled as a whole when off screen (a set kept to one square of the map; see seal). */
+    private culled = false,
   ) {
     this.meshes = parts.map(({ geo, mat, tinted }) => {
       const im = new THREE.InstancedMesh(geo, mat, capacity);
       im.count = 0;
       im.castShadow = im.receiveShadow = true;
-      // The copies are spread along the route and fly about when hit: never culled as a whole.
-      im.frustumCulled = false;
+      // Copies spread along the route that fly about when hit are never culled as a whole.
+      im.frustumCulled = culled;
       im.userData.tinted = !!tinted;
       return im;
     });
+  }
+
+  /** Done adding: bound the copies, for culling. */
+  seal(): void {
+    for (const im of this.meshes) im.computeBoundingSphere();
   }
 
   get full(): boolean {
@@ -117,6 +127,8 @@ class PropInstances {
     if (!this.dirty) return;
     this.dirty = false;
     for (const im of this.meshes) im.instanceMatrix.needsUpdate = true;
+    // One knocked flying may have left the bounds.
+    if (this.culled) this.seal();
   }
 }
 
@@ -389,6 +401,7 @@ export class City {
     this.buildBridge();
     this.buildTunnel();
     this.buildWalls();
+    this.buildLamps();
     this.buildProps();
     this.buildCafes();
     this.buildFiller();
@@ -768,13 +781,15 @@ export class City {
   // ---------------------------------------------------------------- streets
 
   private buildRoads(): void {
-    const asphalt = asphaltTexture();
+    const asphalt = asphaltTextures();
     // Damp asphalt with puddles: they mirror the evening sky, and the streaks
     // GroundFx paints under every light read as their reflections.
-    const asphaltMat = new THREE.MeshStandardMaterial({
-      map: asphalt, roughnessMap: asphaltWetTexture(), roughness: 1, envMapIntensity: 1.35,
-      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-    });
+    const asphaltMat = mirrorsLamps(
+      new THREE.MeshStandardMaterial({
+        map: asphalt.map, normalMap: asphalt.normal, normalScale: new THREE.Vector2(0.7, 0.7), roughnessMap: asphaltWetTexture(), roughness: 1, envMapIntensity: 1.35,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      }),
+    );
     const mosaicMat = new THREE.MeshStandardMaterial({ map: mosaicTexture(), roughness: 0.85 });
     const walkMat = new THREE.MeshStandardMaterial({ map: sidewalkTexture(), color: 0xe4ddd0, roughness: 0.9 });
     const curbMat = new THREE.MeshStandardMaterial({ color: 0xcfc8bb, roughness: 0.8 });
@@ -811,7 +826,7 @@ export class City {
     /** Where a street's markings stop short of a node: at an intersection, not where the bridge just carries on. */
     const stopAt = (n: (typeof MAP.nodes)[number], e: MapEdge) => (n.edges.length > 1 && !n.edges.every((x) => x.bridge) ? clear(n, e) : 0);
     for (const e of MAP.edges) {
-      this.batch(ribbon(e.pts, -e.hw, e.hw, 0.05, 8, true), asphaltMat, false);
+      this.batch(ribbon(e.pts, -e.hw, e.hw, 0.05, 16, true), asphaltMat, false);
       const ca = stopAt(e.a, e);
       const cb = stopAt(e.b, e);
       if (e.length - ca - cb < 4) continue;
@@ -889,7 +904,7 @@ export class City {
       const r = Math.max(...n.edges.map((e) => e.hw));
       const ring: THREE.Vector3[] = [];
       for (let k = 0; k < 20; k++) ring.push(new THREE.Vector3(n.pos.x + Math.cos((k / 20) * Math.PI * 2) * r, 0, n.pos.z + Math.sin((k / 20) * Math.PI * 2) * r));
-      this.batch(flatPolygon(ring, [], 0.05, 8), asphaltMat, false);
+      this.batch(flatPolygon(ring, [], 0.05, 16), asphaltMat, false);
     }
     const dashMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.25, 4).rotateX(-Math.PI / 2), yellow, dashes.length);
     dashes.forEach((m, i) => dashMesh.setMatrixAt(i, m));
@@ -1152,12 +1167,13 @@ export class City {
           const t = MAP.tangentAt(e, s);
           const l = leftOf(t).multiplyScalar(side);
           const curb = p.clone().addScaledVector(l, e.hw + (important ? 1.2 : 0.8));
-          if (MAP.onRoad(curb, 0.5) || this.inBuilding(curb.x, curb.z, 0.8) || inTunnel(curb, 8)) continue;
+          if (MAP.onRoad(curb, 0.5) || this.inBuilding(curb.x, curb.z, 0.8) || inTunnel(curb, 8) || this.nearLamp(curb)) continue;
           const out = { along: t, out: l };
           const roll = this.rand();
+          // (The lamps are in rows of their own: see buildLamps.)
           if (roll < (important ? 0.3 : 0.4)) this.addPalm(curb);
           else if (roll < (important ? 0.48 : 0.58)) this.plantTree(curb, 0.6 + this.rand() * 0.3);
-          else if (roll < (important ? 0.72 : 0.8)) this.addLightPost(curb, out);
+          else if (roll < (important ? 0.72 : 0.8)) continue;
           else if (roll < 0.8 && important) this.addKiosk(curb, out);
           else if (roll < 0.9) this.addBench(curb.clone().addScaledVector(l, 0.6), out);
           else this.addBin(curb);
@@ -1183,25 +1199,70 @@ export class City {
     this.scenery.push(mesh);
   }
 
-  private static postGeo?: THREE.BufferGeometry;
-  private static postMats = [
-    new THREE.MeshStandardMaterial({ color: 0x3c4148, metalness: 0.6, roughness: 0.5 }),
-    // Bright enough to bloom: from above, a lamp is its glow.
-    new THREE.MeshStandardMaterial({ color: 0xfff6d8, emissive: 0xffd58a, emissiveIntensity: 4.5 }),
-  ];
+  private static postParts?: { geo: THREE.BufferGeometry; mat: THREE.Material }[];
+  /** Street lamps, instanced by square of the map (see LAMP_SQUARE). */
+  private lampSets = new Map<string, PropInstances>();
 
-  /** `side.out` points away from the street; the arm reaches back over it. */
+  /**
+   * A street lamp on the curb. `side.out` points away from the street; the arm
+   * reaches back over it. Drawn instanced, a set per square of the map, each
+   * with its own body so the vault can still flatten it.
+   */
   private addLightPost(pos: THREE.Vector3, side: { out: THREE.Vector3 }): void {
-    if (!City.postGeo) {
-      const pole = mergeGeometries([new THREE.BoxGeometry(0.22, 7, 0.22), new THREE.BoxGeometry(0.15, 0.15, 2.4).translate(0, 3.4, 1.1)]);
-      const lamp = new THREE.BoxGeometry(0.4, 0.2, 0.7).translate(LAMP_HEAD.x, LAMP_HEAD.y, LAMP_HEAD.z);
-      City.postGeo = mergeGeometries([pole, lamp], true)!;
+    City.postParts ??= [
+      {
+        geo: mergeGeometries([new THREE.BoxGeometry(0.22, 7, 0.22), new THREE.BoxGeometry(0.15, 0.15, 2.4).translate(0, 3.4, 1.1)])!,
+        mat: new THREE.MeshStandardMaterial({ color: 0x3c4148, metalness: 0.6, roughness: 0.5 }),
+      },
+      {
+        geo: new THREE.BoxGeometry(0.4, 0.2, 0.7).translate(LAMP_HEAD.x, LAMP_HEAD.y, LAMP_HEAD.z),
+        // Bright enough to bloom: from above, a lamp is its glow.
+        mat: new THREE.MeshStandardMaterial({ color: 0xfff6d8, emissive: 0xffd58a, emissiveIntensity: 4.5 }),
+      },
+    ];
+    const key = `${Math.floor(pos.x / LAMP_SQUARE)},${Math.floor(pos.z / LAMP_SQUARE)}`;
+    let set = this.lampSets.get(key);
+    if (!set) {
+      set = new PropInstances(City.postParts, 1024, true);
+      this.lampSets.set(key, set);
+      this.instanced.push(set);
+      this.group.add(...set.meshes);
     }
-    const heading = Math.atan2(-side.out.x, -side.out.z);
-    const mesh = new THREE.Mesh(City.postGeo, City.postMats);
-    this.addProp(mesh, pos.clone().setY(3.7), RAPIER.ColliderDesc.cuboid(0.15, 3.5, 0.15).setMass(150), 1800, heading);
-    this.scenery.push(mesh);
-    this.lamps.push(mesh);
+    const stand = this.instancedProp(set, pos.clone().setY(3.7), [RAPIER.ColliderDesc.cuboid(0.15, 3.5, 0.15).setMass(150)], 1800, Math.atan2(-side.out.x, -side.out.z));
+    if (stand) this.lamps.push(stand);
+  }
+
+  /**
+   * Street lamps in rows down every street, staggered from one side to the
+   * other: closest on the avenues. At night they're what lights the city.
+   */
+  private buildLamps(): void {
+    for (const e of MAP.edges) {
+      if (e.bridge || e.length < 30) continue;
+      const spacing = (e.rank <= 2 ? 30 : e.rank <= 4 ? 34 : 44) / 2;
+      const ca = Math.max(...e.a.edges.map((x) => x.hw)) + 4;
+      const cb = Math.max(...e.b.edges.map((x) => x.hw)) + 4;
+      let side = e.id % 2 ? 1 : -1;
+      for (let s = ca + 2; s < e.length - cb; s += spacing, side = -side) {
+        const p = MAP.pointAt(e, s);
+        const t = MAP.tangentAt(e, s);
+        const l = leftOf(t).multiplyScalar(side);
+        const curb = p.clone().addScaledVector(l, e.hw + (e.rank <= 4 ? 1.2 : 0.8));
+        if (MAP.onRoad(curb, 0.5) || this.inBuilding(curb.x, curb.z, 0.8) || inTunnel(curb, 8)) continue;
+        this.addLightPost(curb, { out: l });
+        this.lampSpots.add(`${Math.round(curb.x / 4)},${Math.round(curb.z / 4)}`);
+      }
+    }
+    for (const set of this.lampSets.values()) set.seal();
+  }
+
+  /** Where lamps stand, by 4 m cell, so nothing else is put on top of them. */
+  private lampSpots = new Set<string>();
+  private nearLamp(p: THREE.Vector3): boolean {
+    const x = Math.round(p.x / 4);
+    const z = Math.round(p.z / 4);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) if (this.lampSpots.has(`${x + i},${z + j}`)) return true;
+    return false;
   }
 
   private static benchGeo?: THREE.BufferGeometry;
@@ -1333,8 +1394,8 @@ export class City {
   }
 
   /** A prop drawn as a copy in an instanced set: its body, and a stand-in object for its pose. */
-  private instancedProp(set: PropInstances, pos: THREE.Vector3, colliders: RAPIER.ColliderDesc[], value: number, heading: number, colour?: THREE.Color): void {
-    if (set.full) return;
+  private instancedProp(set: PropInstances, pos: THREE.Vector3, colliders: RAPIER.ColliderDesc[], value: number, heading: number, colour?: THREE.Color): THREE.Object3D | null {
+    if (set.full) return null;
     const body = this.world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(pos.x, pos.y, pos.z)
@@ -1347,6 +1408,7 @@ export class City {
     syncMesh(stand, body);
     const index = set.add(stand, colour);
     this.props.push({ body, mesh: stand, value, hit: false, instance: { set, index } });
+    return stand;
   }
 
   private static parkedColors = [0xc0392b, 0x2e86de, 0xf1c40f, 0xecf0f1, 0x16a085, 0x7f8c8d, 0x8e44ad, 0x1f2a36, 0xd35400];

@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { NIGHT } from './look';
+import { STREET_LIGHT } from './streetlight';
 
 interface Particle {
   pos: THREE.Vector3;
@@ -52,15 +54,37 @@ class ParticlePool {
     geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('size', new THREE.BufferAttribute(this.sizes, 1).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('alpha', new THREE.BufferAttribute(this.alphas, 1).setUsage(THREE.DynamicDrawUsage));
+    // Glowing particles (sparks, nitrous, glass glints) are their own light; smoke, dust and spray
+    // are lit: by the street light map where they drift through it, and faintly by the night.
     const mat = new THREE.ShaderMaterial({
-      uniforms: { map: { value: softDot() } },
+      uniforms: {
+        map: { value: softDot() },
+        lit: { value: additive ? 0 : 1 },
+        ambient: { value: NIGHT ? 0.16 : 1 },
+        streetLightMap: STREET_LIGHT.map,
+        streetLightCenter: STREET_LIGHT.center,
+        streetLightSize: STREET_LIGHT.size,
+        streetLightGain: STREET_LIGHT.gain,
+      },
       vertexShader: /* glsl */ `
         attribute float size;
         attribute float alpha;
+        uniform float lit;
+        uniform float ambient;
+        uniform sampler2D streetLightMap;
+        uniform vec2 streetLightCenter;
+        uniform float streetLightSize;
+        uniform float streetLightGain;
         varying vec3 vColor;
         varying float vAlpha;
         void main() {
           vColor = color;
+          if (lit > 0.5) {
+            vec3 w = (modelMatrix * vec4(position, 1.0)).xyz;
+            vec2 uv = vec2(w.x - streetLightCenter.x, streetLightCenter.y - w.z) / streetLightSize + 0.5;
+            vec3 light = texture2D(streetLightMap, uv).rgb * streetLightGain * 0.12;
+            vColor = color * (ambient + light);
+          }
           vAlpha = alpha;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           gl_PointSize = size * 300.0 / -mv.z;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { NIGHT } from './look';
 
 /**
  * The RIO 24H news helicopter. It finds the chase once the vault is out, circles
@@ -229,7 +230,7 @@ export class Chopper {
     this.beam.position.copy(lampAt);
     this.beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), toSpot.clone().divideScalar(length));
     this.beam.scale.set(SPOT_RADIUS * 0.9, length, SPOT_RADIUS * 0.9);
-    (this.beam.material as THREE.ShaderMaterial).uniforms.intensity.value = 0.18 * this.on;
+    (this.beam.material as THREE.ShaderMaterial).uniforms.intensity.value = (NIGHT ? 0.22 : 0.18) * this.on;
     this.lamp.emissiveIntensity = 8 * this.on;
     this.light.position.copy(lampAt);
     this.light.target.position.copy(this.spot);

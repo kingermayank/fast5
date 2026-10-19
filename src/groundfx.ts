@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { NIGHT } from './look';
 import type { Path } from './roads';
 
 /** White in the middle, fading to nothing at the edge (alpha carries the falloff). */
@@ -10,6 +11,26 @@ function radialTexture(): THREE.CanvasTexture {
   g.addColorStop(0, 'rgba(255,255,255,1)');
   g.addColorStop(0.35, 'rgba(255,255,255,0.55)');
   g.addColorStop(0.7, 'rgba(255,255,255,0.15)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+
+/**
+ * A street lamp's footprint: a lamp shines down through a lens, so its pool is
+ * even across most of its width and falls off at the rim (a soft-edged disc,
+ * not a blob).
+ */
+function spotTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.3, 'rgba(255,255,255,0.88)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.82, 'rgba(255,255,255,0.18)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 128, 128);
@@ -144,33 +165,115 @@ class Layer {
 }
 
 /**
- * Light and shade painted on the ground, which is how lights read from above:
- * pools under street lamps, headlight throws ahead of cars, red and blue
- * strobes round police cars, and soft contact shadows that sit the cars and the
- * vault on the road. Three instanced draws, refilled every frame.
+ * Headlight beams in the rain: a soft cone of lit air ahead of each car (seen
+ * edge-on it's thicker, so brighter at its sides), fading out along its length.
+ * One instanced draw, refilled every frame; only at night.
+ */
+class Shafts {
+  readonly mesh: THREE.InstancedMesh;
+  private n = 0;
+  private m = new THREE.Matrix4();
+  private q = new THREE.Quaternion();
+  private e = new THREE.Euler(0, 0, 0, 'YXZ');
+  private s = new THREE.Vector3();
+  private c = new THREE.Color();
+
+  constructor(private capacity: number) {
+    // A cone along +z from its narrow end (z = 0) to its wide end (z = 1).
+    const geo = new THREE.CylinderGeometry(0.3, 1, 1, 18, 1, true).translate(0, -0.5, 0).rotateX(-Math.PI / 2);
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: /* glsl */ `
+        varying float vAlong;
+        varying vec3 vN;
+        varying vec3 vV;
+        varying vec3 vColor;
+        void main() {
+          vAlong = position.z;
+          vColor = instanceColor;
+          vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+          vN = normalize(normalMatrix * mat3(instanceMatrix) * normal);
+          vV = normalize(-mv.xyz);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */ `
+        varying float vAlong;
+        varying vec3 vN;
+        varying vec3 vV;
+        varying vec3 vColor;
+        void main() {
+          float facing = abs(dot(normalize(vN), normalize(vV)));
+          float fade = pow(1.0 - vAlong, 1.4) * smoothstep(0.0, 0.05, vAlong);
+          gl_FragColor = vec4(vColor * facing * facing * fade, 1.0);
+        }`,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    this.mesh = new THREE.InstancedMesh(geo, mat, capacity);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.setColorAt(0, this.c);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 2;
+    this.mesh.count = 0;
+  }
+
+  begin(): void {
+    this.n = 0;
+  }
+
+  add(from: THREE.Vector3, heading: number, length: number, width: number, color: THREE.ColorRepresentation, intensity: number): void {
+    if (this.n >= this.capacity) return;
+    // Aimed a little down at the road.
+    this.q.setFromEuler(this.e.set(0.06, heading, 0));
+    this.mesh.setMatrixAt(this.n, this.m.compose(from, this.q, this.s.set(width, width * 0.45, length)));
+    this.mesh.setColorAt(this.n, this.c.set(color).multiplyScalar(intensity));
+    this.n++;
+  }
+
+  end(): void {
+    this.mesh.count = this.n;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+}
+
+/**
+ * Light and shade on the ground, which is how lights read from above: pools
+ * under street lamps, headlight throws ahead of cars, red and blue strobes
+ * round police cars, and soft contact shadows that sit the cars and the vault
+ * on the road. The pools and throws go into the street light map (`lights`,
+ * see streetlight.ts), which lights whatever they fall on; the shadows, the
+ * lights' streaks in the wet road and the route go straight into the scene.
+ * Instanced draws, refilled every frame.
  */
 export class GroundFx {
   readonly group = new THREE.Group();
   private glow: Layer;
+  private lamps: Layer;
   private beams: Layer;
   private shade: Layer;
   private streaks: Layer;
   private marks: Layer;
+  private shafts = new Shafts(64);
   private c = new THREE.Color();
   /** Bearing from the scene toward the camera, on the ground: where reflections run. */
   private toViewer = 0;
+  private p = new THREE.Vector3();
 
-  constructor() {
+  constructor(lights: THREE.Scene) {
     const radial = radialTexture();
     // No fog on added light: fogging an additive quad brightens it toward the haze colour.
     const additive = (map: THREE.Texture) =>
       new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: 0xffffff, fog: false });
     this.shade = new Layer(64, new THREE.MeshBasicMaterial({ map: radial, color: 0x000000, transparent: true, opacity: 0.5, depthWrite: false }), 0.075);
-    this.glow = new Layer(256, additive(radial), 0.085);
-    this.beams = new Layer(64, additive(beamTexture()), 0.09);
+    this.glow = new Layer(512, additive(radial), 0);
+    this.lamps = new Layer(1024, additive(spotTexture()), 0);
+    this.beams = new Layer(160, additive(beamTexture()), 0);
     this.streaks = new Layer(384, additive(streakTexture()), 0.088);
     this.marks = new Layer(40, additive(chevronTexture()), 0.092);
-    this.group.add(this.shade.mesh, this.glow.mesh, this.beams.mesh, this.streaks.mesh, this.marks.mesh);
+    lights.add(this.glow.mesh, this.lamps.mesh, this.beams.mesh);
+    this.group.add(this.shade.mesh, this.streaks.mesh, this.marks.mesh, this.shafts.mesh);
   }
 
   /**
@@ -210,7 +313,9 @@ export class GroundFx {
   begin(): void {
     this.shade.begin();
     this.glow.begin();
+    this.lamps.begin();
     this.beams.begin();
+    this.shafts.begin();
     this.streaks.begin();
     this.marks.begin();
   }
@@ -221,6 +326,12 @@ export class GroundFx {
     this.glow.add(at.x, at.z, 0, radius * 2, radius * 2, this.c.set(color).multiplyScalar(intensity));
   }
 
+  /** A street lamp's pool: even under the lamp, soft at the rim. */
+  lamp(at: THREE.Vector3, radius: number, color: THREE.ColorRepresentation, intensity: number): void {
+    if (intensity <= 0.01) return;
+    this.lamps.add(at.x, at.z, 0, radius * 2, radius * 2, this.c.set(color).multiplyScalar(intensity));
+  }
+
   /**
    * Red and blue pools either side of a cruiser, as bright as its light bar is
    * right now (whatever flashes the bar flashes these). `left` is the car's left on the ground.
@@ -228,17 +339,20 @@ export class GroundFx {
   strobes(at: THREE.Vector3, left: THREE.Vector3, bar: LightBar): void {
     // A lit bar half runs at emissive 3, an unlit one at 0.2.
     const k = 0.6;
-    this.pool(at.clone().addScaledVector(left, 1.8), 5.5, 0xff2233, bar.red.emissiveIntensity * k);
-    this.pool(at.clone().addScaledVector(left, -1.8), 5.5, 0x2a5cff, bar.blue.emissiveIntensity * k);
+    // At night they wash over the street round the car.
+    const r = NIGHT ? 9 : 5.5;
+    this.pool(at.clone().addScaledVector(left, 1.8), r, 0xff2233, bar.red.emissiveIntensity * k);
+    this.pool(at.clone().addScaledVector(left, -1.8), r, 0x2a5cff, bar.blue.emissiveIntensity * k);
     this.reflect(at.clone().addScaledVector(left, 0.4), 1.6, 0xff2a3a, bar.red.emissiveIntensity * 0.45, 1.3);
     this.reflect(at.clone().addScaledVector(left, -0.4), 1.6, 0x3a66ff, bar.blue.emissiveIntensity * 0.45, 1.3);
   }
 
-  /** A headlight throw from `from` along `heading` (a bearing). */
+  /** A headlight throw from `from` along `heading` (a bearing); at night, its beam in the rain too. */
   beam(from: THREE.Vector3, heading: number, length: number, width: number, color: THREE.ColorRepresentation, intensity: number): void {
     const x = from.x + Math.sin(heading) * length * 0.5;
     const z = from.z + Math.cos(heading) * length * 0.5;
     this.beams.add(x, z, heading, length, width, this.c.set(color).multiplyScalar(intensity));
+    if (NIGHT) this.shafts.add(this.p.set(from.x, 0.75, from.z), heading, length * 0.8, width * 0.45, color, intensity * 0.05);
   }
 
   /** A soft dark patch under something, `length` along `heading`. */
@@ -249,7 +363,9 @@ export class GroundFx {
   end(): void {
     this.shade.end();
     this.glow.end();
+    this.lamps.end();
     this.beams.end();
+    this.shafts.end();
     this.streaks.end();
     this.marks.end();
   }

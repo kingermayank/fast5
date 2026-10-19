@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { seeThrough } from './cutaway';
+import { NIGHT } from './look';
 
 /**
  * Trees, shrubs and palms, in the soft rounded style of the overhead
@@ -64,12 +65,14 @@ function canopyGeometry(): THREE.BufferGeometry {
   });
 }
 
-/** Foliage glows a little with its own colour (light through leaves), so shaded sides aren't black. */
+/** Foliage glows a little with its own colour (light through leaves), so shaded sides aren't black (barely, at night). */
 function softFoliage<T extends THREE.MeshStandardMaterial>(mat: T): T {
-  mat.onBeforeCompile = (shader) => {
+  const before = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, renderer) => {
+    before.call(mat, shader, renderer);
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <emissivemap_fragment>',
-      '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * 0.16;',
+      `#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * ${NIGHT ? '0.02' : '0.16'};`,
     );
   };
   // Keep its program apart from plain materials with the same settings.

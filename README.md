@@ -9,10 +9,13 @@ de León through Hato Rey's Golden Mile, and ended it on the Teodoro Moscoso Bri
 streets and buildings (with their real heights) from OpenStreetMap, dressed as Rio, with Christ the
 Redeemer on Corcovado at the end of the avenue and Sugarloaf out in the bay.
 
-You play it from above, at dusk: a 2.5D camera at a steep slant rides behind the convoy like a
-diorama (forward is always up the screen), looking ahead as you speed up, with tilt-shift blur, wet streets that mirror the street
-lamps, headlights and police strobes, and civilian traffic in the lanes. Buildings between the
+You play it from above, on a rainy night: a 2.5D camera at a steep slant rides behind the convoy
+(forward is always up the screen), looking ahead as you speed up. The city is lit by its own lights:
+rows of street lamps down every street throw warm pools across wet, cracked asphalt and the mosaic
+sidewalks, the puddles mirror the lamps, headlights cut beams through the rain, police strobes wash
+red and blue over everything near them, and civilian traffic fills the lanes. Buildings between the
 camera and your car dissolve so you never lose it. C switches to the chase camera behind the car.
+`?dusk` brings back the golden-hour look the game first had.
 
 A made-up TV channel, RIO 24H, covers the chase live: its helicopter holds a searchlight on the
 vault, and breaking-news headlines roll in the corner of the screen as the heat rises. The big
@@ -151,7 +154,7 @@ contributors, available under the [Open Database License](https://www.openstreet
 uses the Barlow Condensed and Inter typefaces (SIL Open Font License, in `ui/fonts/`).
 
 Debug URL flags: `?crew=dom|brian` skips the menu and cutscene (add `&intro` to watch it),
-`?view=chase` starts behind the car instead of overhead,
+`?view=chase` starts behind the car instead of overhead, `?dusk` plays it at golden hour instead of a rainy night,
 `?autopilot` follows the GPS (`?autopilot=detour` disobeys it at random intersections to test
 rerouting, `?autopilot=wander` turns at random), `?nocops` disables police, `?at=bank`, `?at=tunnel`,
 `?at=bridge` and `?at=split` start the chase short of the bank, short of the tunnel, at the foot of
@@ -176,8 +179,11 @@ sent into the bay, `reyes`, `allies`, `lastScene`, `policeHeld`), the street lif
 - `src/main.ts`: game setup, mission state machine, camera, effects and sound hookup
 - `src/overhead.ts`: the bird's-eye camera (fixed along the street grid, look-ahead, speed zoom)
 - `src/graphics.ts`: renderer, sky, environment lighting, bloom, tilt-shift and color grade, Rio's mountains
+- `src/look.ts`: the time of day (a rainy night, or `?dusk`)
+- `src/streetlight.ts`: the street light map: the city's lights drawn top-down each frame and read by every lit surface; the wet road's lamp reflections
+- `src/rain.ts`: rain streaks and splashes, lit by whatever light they fall through
 - `src/cutaway.ts`: dissolves buildings that would hide the player from the overhead camera
-- `src/groundfx.ts`: light and shade painted on the road (lamp pools, headlights, strobes, contact shadows)
+- `src/groundfx.ts`: the city's lights for the street light map (lamp pools, headlights, strobes, the searchlight), headlight beams in the rain, contact shadows and the route on the road
 - `src/breach.ts`: the opening set piece (armored truck, station cops, cutscene shots)
 - `src/cutscene.ts`, `src/voice.ts`, `src/videos.ts`: cutscene player, voiceover, optional video cutscenes
 - `src/partner.ts`: the partner as a wingman: holds a place beside you (in from walls, single file where it's tight or a spike strip is in its lane), catches up along your trail, and is put back if wedged

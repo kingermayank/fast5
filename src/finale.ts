@@ -60,6 +60,8 @@ export class Finale {
   private hobbs = buildArmoredTruck();
   private escort: CarModel[] = [];
   private set: THREE.Group | null = null;
+  /** The hideout yard's work lamps, which light it at night (through the street light map). */
+  readonly yardLights: THREE.Vector3[] = [];
   private realVault: THREE.Object3D | null = null;
   private crew: Figure[] = [];
   private time = 0;
@@ -439,8 +441,12 @@ export class Finale {
         const l = new THREE.Mesh(new THREE.BoxGeometry(w > 1 ? 1.4 : 0.15, 0.25, d > 1 ? 1.4 : 0.15), lamp);
         l.position.copy(lampAt(k));
         g.add(l);
+        const at = lampAt(k);
+        this.yardLights.push(this.inYard(at.x, at.y, at.z));
       }
     }
+    // And the lamp on the truck's back, over the vault's door.
+    this.yardLights.push(this.inYard(0, 4, 1.5));
     // The truck the real vault came home in, backed up with its ramp down to the vault's back.
     const truck = new GarbageTruck();
     const truckZ = -1.5 - 1 + RAMP_FOOT;

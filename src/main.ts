@@ -15,6 +15,8 @@ import { Director } from './director';
 import { Effects } from './fx';
 import { BRIDGE_FOOT_POS, Gps, type Turn } from './gps';
 import { createGraphics } from './graphics';
+import { NIGHT } from './look';
+import { GLINT_LAMPS, GLINTS } from './streetlight';
 import { BEACONS, GroundFx } from './groundfx';
 import { Hud } from './hud';
 import { Input, type ControlState } from './input';
@@ -33,6 +35,7 @@ import { Run } from './run';
 import { Traffic } from './traffic';
 import { BusCrossing } from './bus';
 import { Pedestrians } from './pedestrians';
+import { Rain } from './rain';
 import { TunnelSwap } from './tunnel';
 import { Cable, CABLE_TOW_LENGTH, Vault } from './vault';
 import { Vehicle, type VehicleSpec } from './vehicle';
@@ -68,7 +71,10 @@ type State = 'select' | 'cutscene' | 'breach' | 'chase' | 'outro' | 'busted' | '
 /** Swap the procedural Christ the Redeemer for the downloaded model, if it loaded. */
 function useStatueModel(statue: THREE.Group): void {
   const src = model('christ');
-  if (!src) return;
+  if (!src) {
+    floodlit(statue);
+    return;
+  }
   const s = src.clone();
   const size = new THREE.Box3().setFromObject(s).getSize(new THREE.Vector3());
   // Arms across the view from the city (the group already faces it).
@@ -79,6 +85,25 @@ function useStatueModel(statue: THREE.Group): void {
   s.position.y = -14;
   statue.clear();
   statue.add(s);
+  floodlit(statue);
+}
+
+/** At night the statue is floodlit, as the real one is: a pale glow over the dark hills. */
+function floodlit(statue: THREE.Group): void {
+  if (!NIGHT) return;
+  statue.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const glow = (m: THREE.Material) => {
+      const lit = (m as THREE.MeshStandardMaterial).clone();
+      if (lit.emissive) {
+        lit.emissive.set(0xfff0d8);
+        lit.emissiveIntensity = 0.9;
+      }
+      return lit;
+    };
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(glow) : glow(mesh.material);
+  });
 }
 
 async function start(): Promise<void> {
@@ -95,8 +120,11 @@ async function start(): Promise<void> {
   scene.add(pedestrians.group);
   const fx = new Effects();
   scene.add(fx.group);
-  const groundFx = new GroundFx();
+  const groundFx = new GroundFx(gfx.lights);
   scene.add(groundFx.group);
+  // It rains at night.
+  const rain = NIGHT ? new Rain() : null;
+  if (rain) scene.add(rain.group);
   const sound = new Sound();
   const voice = new Voice();
 
@@ -1283,26 +1311,35 @@ async function start(): Promise<void> {
     if (guide) groundFx.route(guide, performance.now() / 1000);
     else if (player && state === 'chase' && gps.nodes.length) groundFx.route(gps.path(player.position), performance.now() / 1000);
     if (player && state !== 'select') {
+      // Everything within reach of the street light map (see streetlight.ts).
+      const near = (p: THREE.Vector3) => Math.abs(p.x - camLook.x) < 200 && Math.abs(p.z - camLook.z) < 200;
+      const lit: THREE.Vector3[] = [];
       for (const lamp of city.lamps) {
-        if (Math.abs(lamp.position.x - camLook.x) > 140 || Math.abs(lamp.position.z - camLook.z) > 140) continue;
-        const head = lamp.localToWorld(LAMP_HEAD.clone());
+        if (!near(lamp.position)) continue;
+        const head = LAMP_HEAD.clone().applyQuaternion(lamp.quaternion).add(lamp.position);
         // Knocked over, it's out.
         if (head.y > 5) {
-          groundFx.pool(head, 6.5, 0xffc27a, 0.5);
-          groundFx.reflect(head, head.y, 0xffc27a, 0.55, 1.1);
+          groundFx.lamp(head, NIGHT ? 12 : 6.5, 0xffd09a, NIGHT ? 0.75 : 0.5);
+          if (NIGHT) lit.push(head);
+          else groundFx.reflect(head, head.y, 0xffc27a, 0.55, 1.1);
         }
       }
+      // At night the wet road mirrors the lamps nearest the middle of the view (see mirrorsLamps).
+      lit.sort((a, b) => a.distanceToSquared(camLook) - b.distanceToSquared(camLook));
+      GLINTS.count.value = Math.min(lit.length, GLINT_LAMPS);
+      for (let i = 0; i < GLINTS.count.value; i++) GLINTS.heads.value[i].copy(lit[i]);
       // The tunnel's sodium lamps.
       for (const p of city.tunnelLamps) {
-        if (Math.abs(p.x - camLook.x) > 140 || Math.abs(p.z - camLook.z) > 140) continue;
-        groundFx.pool(p, 6, 0xff9440, 0.4);
+        if (near(p)) groundFx.pool(p, 6, 0xff9440, 0.4);
       }
+      // The work lamps in the hideout yard, at payday.
+      for (const p of finale?.yardLights ?? []) if (near(p)) groundFx.lamp(p, 13, 0xffd9a0, NIGHT ? 1.1 : 0.4);
       for (const c of police.cops) {
         const p = c.v.position;
         const f = c.v.forward;
         groundFx.shadow(p, c.v.heading, 5.6, 2.9);
         if (c.wrecked) continue;
-        groundFx.beam(p.clone().addScaledVector(f, 2.3), c.v.heading, 15, 7, 0xfff0d0, 0.3);
+        groundFx.beam(p.clone().addScaledVector(f, 2.3), c.v.heading, NIGHT ? 24 : 15, NIGHT ? 9 : 7, 0xfff0d0, NIGHT ? 1.6 : 0.3);
         groundFx.reflect(p.clone().addScaledVector(f, 2.4), 0.7, 0xfff0d0, 0.35, 1.4);
         // The bar's red half is on the car's left (+x when it faces +z).
         if (c.v.model.lightBar) groundFx.strobes(p, new THREE.Vector3(f.z, 0, -f.x), c.v.model.lightBar);
@@ -1312,12 +1349,12 @@ async function start(): Promise<void> {
         const f = t.v.forward;
         groundFx.shadow(p, t.v.heading, 5, 2.6);
         if (t.loose) continue;
-        groundFx.beam(p.clone().addScaledVector(f, 2.2), t.v.heading, 13, 6, 0xfff0d0, 0.25);
+        groundFx.beam(p.clone().addScaledVector(f, 2.2), t.v.heading, NIGHT ? 22 : 13, NIGHT ? 8 : 6, 0xfff0d0, NIGHT ? 1.5 : 0.25);
         groundFx.reflect(p.clone().addScaledVector(f, 2.2), 0.7, 0xfff0d0, 0.3, 1.3);
       }
       for (const b of BEACONS) {
         const p = b.at.getWorldPosition(new THREE.Vector3());
-        if (Math.abs(p.x - camLook.x) > 140 || Math.abs(p.z - camLook.z) > 140) continue;
+        if (!near(p)) continue;
         const left = new THREE.Vector3(1, 0, 0).applyQuaternion(b.at.getWorldQuaternion(new THREE.Quaternion())).setY(0).normalize();
         groundFx.strobes(p, left, b.bar);
       }
@@ -1325,7 +1362,7 @@ async function start(): Promise<void> {
         const p = car.position;
         const f = car.forward;
         groundFx.shadow(p, car.heading, 5.6, 2.9);
-        groundFx.beam(p.clone().addScaledVector(f, 2.3), car.heading, 17, 7.5, 0xfff0d0, 0.35);
+        groundFx.beam(p.clone().addScaledVector(f, 2.3), car.heading, NIGHT ? 28 : 17, NIGHT ? 10 : 7.5, 0xfff0d0, NIGHT ? 1.9 : 0.35);
         // Headlights and tail lights in the wet road.
         groundFx.reflect(p.clone().addScaledVector(f, 2.4), 0.7, 0xfff0d0, 0.4, 1.5);
         const braking = car.controls.brake > 0;
@@ -1751,6 +1788,7 @@ async function start(): Promise<void> {
     city.update(dt);
     updateCamera(dt);
     paintGround(drag);
+    rain?.update(dt, camLook, inTunnel(camera.position, 4));
     updateBeacons(performance.now() / 1000);
 
     if (state === 'breach' || state === 'chase') {

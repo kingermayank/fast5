@@ -5,8 +5,10 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { NIGHT } from './look';
 import { leftOf } from './roads';
 import { RUN_ON } from './roadmap';
+import { installStreetLight, STREET_LIGHT, StreetLight } from './streetlight';
 
 /**
  * Late golden hour turning to dusk: a low sun from the west-southwest, about 17
@@ -14,10 +16,14 @@ import { RUN_ON } from './roadmap';
  * the city's own lights (lamps, headlights, shop windows, strobes) carry the rest.
  */
 export const SUN_DIR = new THREE.Vector3(-0.596, 0.28, -0.692).normalize();
-const HAZE = 0xd9a47c;
+/** At night the key light is the moon, high in the north-west: short, faint, cool shadows. */
+const MOON_DIR = new THREE.Vector3(-0.3, 0.86, -0.42).normalize();
+const KEY_DIR = NIGHT ? MOON_DIR : SUN_DIR;
+/** Dusk haze, or at night the rain-soaked dark the city's glow sinks into (the sky is the same colour). */
+const HAZE = NIGHT ? 0x0c1320 : 0xd9a47c;
 /** Haze for the chase camera, and thicker for the overhead view, whose distances are short. */
-const FOG_CHASE = 0.0003;
-const FOG_OVERHEAD = 0.0015;
+const FOG_CHASE = NIGHT ? 0.0011 : 0.0003;
+const FOG_OVERHEAD = NIGHT ? 0.0024 : 0.0015;
 
 /**
  * Tilt-shift: a blur that grows toward the top and bottom of the screen around
@@ -83,21 +89,29 @@ export interface Graphics {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  /** The key light: the low sun at dusk, the moon at night. */
   sun: THREE.DirectionalLight;
   /** The statue on the tall peak (procedural until the model loads). */
   statue: THREE.Group;
+  /** The city's own lights, drawn into the street light map each frame (see streetlight.ts). */
+  lights: THREE.Scene;
   render(): void;
   resize(): void;
-  /** Keep the shadow frustum centered on what the camera is looking at. */
+  /** Keep the shadow frustum and the street light map centered on what the camera is looking at. */
   follow(focus: THREE.Vector3): void;
   /**
    * The overhead presentation: tilt-shift sharp around screen height `focus`
-   * (0 bottom, 1 top), thicker haze, deeper vignette. Off for the chase camera and cutscenes.
+   * (0 bottom, 1 top; at dusk only), thicker haze, deeper vignette. Off for the chase camera and cutscenes.
    */
   overhead(on: boolean, focus?: number): void;
 }
 
 export function createGraphics(canvas: HTMLCanvasElement): Graphics {
+  installStreetLight();
+  const streetLight = new StreetLight();
+  // At dusk the sun does most of the lighting and the lamps only warm the pavement under them.
+  STREET_LIGHT.gain.value = NIGHT ? 5 : 1.5;
+  const lightFocus = new THREE.Vector3();
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.shadowMap.enabled = true;
@@ -124,17 +138,21 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   // The sun disc is ~60000x brighter than the sky, which overflows the half-float render target;
   // bloom then smears infinity over the whole screen whenever you face the sun. Cap it.
   sky.material.fragmentShader = sky.material.fragmentShader.replace('gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( min( texColor, vec3( 1.8 ) ), 1.0 );');
-  scene.add(sky);
+  // At night the sky is the haze's colour, so the far city sinks into it.
+  if (NIGHT) scene.background = new THREE.Color(HAZE);
+  else scene.add(sky);
 
   // Reflections come from a calibrated gradient sky (the physical sky shader's raw
-  // radiance is far too bright to light the scene with), plus a sun hotspot.
+  // radiance is far too bright to light the scene with), plus a sun hotspot; at night,
+  // a dark sky over the city's sodium glow on the horizon.
   const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(gradientSkyScene(), 0.02).texture;
-  scene.environmentIntensity = 0.55;
+  scene.environment = pmrem.fromScene(NIGHT ? nightSkyScene() : gradientSkyScene(), 0.02).texture;
+  scene.environmentIntensity = NIGHT ? 0.7 : 0.55;
 
-  // Warm key, cool fill: shadows pick up the blue of the evening sky.
-  scene.add(new THREE.HemisphereLight(0x8fb2ec, 0x3b302a, 0.5));
-  const sun = new THREE.DirectionalLight(0xff9f63, 2.7);
+  // Warm key, cool fill: shadows pick up the blue of the evening sky. At night, a faint cool
+  // moon and a little sky light, so roofs and walls read as shapes; the city's lights do the rest.
+  scene.add(NIGHT ? new THREE.HemisphereLight(0x2c3f63, 0x0b0b0e, 0.2) : new THREE.HemisphereLight(0x8fb2ec, 0x3b302a, 0.5));
+  const sun = NIGHT ? new THREE.DirectionalLight(0x9db4ff, 0.3) : new THREE.DirectionalLight(0xff9f63, 2.7);
   sun.castShadow = true;
   sun.shadow.mapSize.set(3072, 3072);
   // Wide enough for the oblique overhead view, which sees well up the street.
@@ -154,8 +172,9 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
-  // Lamps, headlights, strobes, shop neon and sparks glow; sunlit walls don't.
-  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.78, 0.55, 1.75);
+  // Lamps, headlights, strobes, shop neon and sparks glow; sunlit walls don't. At night more
+  // of the frame is light sources, and they bloom wider in the wet air.
+  const bloom = NIGHT ? new UnrealBloomPass(new THREE.Vector2(256, 256), 0.9, 0.6, 1.2) : new UnrealBloomPass(new THREE.Vector2(256, 256), 0.78, 0.55, 1.75);
   composer.addPass(bloom);
   const tiltX = new ShaderPass(TiltShiftShader);
   const tiltY = new ShaderPass(TiltShiftShader);
@@ -185,25 +204,36 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
     camera,
     sun,
     statue,
+    lights: streetLight.scene,
     resize,
     render: () => {
       renderer.info.reset();
+      streetLight.render(renderer, lightFocus);
       composer.render();
     },
     follow(focus) {
-      sun.position.copy(focus).addScaledVector(SUN_DIR, 320);
+      sun.position.copy(focus).addScaledVector(KEY_DIR, 320);
       sun.target.position.copy(focus);
+      lightFocus.copy(focus);
       // The sky box is drawn at the far plane, from its middle: keep the camera in it, however far out the bridge goes.
       sky.position.copy(focus);
     },
     overhead(on, focus = 0.5) {
       for (const pass of [tiltX, tiltY]) {
-        pass.enabled = on;
+        // The miniature blur suits the toy-like dusk; the night city is shot sharp.
+        pass.enabled = on && !NIGHT;
         pass.uniforms.focus.value = focus;
         // About 9 px at 1080p, scaled with the drawing buffer.
         pass.uniforms.amount.value = (9 * size.y) / 1080;
       }
       fog.density = on ? FOG_OVERHEAD : FOG_CHASE;
+      if (NIGHT) {
+        renderer.toneMappingExposure = on ? 1.2 : 1.1;
+        grade.uniforms.vignette.value = on ? 0.5 : 0.4;
+        grade.uniforms.saturation.value = 1.08;
+        grade.uniforms.contrast.value = 1.1;
+        return;
+      }
       // From above there's no bright sky in shot, so open the exposure up and push the colour.
       renderer.toneMappingExposure = on ? 1.02 : 0.8;
       grade.uniforms.vignette.value = on ? 0.5 : 0.35;
@@ -211,6 +241,36 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
       grade.uniforms.contrast.value = on ? 1.13 : 1.06;
     },
   };
+}
+
+/**
+ * The night sky for reflections: low rain cloud lit dull orange by the city
+ * (what puddles seen from above mirror), brighter toward the horizon where the
+ * streets' sodium glow is (what car paint and the chase camera's road mirror),
+ * and a faint moon through it.
+ */
+function nightSkyScene(): THREE.Scene {
+  const scene = new THREE.Scene();
+  const geo = new THREE.SphereGeometry(100, 48, 24);
+  const colors: number[] = [];
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const glow = new THREE.Color(0.34, 0.2, 0.1);
+  const zenith = new THREE.Color(0.06, 0.05, 0.055);
+  const ground = new THREE.Color(0.015, 0.014, 0.016);
+  const c = new THREE.Color();
+  const dir = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    dir.fromBufferAttribute(pos, i).normalize();
+    if (dir.y < 0) c.copy(ground).lerp(glow, Math.max(0, 1 + dir.y * 10) * 0.5);
+    else c.copy(glow).lerp(zenith, Math.pow(dir.y, 0.35));
+    colors.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+  const moon = new THREE.Mesh(new THREE.SphereGeometry(3, 12, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 3.4, 4) }));
+  moon.position.copy(MOON_DIR).multiplyScalar(90);
+  scene.add(moon);
+  return scene;
 }
 
 /** Dome with a warm horizon, blue zenith, dark ground and a bright sun spot. */
