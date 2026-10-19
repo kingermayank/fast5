@@ -25,6 +25,8 @@ function gridBearing(): number {
   let c = 0;
   let s = 0;
   for (const e of MAP.edges) {
+    // Not the bridge: it runs off at its own angle for kilometres.
+    if (e.bridge) continue;
     for (let i = 1; i < e.pts.length; i++) {
       const dx = e.pts[i].x - e.pts[i - 1].x;
       const dz = e.pts[i].z - e.pts[i - 1].z;

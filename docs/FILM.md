@@ -184,4 +184,5 @@ impact) are the language for the payoffs.
 | Bike cops in pairs, weaving alongside; the vault throws the rider clear (and they sit up) | built |
 | People on the route's corners who stare, scatter and dive clear (never hit) | built |
 | A city bus pulling across a crossing, passengers turning to watch; NEAR MISS round its tail | built |
+| A bridge that never ends: past the real one's landing it runs on 10 km across the bay into the haze, so the fight never reaches water | built |
 | The garage break-in (the film goes in underground; ours is at street level) | later |

@@ -1471,6 +1471,7 @@ async function start(): Promise<void> {
     frustum.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     // Shadows around what's on screen: the overhead view looks well ahead of the car.
     gfx.follow(state === 'cutscene' || state === 'outro' || !player || view === 'overhead' ? camLook.clone().setY(0) : player.position);
+    city.follow(camera.position);
 
     // From overhead: see through buildings around the player, and keep the tilt-shift band on them.
     const above = view === 'overhead' && !!player && !shot && state !== 'select' && state !== 'cutscene' && state !== 'outro';

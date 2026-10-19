@@ -258,6 +258,64 @@ export class RoadMap {
   }
 }
 
+// ----------------------------------------------------- the bridge runs on
+
+/** The map's own extent (its streets, without the bridge's run-on below): for the minimap and the water. */
+export const BOUNDS = new THREE.Box3().setFromPoints(points(RAW.nodes));
+
+/**
+ * How far (m) the bridge runs on past the end of the map's data. The real one lands
+ * about where the data stops; this one carries straight on across the open bay into
+ * the haze, so the fight on it never runs out of deck.
+ */
+export const BRIDGE_RUN = 10000;
+
+/** Where the run-on starts (the end of the real bridge), which way it goes, and its edge's id. */
+export const RUN_ON = (function runOn(raw: RawMap) {
+  // The bridge's far end: the end of a bridge edge that nothing else meets.
+  const degree = new Map<number, number>();
+  for (const e of raw.edges) for (const n of [e.a, e.b]) degree.set(n, (degree.get(n) ?? 0) + 1);
+  const last = raw.edges.find((e) => e.br && (degree.get(e.a) === 1 || degree.get(e.b) === 1));
+  if (!last) return null;
+  const endId = degree.get(last.b) === 1 ? last.b : last.a;
+  const line = points(last.p);
+  if (endId === last.a) line.reverse();
+  const end = new THREE.Vector3(raw.nodes[endId * 2], 0, raw.nodes[endId * 2 + 1]);
+  const dir = end.clone().sub(line[line.length - 2]).normalize();
+  // Straight on, as an edge of its own, with a point every 250 m (so what's built along it comes in pieces).
+  const p: number[] = [];
+  for (let s = 0; s <= BRIDGE_RUN; s += 250) p.push(end.x + dir.x * s, end.z + dir.z * s);
+  raw.nodes.push(p[p.length - 2], p[p.length - 1]);
+  const edge = raw.edges.push({ a: endId, b: raw.nodes.length / 2 - 1, w: last.w, r: last.r, n: last.n, br: 1, p }) - 1;
+  // Where the real bridge lands, the map has a piece of shore with no streets on it, and the
+  // run-on would cross it. It goes under water (its drivable ring, and its corners from the land).
+  const nodes = points(raw.nodes);
+  const inside = (x: number, z: number, ring: THREE.Vector3[]) => {
+    let inn = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[i];
+      const b = ring[j];
+      if (a.z > z !== b.z > z && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x) inn = !inn;
+    }
+    return inn;
+  };
+  const streetless = raw.walls.filter((flat) => {
+    const ring = points(flat);
+    return !nodes.some((n) => inside(n.x, n.z, ring));
+  });
+  const gone = new Set(streetless.flatMap((flat) => points(flat).map((q) => `${q.x},${q.z}`)));
+  raw.walls = raw.walls.filter((flat) => !streetless.includes(flat));
+  raw.land = raw.land.map((poly) =>
+    poly.map((flat) => {
+      const kept = points(flat).filter((q) => !gone.has(`${q.x},${q.z}`));
+      // Rings are closed: if the first corner went, close it on the new first.
+      if (kept.length && !kept[0].equals(kept[kept.length - 1])) kept.push(kept[0].clone());
+      return kept.flatMap((q) => [q.x, q.z]);
+    }),
+  );
+  return { from: end, dir, edge };
+})(RAW);
+
 export const MAP = new RoadMap(RAW);
 
 // ------------------------------------------------------------- set pieces

@@ -5,6 +5,8 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { leftOf } from './roads';
+import { RUN_ON } from './roadmap';
 
 /**
  * Late golden hour turning to dusk: a low sun from the west-southwest, about 17
@@ -191,6 +193,8 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
     follow(focus) {
       sun.position.copy(focus).addScaledVector(SUN_DIR, 320);
       sun.target.position.copy(focus);
+      // The sky box is drawn at the far plane, from its middle: keep the camera in it, however far out the bridge goes.
+      sky.position.copy(focus);
     },
     overhead(on, focus = 0.5) {
       for (const pass of [tiltX, tiltY]) {
@@ -262,11 +266,30 @@ function addMountains(scene: THREE.Scene): THREE.Group {
     let s = 11;
     return () => ((s = (s * 16807) % 2147483647) / 2147483647);
   })();
+  /** The bridge runs on across the bay for kilometres: a hill (of footprint radius r) in its way stands aside. */
+  const aside = (x: number, z: number, r: number): [number, number] => {
+    if (!RUN_ON) return [x, z];
+    const { from, dir } = RUN_ON;
+    const left = leftOf(dir);
+    const along = (x - from.x) * dir.x + (z - from.z) * dir.z;
+    const lat = (x - from.x) * left.x + (z - from.z) * left.z;
+    const clear = r + 380;
+    if (along < -r || Math.abs(lat) >= clear) return [x, z];
+    const p = from.clone().addScaledVector(dir, along).addScaledVector(left, Math.sign(lat || 1) * clear);
+    return [p.x, p.z];
+  };
+  /** A point out in the bay, `along` the run-on past the real bridge's end and `lat` to its left. */
+  const bay = (along: number, lat: number, x: number, z: number): [number, number] => {
+    if (!RUN_ON) return [x, z];
+    const p = RUN_ON.from.clone().addScaledVector(RUN_ON.dir, along).addScaledVector(leftOf(RUN_ON.dir), lat);
+    return [p.x, p.z];
+  };
   /**
    * A Rio morro: a steep-sided dome, lumpy, its foot buried in the city. `spire`
    * pinches the top (Corcovado) instead of rounding it (Sugarloaf).
    */
   const peak = (x: number, z: number, r: number, h: number, m: THREE.Material, squash = 1, spire = 0) => {
+    [x, z] = aside(x, z, r * Math.max(1, squash));
     const geo = new THREE.SphereGeometry(1, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2);
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const phase = rand() * 10;
@@ -296,10 +319,10 @@ function addMountains(scene: THREE.Scene): THREE.Group {
     const r = 260 + rand() * 260;
     peak(CX + Math.cos(ang) * d, CZ + Math.sin(ang) * d, r, r * (0.7 + rand() * 0.9), mat, 0.8 + rand() * 0.5, rand() * 0.3);
   }
-  // Sugarloaf and its smaller twin (Urca) out in the bay, dead ahead as you drive the bridge:
-  // bare granite with a cap of forest.
-  peak(3500, -2150, 150, 400, rock, 0.75, 0.1);
-  peak(3230, -1880, 150, 210, mat, 1.2);
+  // Sugarloaf and its smaller twin (Urca) out in the bay, ahead as you drive the bridge and
+  // then off its right as it runs on past them: bare granite with a cap of forest.
+  peak(...bay(2250, -620, 3500, -2150), 150, 400, rock, 0.75, 0.1);
+  peak(...bay(1900, -600, 3230, -1880), 150, 210, mat, 1.2);
   // Corcovado with the statue on top, south: ahead as you drive down Ponce de León.
   const tall = peak(450, 3500, 420, 820, mat, 0.7, 0.55);
   const statue = new THREE.Group();

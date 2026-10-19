@@ -5,7 +5,7 @@ import type { CarModel } from './carModel';
 import { STREET_GROUPS } from './vehicle';
 import { seeThrough } from './cutaway';
 import { RAPIER, syncMesh } from './physics';
-import { BANK, BRIDGE, GOAL, inTunnel, MAP, type MapEdge, PLAN, points, RAW, TUNNEL } from './roadmap';
+import { BANK, BOUNDS, BRIDGE, GOAL, inTunnel, MAP, type MapEdge, PLAN, points, RAW, TUNNEL } from './roadmap';
 import { leftOf } from './roads';
 import {
   arrowTexture, asphaltTexture, asphaltWetTexture, awningTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, helipadTexture, mosaicTexture, roofTexture, sidewalkTexture, signTexture,
@@ -25,6 +25,9 @@ const CHUNK = 320;
 const SIDEWALK = 2.5;
 const BRIDGE_BARRIER = 0.8;
 const WATER_Y = -4;
+/** The water plane (m) and its ripple tiles across it; it moves with the camera (see follow). */
+const WATER_SIZE = 20000;
+const WATER_TILES = 300;
 
 /** Police HQ block, west of Ponce de León; the vault room opens east onto the avenue (x = 200). */
 const STATION = { x0: 116, x1: 184, z0: 116, z1: 184, roomX0: 170, roomZ0: 144, roomZ1: 156, roomH: 4.2, h: 20 };
@@ -691,15 +694,18 @@ export class City {
     }
     // Physically the ground is one flat slab under everything, bridge included: a triangle mesh
     // here had seams that caught the dragged vault dead at speed. The water is out of reach
-    // behind the seawalls and the bridge rails, so it needn't be a hole.
+    // behind the seawalls and the bridge rails, so it needn't be a hole. It reaches past the
+    // far end of the bridge's run-on (see BRIDGE_RUN), so there's no seam out there either.
     const center = this.mapCenter();
-    this.world.createCollider(RAPIER.ColliderDesc.cuboid(6000, 1, 6000).setTranslation(center.x, -1, center.z).setFriction(0.6), this.ground);
+    const far = BRIDGE.pts[BRIDGE.pts.length - 1];
+    const half = Math.max(6000, Math.abs(far.x - center.x) + 1000, Math.abs(far.z - center.z) + 1000);
+    this.world.createCollider(RAPIER.ColliderDesc.cuboid(half, 1, half).setTranslation(center.x, -1, center.z).setFriction(0.6), this.ground);
 
     // Water under everything: the lagoon, the bay, the edge of the world.
     const ripples = waterNormalTexture();
-    ripples.repeat.set(300, 300);
+    ripples.repeat.set(WATER_TILES, WATER_TILES);
     this.water = new THREE.Mesh(
-      new THREE.PlaneGeometry(20000, 20000),
+      new THREE.PlaneGeometry(WATER_SIZE, WATER_SIZE),
       new THREE.MeshPhysicalMaterial({ color: 0x1d4a5a, roughness: 0.12, metalness: 0.1, normalMap: ripples, normalScale: new THREE.Vector2(0.35, 0.35), clearcoat: 0.6 }),
     );
     this.water.rotation.x = -Math.PI / 2;
@@ -744,10 +750,19 @@ export class City {
     );
   }
 
-  /** Middle of the map (for the water plane and the distant scenery). */
+  /** Middle of the map (for the ground slab and the water plane). */
   mapCenter(): THREE.Vector3 {
-    const box = new THREE.Box3().setFromPoints(MAP.nodes.map((n) => n.pos));
-    return box.getCenter(new THREE.Vector3()).setY(0);
+    return BOUNDS.getCenter(new THREE.Vector3()).setY(0);
+  }
+
+  /**
+   * Keep the water under the camera wherever it goes (the bridge runs on for kilometres):
+   * the plane moves in whole ripple tiles, so the ripples stay put.
+   */
+  follow(focus: THREE.Vector3): void {
+    const tile = WATER_SIZE / WATER_TILES;
+    this.water.position.x = Math.round(focus.x / tile) * tile;
+    this.water.position.z = Math.round(focus.z / tile) * tile;
   }
 
   // ---------------------------------------------------------------- streets
@@ -793,12 +808,16 @@ export class City {
         s -= len;
       }
     };
+    /** Where a street's markings stop short of a node: at an intersection, not where the bridge just carries on. */
+    const stopAt = (n: (typeof MAP.nodes)[number], e: MapEdge) => (n.edges.length > 1 && !n.edges.every((x) => x.bridge) ? clear(n, e) : 0);
     for (const e of MAP.edges) {
       this.batch(ribbon(e.pts, -e.hw, e.hw, 0.05, 8, true), asphaltMat, false);
-      const ca = e.a.edges.length > 1 ? clear(e.a, e) : 0;
-      const cb = e.b.edges.length > 1 ? clear(e.b, e) : 0;
+      const ca = stopAt(e.a, e);
+      const cb = stopAt(e.b, e);
       if (e.length - ca - cb < 4) continue;
       const mid = slice(e, ca, e.length - cb);
+      // The bridge: solid edge lines inside the barriers (and lanes, below).
+      if (e.bridge) for (const side of [1, -1]) this.batch(ribbon(mid, side * (e.hw - 0.6) - 0.09, side * (e.hw - 0.6) + 0.09, 0.06, 4), white, false);
       // Sidewalks with a curb along the avenues (the main ones in Rio's wave mosaic); edge lines.
       if (e.rank <= 4 && !e.bridge) {
         const mat = e.rank <= 2 ? mosaicMat : walkMat;
@@ -813,7 +832,7 @@ export class City {
       }
       // Center line on two-way streets wide enough for one: double solid yellow on the avenues,
       // dashed on the rest; dashed white lane lines on the wide ones (two or three lanes each way).
-      if (e.hw >= 6 && !e.bridge) {
+      if (e.hw >= 6) {
         if (e.rank <= 3) for (const o of [-0.2, 0.2]) this.batch(ribbon(mid, o - 0.07, o + 0.07, 0.06, 4), yellow, false);
         else dashAlong(mid, 0, 10, dashes);
         if (e.hw >= 8) {

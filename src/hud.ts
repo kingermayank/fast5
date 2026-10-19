@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Input } from './input';
-import { MAP, points, RAW } from './roadmap';
+import { BOUNDS, BRIDGE, BRIDGE_RUN, MAP, points, RAW, RUN_ON } from './roadmap';
 import type { RiveUi } from './riveui';
 
 export interface HudState {
@@ -53,7 +53,8 @@ const MAP_SIZE = 200;
 
 /** The whole street map drawn once (north-up in game coordinates); the radar rotates it. */
 const BASE = (() => {
-  const box = new THREE.Box3().setFromPoints(MAP.nodes.map((n) => n.pos)).expandByScalar(200);
+  // The map's own extent: the bridge's run-on is drawn live (it goes on for kilometres).
+  const box = BOUNDS.clone().expandByScalar(200);
   const canvas = document.createElement('canvas');
   canvas.width = Math.ceil((box.max.x - box.min.x) * MAP_SCALE);
   canvas.height = Math.ceil((box.max.z - box.min.z) * MAP_SCALE);
@@ -81,6 +82,7 @@ const BASE = (() => {
   ctx.strokeStyle = 'rgba(200,205,215,0.5)';
   ctx.lineCap = ctx.lineJoin = 'round';
   for (const e of [...MAP.edges].sort((a, b) => b.hw - a.hw)) {
+    if (e.id === RUN_ON?.edge) continue;
     ctx.lineWidth = Math.max(2, e.hw * 2 * MAP_SCALE);
     ctx.strokeStyle = e.rank <= 2 ? 'rgba(225,215,185,0.6)' : 'rgba(200,205,215,0.45)';
     ctx.beginPath();
@@ -461,9 +463,20 @@ export class Hud {
     const b = -sin;
     const cc = sin;
     const d = -cos;
+    // Open water off the edge of the drawn map, where the bridge runs on.
+    ctx.fillStyle = 'rgba(20,48,70,0.9)';
+    ctx.fillRect(0, 0, MAP_SIZE, MAP_SIZE);
     ctx.setTransform(a, b, cc, d, c - (a * px + cc * pz), c - (b * px + d * pz));
     ctx.drawImage(BASE.canvas, 0, 0);
     ctx.restore();
+    if (RUN_ON) {
+      ctx.strokeStyle = 'rgba(225,215,185,0.6)';
+      ctx.lineWidth = Math.max(2, BRIDGE.hw * 2 * MAP_SCALE);
+      ctx.beginPath();
+      ctx.moveTo(...toMap(RUN_ON.from));
+      ctx.lineTo(...toMap(RUN_ON.from.clone().addScaledVector(RUN_ON.dir, BRIDGE_RUN)));
+      ctx.stroke();
+    }
 
     // The GPS route.
     if (s.route.length) {

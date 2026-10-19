@@ -112,8 +112,10 @@ burnout. If the crew still gets nowhere for a few seconds, it's lined back up on
 3. **Don't get boxed in:** if cops pin you at low speed, the BUSTED meter fills (a tip tells you
    how to break out).
 4. **Bridge:** Mia's route runs down Ponce de León, left onto the Piñero expressway, through the
-   tunnel and the toll plaza and onto the Moscoso bridge. The police have walled off the far end with
-   two rows of cruisers, and more are coming up behind. Partway across your partner calls it: too
+   tunnel and the toll plaza and onto the Moscoso bridge. The police have walled it off ahead with
+   two rows of cruisers, and more are coming up behind. The bridge never ends: past where the real
+   one lands it runs straight on across the bay into the haze, so the fight always has deck to
+   run on. Partway across your partner calls it: too
    many, you have to split up. They unhook, spin round and lead the pack away, and you're left with
    the vault stopped dead on one cable: hold **Shift** for nitrous to fill the SOLO PULL meter and get
    it rolling (gas alone won't do it). Then the wall comes at you head-on, and Reyes's black SUVs
