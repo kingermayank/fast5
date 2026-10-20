@@ -6,6 +6,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { NIGHT } from './look';
+import { reportProblem } from './problems';
 import { leftOf } from './roads';
 import { RUN_ON } from './roadmap';
 import { installStreetLight, STREET_LIGHT, StreetLight } from './streetlight';
@@ -57,6 +58,25 @@ const TiltShiftShader = {
         total += w;
       }
       gl_FragColor = sum / total;
+    }`,
+};
+
+/**
+ * Scrubs the frame before bloom: anything not a number becomes black. One NaN
+ * pixel (a GPU's pow() of a negative, say) would otherwise be blurred by the
+ * bloom into every pixel and black out the whole screen. max(0, x) is 0 for a
+ * NaN under both the GLSL and the IEEE readings of max (keep the 0 first).
+ */
+const ScrubShader = {
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    varying vec2 vUv;
+    void main() {
+      gl_FragColor = min(vec4(60000.0), max(vec4(0.0), texture2D(tDiffuse, vUv)));
     }`,
 };
 
@@ -113,6 +133,12 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   STREET_LIGHT.gain.value = NIGHT ? 5 : 1.5;
   const lightFocus = new THREE.Vector3();
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  // A shader this GPU won't compile, or the GPU dropping the page, says so on screen.
+  renderer.debug.onShaderError = (gl, program, vertex, fragment) => {
+    const log = gl.getProgramInfoLog(program) || gl.getShaderInfoLog(fragment) || gl.getShaderInfoLog(vertex) || 'no log';
+    reportProblem(`A shader failed to compile on this graphics card: ${log.trim().slice(0, 240)}`);
+  };
+  canvas.addEventListener('webglcontextlost', () => reportProblem('The graphics card stopped the game (WebGL context lost). Reload the page to try again.'));
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -172,6 +198,7 @@ export function createGraphics(canvas: HTMLCanvasElement): Graphics {
   const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(new ShaderPass(ScrubShader));
   // Lamps, headlights, strobes, shop neon and sparks glow; sunlit walls don't. At night more
   // of the frame is light sources, and they bloom wider in the wet air.
   const bloom = NIGHT ? new UnrealBloomPass(new THREE.Vector2(256, 256), 0.9, 0.6, 1.2) : new UnrealBloomPass(new THREE.Vector2(256, 256), 0.78, 0.55, 1.75);

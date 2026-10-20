@@ -35,6 +35,7 @@ import { Run } from './run';
 import { Traffic } from './traffic';
 import { BusCrossing } from './bus';
 import { Pedestrians } from './pedestrians';
+import { watchForProblems } from './problems';
 import { Rain } from './rain';
 import { TunnelSwap } from './tunnel';
 import { Cable, CABLE_TOW_LENGTH, Vault } from './vault';
@@ -107,6 +108,7 @@ function floodlit(statue: THREE.Group): void {
 }
 
 async function start(): Promise<void> {
+  watchForProblems();
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const gfx = createGraphics(canvas);
   const { scene, camera } = gfx;

@@ -202,7 +202,9 @@ class Shafts {
         varying vec3 vColor;
         void main() {
           float facing = abs(dot(normalize(vN), normalize(vV)));
-          float fade = pow(1.0 - vAlong, 1.4) * smoothstep(0.0, 0.05, vAlong);
+          // Clamped: interpolation can carry it a hair past 1, and pow() of a negative is NaN on a GPU.
+          float along = clamp(vAlong, 0.0, 1.0);
+          float fade = pow(1.0 - along, 1.4) * smoothstep(0.0, 0.05, along);
           gl_FragColor = vec4(vColor * facing * facing * fade, 1.0);
         }`,
       transparent: true,

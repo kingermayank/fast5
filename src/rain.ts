@@ -83,7 +83,8 @@ export class Rain {
           // Wide enough to cover a pixel or so however far off.
           vec3 toCamera = cameraPosition - p;
           float width = max(0.03, length(toCamera) * 0.0008);
-          p += normalize(cross(dir, toCamera)) * corner.x * width;
+          vec3 side = cross(dir, toCamera);
+          p += side / max(length(side), 1e-4) * corner.x * width;
           vAlong = corner.y;
           vLight = 0.02 + streetLightAt(head) * 0.08;
           gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
