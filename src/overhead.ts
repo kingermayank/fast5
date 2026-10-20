@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GOAL, MAP, PLAN } from './roadmap';
+import { MAP, PLAN, RAW } from './roadmap';
 
 /**
  * Bird's-eye camera for the chase: high and angled rather than straight down,
@@ -48,7 +48,9 @@ function gridBearing(): number {
 export const OVERHEAD_YAW = (() => {
   const grid = gridBearing();
   const from = PLAN[0].pos;
-  const want = Math.atan2(GOAL.pos.x - from.x, GOAL.pos.z - from.z);
+  // Toward the middle of the bridge (where the data's route ends).
+  const to = MAP.node(RAW.poi.goal).pos;
+  const want = Math.atan2(to.x - from.x, to.z - from.z);
   let best = grid;
   for (let k = 1; k < 4; k++) {
     const yaw = grid + (k * Math.PI) / 2;

@@ -187,7 +187,7 @@ export class Chopper {
 
   /**
    * `away` is the camera's view direction along the ground: the helicopter stays out that way.
-   * `lost`: it can't see the target (it's in the tunnel), so the searchlight goes off till it's out.
+   * `lost`: it can't see the target (it's under the overpass), so the searchlight goes off till it's out.
    */
   update(dt: number, target: THREE.Vector3, targetVel: THREE.Vector3, away: THREE.Vector3, lost = false): void {
     if (!this.active || dt <= 0) return;

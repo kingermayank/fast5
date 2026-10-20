@@ -455,12 +455,58 @@ export function waterNormalTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+/**
+ * Precast concrete panels, as on an overpass's retaining walls: a stacked grid of
+ * 1.5 m squares (4 x 4 per repeat, 6 m square) with dark recessed joints, each panel
+ * its own shade, and grime run down from the joints by the rain.
+ */
+export function retainingWallTexture(): THREE.CanvasTexture {
+  return canvasTexture(512, 512, (ctx) => {
+    const P = 128;
+    let s = 909;
+    const rand = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        const v = 168 + Math.floor(rand() * 26);
+        ctx.fillStyle = `rgb(${v},${v - 4},${v - 11})`;
+        ctx.fillRect(i * P, j * P, P, P);
+        // A faint bevel: lit along the top edge, shaded along the bottom.
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.fillRect(i * P + 4, j * P + 4, P - 8, 5);
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        ctx.fillRect(i * P + 4, j * P + P - 9, P - 8, 5);
+      }
+    }
+    noise(ctx, 512, 512, 9000, 0.07);
+    // Streaks of grime down from the joints.
+    for (let k = 0; k < 70; k++) {
+      const x = Math.floor(rand() * 4) * P + 6 + rand() * (P - 12);
+      const y = Math.floor(rand() * 4) * P + 4;
+      const len = 20 + rand() * 90;
+      const g = ctx.createLinearGradient(0, y, 0, y + len);
+      g.addColorStop(0, `rgba(40,36,30,${0.1 + rand() * 0.18})`);
+      g.addColorStop(1, 'rgba(40,36,30,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, 2 + rand() * 5, len);
+    }
+    // The joints.
+    ctx.fillStyle = 'rgba(28,26,22,0.85)';
+    for (let i = 0; i <= 4; i++) {
+      ctx.fillRect(i * P - 2, 0, 4, 512);
+      ctx.fillRect(0, i * P - 2, 512, 4);
+    }
+  });
+}
+
 export function signTexture(text: string, bg: string, fg: string): THREE.CanvasTexture {
   return canvasTexture(512, 96, (ctx) => {
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, 512, 96);
     ctx.fillStyle = fg;
-    ctx.font = 'bold 64px sans-serif';
+    // As big as fits.
+    let size = 64;
+    ctx.font = `bold ${size}px sans-serif`;
+    while (size > 24 && ctx.measureText(text).width > 480) ctx.font = `bold ${(size -= 4)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, 256, 52);

@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import type { MomentContext } from './moments';
 import type { Cop } from './police';
-import { BANK, inTunnel, onBridge, SPIKES } from './roadmap';
+import { BANK, nearOverpass, onBridge, SPIKES } from './roadmap';
 import { CAUGHT_GROUPS, Vehicle, type VehicleSpec } from './vehicle';
 
 /*
  * Han and Roman in two police cars that aren't police cars: halfway through the
  * city they come up behind the convoy, slot into the pack and ram real cruisers
  * off the road from inside it, laughing on the radio, then peel off to get to the
- * tunnel ahead of everyone. They pass straight through the crew and the vault (they
+ * overpass ahead of everyone. They pass straight through the crew and the vault (they
  * know where not to be); green markers and minimap blips say which two they are.
  */
 
@@ -48,7 +48,7 @@ export class Allies {
   state: 'waiting' | 'riding' | 'leaving' | 'gone' = 'waiting';
   readonly cars: Ally[] = [];
   private time = 0;
-  /** Set by the game: whether they can still come (only on the way to the tunnel, before the swap). */
+  /** Set by the game: whether they can still come (only on the way to the overpass, before the swap). */
   allowed: () => boolean = () => true;
   private lastLine = -10;
   private lines = { ROMAN: 0, HAN: 0 };
@@ -70,9 +70,9 @@ export class Allies {
       const past = SPIKES.toLocal(player.position).z > 40;
       const busy = police.cops.filter((c) => !c.wrecked && c.v.position.distanceTo(player.position) < 110).length >= 2;
       const p = player.position;
-      const clear = p.distanceTo(BANK.corner) > 260 && !inTunnel(p, 320) && !onBridge(p);
+      const clear = p.distanceTo(BANK.corner) > 260 && !nearOverpass(p, 320) && !onBridge(p);
       if (((past && busy) || (chaseTime > 75 && busy)) && clear && this.allowed()) this.arrive();
-      // Too late for them: they went straight to the tunnel.
+      // Too late for them: they went straight to the overpass.
       if (!this.allowed()) this.state = 'gone';
       return;
     }
@@ -89,11 +89,11 @@ export class Allies {
       }
     }
     const done = this.cars.reduce((n, a) => n + a.takedowns, 0);
-    const nearBank = player.position.distanceTo(BANK.corner) < 200 || inTunnel(player.position, 260);
+    const nearBank = player.position.distanceTo(BANK.corner) < 200 || nearOverpass(player.position, 260);
     if (this.state === 'riding' && (this.time > RIDE || done >= MAX_TAKEDOWNS || nearBank)) {
       this.state = 'leaving';
       this.time = 0;
-      say(ctx, 'HAN', 'That’s our exit. We’ll see you in the tunnel.');
+      say(ctx, 'HAN', 'That’s our exit. See you under the Barbosa overpass.');
     }
     if (this.state === 'leaving' && this.time > 6) {
       for (const a of this.cars) {

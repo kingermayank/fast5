@@ -258,6 +258,74 @@ export class RoadMap {
   }
 }
 
+// ----------------------------------------------------- the Barbosa overpass
+
+/** Length of a polyline. */
+const lineLength = (pts: THREE.Vector3[]) => pts.reduce((s, p, i) => (i ? s + p.distanceTo(pts[i - 1]) : 0), 0);
+
+/** A polyline's first `s` m (with the cut point at its end). */
+function lineHead(pts: THREE.Vector3[], s: number): THREE.Vector3[] {
+  const out = [pts[0].clone()];
+  for (let i = 1; i < pts.length; i++) {
+    const len = pts[i].distanceTo(pts[i - 1]);
+    if (s <= len) {
+      out.push(pts[i - 1].clone().lerp(pts[i], s / Math.max(1e-6, len)));
+      return out;
+    }
+    s -= len;
+    out.push(pts[i].clone());
+  }
+  return out;
+}
+
+/** The deck's top and the underside of its girders (m up), and how far out from the expressway's middle each ramp touches down (m). */
+export const OVERPASS_TOP = 7.75;
+export const OVERPASS_CLEAR = 6.4;
+const RAMP_OUT = 135;
+
+/**
+ * Where Mia's route crosses Avenida Dr. José Celso Barbosa (PR-27), the avenue goes
+ * over the Piñero expressway on a bridge. The map build makes every crossing a
+ * junction, so this one is taken apart again before anything is built from the data:
+ * the avenue's dead-end stub north of the expressway goes, and the road south of it
+ * now starts where the ramp up to the bridge comes down (city.ts builds the bridge
+ * and its ramps over them). Returns the crossing and the line each ramp follows, out
+ * from the crossing, `RAMP_OUT` m long.
+ */
+const BARBOSA = (function cut(raw: RawMap) {
+  const node = raw.poi.plan.find((id) => raw.edges.some((e) => (e.a === id || e.b === id) && /Celso Barbosa/.test(e.n)));
+  if (node === undefined) return null;
+  const crossing = new THREE.Vector3(raw.nodes[node * 2], 0, raw.nodes[node * 2 + 1]);
+  const degree = (id: number) => raw.edges.filter((e) => e.a === id || e.b === id).length;
+  const ramps: THREE.Vector3[][] = [];
+  for (const e of raw.edges.filter((x) => (x.a === node || x.b === node) && x.r > 1)) {
+    // Its line out from the crossing, without the little jogs a simplified polyline has (under 12 m).
+    const raw0 = points(e.p);
+    if (e.a !== node) raw0.reverse();
+    const line = raw0.filter((p, i) => i === 0 || i === raw0.length - 1 || p.distanceTo(raw0[0]) > 12 && raw0.slice(0, i).every((q) => q.distanceTo(p) > 12));
+    const far = e.a === node ? e.b : e.a;
+    const len = lineLength(line);
+    ramps.push(lineHead(line, Math.min(RAMP_OUT, len)));
+    if (degree(far) === 1 && len < RAMP_OUT + 60) {
+      // A stub that only ever led to this crossing: gone.
+      raw.edges.splice(raw.edges.indexOf(e), 1);
+      continue;
+    }
+    // The rest starts at the ramp's foot.
+    const rest = lineHead([...line].reverse(), len - RAMP_OUT);
+    raw.nodes.push(rest[rest.length - 1].x, rest[rest.length - 1].z);
+    const foot = raw.nodes.length / 2 - 1;
+    if (e.a === node) {
+      e.a = foot;
+      e.p = rest.reverse().flatMap((p) => [p.x, p.z]);
+    } else {
+      e.b = foot;
+      e.p = rest.flatMap((p) => [p.x, p.z]);
+    }
+  }
+  return { node, crossing, ramps };
+})(RAW);
+
 // ----------------------------------------------------- the bridge runs on
 
 /** The map's own extent (its streets, without the bridge's run-on below): for the minimap and the water. */
@@ -313,17 +381,20 @@ export const RUN_ON = (function runOn(raw: RawMap) {
       return kept.flatMap((q) => [q.x, q.z]);
     }),
   );
-  return { from: end, dir, edge };
+  return { from: end, dir, edge, node: endId };
 })(RAW);
 
 export const MAP = new RoadMap(RAW);
 
 // ------------------------------------------------------------- set pieces
 
-/** The swap point on the bridge, and the bridge's city end. */
-export const GOAL = MAP.node(RAW.poi.goal);
+/**
+ * The goal: the far end of the real bridge, where its run-on begins (the fight on the
+ * bridge happens short of it, heading back toward the city). The bridge's city end.
+ */
+export const GOAL = MAP.node(RUN_ON?.node ?? RAW.poi.goal);
 export const BRIDGE_FOOT = MAP.node(RAW.poi.foot);
-/** Mia's planned route: intersections from the station to the swap point. */
+/** Mia's planned route: intersections from the station to partway across the bridge (the GPS carries on from there to the goal). */
 export const PLAN = RAW.poi.plan.map((id) => MAP.node(id));
 
 /** The bridge deck as one path from its foot, and how far along it the swap point is. */
@@ -392,38 +463,71 @@ export const BANK = (() => {
 })();
 
 /**
- * The tunnel on the expressway between the bank and the bridge, where Roman and
- * Han swap the real vault for the decoy: a frame at its entrance (x across, left
- * of forward; z along it), its length, the road's half-width in it, and the road
- * it's on (from the bank's corner). It's centred on the first long straight past
- * the bank, well clear of the corner.
+ * The Barbosa overpass, where the swap happens: the avenue's bridge over the Piñero
+ * expressway, past the bank on the way to the Moscoso bridge. A frame at the
+ * crossing (z along the expressway the way the route runs, x across, left of it);
+ * the expressway's half-width there and its centre line through the crossing (from
+ * the bank's corner on to the bridge's foot); the deck's half-width along the
+ * expressway; how far either side of the crossing its abutment walls stand; and the
+ * line each of the avenue's ramps follows, out from the crossing.
  */
-export const TUNNEL = (() => {
-  const k = PLAN.findIndex((n) => n.pos.distanceTo(BANK.corner) < 5);
-  const edge = MAP.between(PLAN[k], PLAN[k + 1])!;
-  const pts = MAP.from(edge, PLAN[k]);
-  let along = 0;
-  let pick = pts.length - 2;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const len = pts[i].distanceTo(pts[i + 1]);
-    if (along >= 250 && len >= 180) {
-      pick = i;
-      break;
-    }
-    along += len;
-  }
-  const a = pts[pick];
-  const b = pts[pick + 1];
-  const run = a.distanceTo(b);
-  const length = Math.min(150, run - 40);
-  const dir = b.clone().sub(a).normalize();
-  return { frame: frame(a.clone().addScaledVector(dir, (run - length) / 2), dir), length, hw: edge.hw, road: pts };
+export const OVERPASS = (() => {
+  const k = PLAN.findIndex((n) => n.id === BARBOSA?.node);
+  if (!BARBOSA || k < 1) throw new Error('the Barbosa overpass is not on the route');
+  const n = PLAN[k];
+  const before = MAP.from(MAP.between(PLAN[k - 1], n)!, PLAN[k - 1]);
+  const after = MAP.from(MAP.between(n, PLAN[k + 1])!, n);
+  const road = [...before, ...after.slice(1)];
+  const dir = after[Math.min(2, after.length - 1)].clone().sub(before[Math.max(0, before.length - 3)]).setY(0).normalize();
+  const hw = Math.max(...n.edges.map((e) => e.hw));
+  return {
+    frame: frame(n.pos, dir),
+    hw,
+    road,
+    /** The deck carries the avenue's four lanes and two sidewalks (to the outside of its parapets). */
+    deckHalf: 10.4,
+    /** The avenue's half-width on the deck and the ramps: its lanes, and to the outside of the parapets. */
+    laneHalf: 8,
+    abut: hw + 3.5,
+    ramps: BARBOSA.ramps,
+  };
 })();
 
-/** Inside the tunnel (with `margin` m to spare all round). */
-export function inTunnel(p: THREE.Vector3, margin = 0): boolean {
-  const l = TUNNEL.frame.toLocal(p);
-  return l.z > -margin && l.z < TUNNEL.length + margin && Math.abs(l.x) < TUNNEL.hw + margin;
+/** How high the avenue is `s` m out from the crossing along either ramp: the deck's top over the expressway and a little past it, then an even grade down to the ground at the foot. */
+export function rampHeight(s: number): number {
+  const s0 = OVERPASS.abut + 5;
+  const u = THREE.MathUtils.clamp((s - s0) / (RAMP_OUT - s0), 0, 1);
+  // The grade eases in and out over the first and last fifth.
+  const a = 0.2;
+  const done = u < a ? (u * u) / (2 * a) : u < 1 - a ? a / 2 + (u - a) : 1 - a - (1 - u) ** 2 / (2 * a);
+  return OVERPASS_TOP * (1 - done / (1 - a));
+}
+
+/** Distance from p to segment ab, on the ground. */
+function segDistance(p: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3): number {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const l2 = dx * dx + dz * dz;
+  const t = l2 < 1e-9 ? 0 : THREE.MathUtils.clamp(((p.x - a.x) * dx + (p.z - a.z) * dz) / l2, 0, 1);
+  return Math.hypot(a.x + dx * t - p.x, a.z + dz * t - p.z);
+}
+
+/** Within `margin` m of the overpass's structure: under its deck, or on or beside either ramp (for keeping props and trees off it). */
+export function onOverpass(p: THREE.Vector3, margin = 0): boolean {
+  if (underOverpass(p, margin)) return true;
+  return OVERPASS.ramps.some((line) => line.some((q, i) => i < line.length - 1 && segDistance(p, q, line[i + 1]) < OVERPASS.deckHalf + margin));
+}
+
+/** Under the overpass's deck (with `margin` m to spare all round), between its abutments. */
+export function underOverpass(p: THREE.Vector3, margin = 0): boolean {
+  const l = OVERPASS.frame.toLocal(p);
+  return Math.abs(l.z) < OVERPASS.deckHalf + margin && Math.abs(l.x) < OVERPASS.abut + margin;
+}
+
+/** On the expressway within `margin` m of the overpass (for keeping the other set pieces away from it). */
+export function nearOverpass(p: THREE.Vector3, margin = 0): boolean {
+  const l = OVERPASS.frame.toLocal(p);
+  return Math.abs(l.z) < OVERPASS.deckHalf + margin && Math.abs(l.x) < OVERPASS.hw + margin;
 }
 
 /** Where the cops lay the spike strip: on Mia's route, facing the way she sends you. */

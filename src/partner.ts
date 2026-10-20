@@ -70,6 +70,7 @@ export class PartnerDriver {
   released = false;
   /** Gone to lead the cops away (the bridge finale): it drives back down this road to its start. */
   private leaving: Path | null = null;
+  private leaveDir = 1;
   private trail: THREE.Vector3[] = [];
   private beside = SPACING;
   private behind = 0;
@@ -93,9 +94,10 @@ export class PartnerDriver {
     return this.trail;
   }
 
-  /** Cut loose and sent back along `path` (toward its start) to draw the cops off. */
-  leave(path: Path): void {
+  /** Cut loose and sent away along `path`: on along it (`dir` 1, the way the split goes in the film), or back toward its start (-1). */
+  leave(path: Path, dir = 1): void {
     this.leaving = path;
+    this.leaveDir = dir;
     this.released = true;
   }
 
@@ -185,12 +187,12 @@ export class PartnerDriver {
   private driveAway(dt: number, me: Vehicle, path: Path): void {
     this.thoughts.mode = 'released';
     const s = path.project(me.position);
-    if (s < 40) {
+    if (s < 40 || s > path.length - 40) {
       me.follow(dt, new THREE.Vector3(), me.heading);
       return;
     }
-    const dir = path.at(s - 25).sub(me.position).setY(0).normalize();
-    me.follow(dt, dir.clone().multiplyScalar(24), Math.atan2(dir.x, dir.z));
+    const dir = path.at(s + this.leaveDir * 25).sub(me.position).setY(0).normalize();
+    me.follow(dt, dir.clone().multiplyScalar(30), Math.atan2(dir.x, dir.z));
   }
 
   /** Distance to the nearest wall (fixed geometry) from `at` along `dir`, up to a few meters past the spacing. */

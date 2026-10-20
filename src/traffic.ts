@@ -3,7 +3,7 @@ import { angleTo } from './ai';
 import { City } from './city';
 import { RAPIER } from './physics';
 import { offsetLine, Path } from './roads';
-import { BANK, inTunnel, MAP, type MapEdge, type MapNode, SPIKES } from './roadmap';
+import { BANK, MAP, nearOverpass, type MapEdge, type MapNode, SPIKES } from './roadmap';
 import { Vehicle, type VehicleSpec } from './vehicle';
 
 /**
@@ -204,7 +204,7 @@ export class Traffic {
       const at = lane.at(s);
       // Mostly where the chase is heading.
       if (at.clone().sub(player).normalize().dot(fwd) < -0.3 && Math.random() < 0.7) continue;
-      if (at.distanceTo(player) < SPAWN_MIN || this.visible(at) || inTunnel(at, 30)) continue;
+      if (at.distanceTo(player) < SPAWN_MIN || this.visible(at) || nearOverpass(at, 30)) continue;
       if (this.cars.some((c) => c.v.position.distanceTo(at) < 14)) continue;
       const t = lane.tangent(s);
       const color = COLORS[Math.floor(Math.random() * COLORS.length)];

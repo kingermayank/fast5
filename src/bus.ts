@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { CarModel } from './carModel';
 import { RAPIER } from './physics';
 import { leftOf, Path } from './roads';
-import { BANK, inTunnel, MAP, type MapEdge, type MapNode, PLAN, SPIKES } from './roadmap';
+import { BANK, MAP, nearOverpass, type MapEdge, type MapNode, PLAN, SPIKES } from './roadmap';
 import { Vehicle, type VehicleSpec } from './vehicle';
 
 /*
@@ -133,7 +133,7 @@ function pickCrossing(): Crossing | null {
     const node = PLAN[k];
     travelled += node.pos.distanceTo(PLAN[k - 1].pos);
     if (travelled < 450) continue;
-    if (node.pos.distanceTo(BANK.corner) < 220 || inTunnel(node.pos, 320) || node.pos.distanceTo(spikes) < 160) continue;
+    if (node.pos.distanceTo(BANK.corner) < 220 || nearOverpass(node.pos, 320) || node.pos.distanceTo(spikes) < 160) continue;
     const route = new Set<MapEdge | null>([MAP.between(PLAN[k - 1], node), MAP.between(node, PLAN[k + 1])]);
     const away = (e: MapEdge) => {
       const pts = MAP.from(e, node);

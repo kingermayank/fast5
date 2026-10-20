@@ -11,8 +11,8 @@ import type { Vault } from './vault';
 import { Vehicle, type VehicleSpec } from './vehicle';
 
 /*
- * Reyes's convoy on the bridge: two black SUVs that come up behind the lone car,
- * ride alongside it, and have gunmen standing up through the sunroofs. Swing the
+ * Reyes's convoy on the bridge: two black SUVs that come through the cops head-on at
+ * the lone car, swing round and ride alongside it, and have gunmen standing up through the sunroofs. Swing the
  * vault into one and it's wrecked (over the rail if it's near enough); swing it
  * into Reyes's and the finale takes over.
  */
@@ -220,7 +220,7 @@ export class Reyes {
     return this.suvs.find((s) => s.boss && !s.wrecked) ?? null;
   }
 
-  /** Both SUVs come up the bridge behind the player, `back` m behind, fast. */
+  /** Both SUVs come out along the bridge from `back` m toward the city of the player (head-on, after the split's turn), fast. */
   arrive(path: Path, player: Vehicle, back = 80): void {
     const s0 = path.project(player.position);
     for (const [i, side] of [1, -1].entries()) {

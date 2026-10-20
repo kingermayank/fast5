@@ -463,3 +463,35 @@ export class Cable {
     this.world.removeImpulseJoint(this.joint, true);
   }
 }
+
+/**
+ * A loose length of cable, drawn as a tube through three points and redrawn as it
+ * moves (a hook dragged along the road, a cable flung off its latch), with the hook
+ * on its end.
+ */
+export class CableLine {
+  readonly mesh: THREE.Mesh;
+  readonly hook: THREE.Mesh;
+
+  constructor(scene: THREE.Scene, radius = 0.045) {
+    this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.7, roughness: 0.4 }));
+    this.mesh.castShadow = true;
+    this.mesh.userData.radius = radius;
+    this.hook = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.34), new THREE.MeshStandardMaterial({ color: 0x55585c, metalness: 0.85, roughness: 0.35 }));
+    this.mesh.visible = this.hook.visible = false;
+    scene.add(this.mesh, this.hook);
+  }
+
+  /** From `a` through (near) `mid` to the hook at `b`, the hook turned to `heading`. */
+  draw(a: THREE.Vector3, mid: THREE.Vector3, b: THREE.Vector3, heading = 0): void {
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, mid, b), 10, this.mesh.userData.radius, 5, false);
+    this.hook.position.copy(b);
+    this.hook.rotation.set(0, heading, 0);
+    this.mesh.visible = this.hook.visible = true;
+  }
+
+  hide(): void {
+    this.mesh.visible = this.hook.visible = false;
+  }
+}

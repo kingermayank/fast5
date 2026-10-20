@@ -60,8 +60,8 @@ a weapon.
 long bridge over the bay, with Sugarloaf behind. Reyes and his men join in black SUVs and a
 pickup, grinning, with a huge pack of police behind them. On the radio, Dom decides there are
 too many and fires a remote release: the latch on Brian's cable pops in a spray of sparks and
-Brian peels away, furious. Dom, alone, throws the car through a 180 so it faces the pack
-nose-on. He does a burnout and flips three nitrous switches, each with a green light. A
+Brian, cut free, drives on across the bridge, furious (the pack doesn't follow him: it's the vault
+they want). Dom, alone, throws the car through a 180 past the vault so it faces the pack nose-on. He does a burnout and flips three nitrous switches, each with a green light. A
 pressure gauge reads, he presses the button, and the car launches with its front wheels in
 the air, dragging the stopped vault.
 
@@ -100,11 +100,11 @@ scatters around the world.
 | 4 The pull | STRAIN meter, slow-motion burst-out | Covered |
 | 5 Breakout | The vault flies out into the street | Missing the **bollards and stone wall** it smashes on the way out |
 | 6 City chase | GPS and Mia, police waves, spike strip, roadblocks, the bank, swing takedowns, wreck cams, news, helicopter | Mostly covered. Missing: **cops shooting from windows**, **cars flipping and cartwheeling**, **bike cops**, **Han and Roman's fake cruisers** |
-| 7 Bridge, the split | Partner calls the split, unhooks, leads the pack away; solo nitrous pull | Covered. Thin: the **latch popping in sparks**, the **nitrous switches**, the **wheelie launch** |
+| 7 Bridge, the split | Partner calls the split, unhooks, leads the pack away; solo nitrous pull | Wrong: in the film **Dom** makes the call and pops **Brian's latch**; Brian **goes on across the bridge**, no cops follow; Dom **turns 180 to face the pack** behind them. Thin: the **latch popping in sparks**, the **nitrous switches**, the **wheelie launch** |
 | 7 Bridge, Reyes | Not in the game | Missing: **Reyes's SUVs** |
 | 8 Wrecking ball | A static two-row blockade to smash | Missing: the **head-on charge**, the **flail**, **cruisers into the bay**, **sunroof gunners**, the **last swing** onto Reyes |
 | 9 Showdown | Not in the game | Missing: **Hobbs arrives**, the **head start** |
-| 10 Reveal | Text on the end screen | Thin: the swap is in the game (the tunnel), but no **empty vault** on screen. The swap itself stops dead; the film's is a **rolling** swap into a **garbage truck**, with a **tarp** and a **cop driving past** |
+| 10 Reveal | Text on the end screen | Thin: the swap is in the game (in a made-up tunnel), but no **empty vault** on screen. The film's swap is **under an overpass**, into a **parked garbage truck**, with the decoy **under a tarp** and a **cop driving past** |
 | 11 Epilogue | Not in the game | Missing: **payday**, the real vault opened and the money pouring out |
 
 ## Part three: game design
@@ -114,24 +114,33 @@ The rule is that every film beat becomes something the player does, then a cinem
 payoff. The film's own shot choices (low cameras, long lenses, slow motion at the moment of
 impact) are the language for the payoffs.
 
-### The rolling swap (replaces the stop-and-swap)
-- **Telegraph.** Mia calls the tunnel. Inside, a city garbage truck (our own livery) is rolling
-  ahead with its hopper raised and the ramp down, sparks off the ramp's lip. Gisele drives;
-  Tej rides the back step waving them in. Han drops the gate behind the convoy so no cop sees.
-- **Action.** Thread the needle: line the vault up with the ramp, matching the truck's speed.
-  A guide on the road shows the line, and a LINE-UP meter reads how centred and how matched
-  you are. The partner takes the far side of the truck.
-- **Payoff.** Slow motion as the cars straddle the truck and the vault rides up the ramp into
-  the hopper. The cables pop off in sparks and the hopper slams down like a jaw. Tej flicks
-  the hooks onto the decoy waiting ahead under a tarp. The cables snap tight, the decoy jerks
-  into motion and the tarp flies off it. The convoy bursts out into the daylight with the decoy.
+### The swap under the overpass (replaces the stop-and-swap)
+Where it happens matters: the film's swap is under a road overpass on the way to the bridge, so
+the game's is under a real one on Mia's route. In the map data, Avenida Dr. José Celso Barbosa
+(PR-27) crosses the Piñero expressway on a bridge (OpenStreetMap tags it `bridge=yes`, `layer=1`)
+about 900 m past the bank. The map build had flattened that crossing into a junction; the game
+takes it apart again and builds the overpass: a deck on girders between panelled abutments, the
+avenue's ramps down either side, lamps, floodlights under the deck, the avenue's name on the
+fascia. (An earlier version put the swap in a made-up 150 m tunnel, with its roof cut away from
+overhead; there is no tunnel there.)
+- **Telegraph.** Mia calls the Barbosa overpass. Under the deck, Gisele's garbage truck (our own
+  livery) is parked in the right-hand lanes with its hopper raised and the ramp down; Tej rides the
+  back step waving them in; the decoy waits in front of the truck under a tarp, Han and Roman
+  beside it.
+- **Action.** Thread the needle: line the vault up with the ramp. A guide on the road shows the
+  line, and a LINE-UP meter reads how centred you are.
+- **Payoff.** One take, as the film cuts it: riding on top of the vault up to the hopper's open
+  mouth with a car either side; the vault rides up the ramp, Tej pulls the pins as it goes in and
+  the hopper comes down on it; the cars roll on past the truck dragging the hooks, sparking; Han
+  and Roman clip them onto the decoy, the cables snap tight, the decoy jerks out from under its
+  tarp, and the convoy pulls it out from under the deck into the rain.
 - **Consequence.** A clean line-up earns a bonus. A sloppy one still goes in, because there is
-  no fail here. Behind them, the cops come through the gate and drive straight past the
-  parked garbage truck while Tej leans on it and waves. Keep that on screen for a beat.
+  no fail here. Behind them, cruisers come under the overpass and drive straight past the parked
+  garbage truck, its back under a tarp now, while Tej waves. Keep that on screen for a beat.
 
 ### The wrecking ball (the bridge climax)
-- After the solo pull, the wall of cruisers at the far end **starts its engines and comes at
-  you**, with Reyes's two black SUVs behind it.
+- After the solo pull, the pack that pulled up in a line across the deck **starts its engines and
+  comes at you** head-on, with Reyes's two black SUVs coming through it.
 - **The flail.** On one cable, steering hard plus the handbrake whips the vault out across the
   lanes. A cruiser it hits in the finale is thrown much harder. Hit near the rail, it goes
   **over the side into the bay** in slow motion with a splash, and that is the news headline.
@@ -160,11 +169,19 @@ impact) are the language for the payoffs.
   spinning.
 - **Han and Roman.** Two cruisers that aren't what they seem join the pack behind you. They
   ram real cops off the road for half a minute, laughing on the radio, then peel off: "see
-  you at the tunnel".
+  you at the overpass".
 - **Bike cops** (next): fast, fragile riders that weave through traffic; the vault sweeps them.
 
 ### The split and the solo pull
-- **The latch.** A close shot of the partner's cable latch popping in a spray of sparks.
+- **The call.** Not the partner's: the player's character makes it, as Dom does. On the radio,
+  the pack's lights behind them, too many to drag ten tons through; then a remote release.
+- **The latch.** A close shot of the partner's cable latch popping in a spray of sparks; the loose
+  cable whips and sparks behind the partner's car as it leaps away, and reels in.
+- **Brian goes on.** The partner, cut free and furious, drives on across the bridge alone. No cops
+  follow (an earlier version had the partner spin round and lead the pack away: not in the film).
+- **The turn.** The player's car brakes hard, swings round through 180 degrees past the sliding
+  vault, drags it round, and stops facing the pack, which pulls up in a line across the deck. The
+  bridge splits the crew up a kilometre out, so the fight back toward the city has the deck.
 - **Switches and wheelie.** The first press of Shift in the solo pull flips three switches on
   the dash, one at a time with a green light and a click, and lights the button. When the
   vault lurches free, the nose lifts in a wheelie.
@@ -185,4 +202,6 @@ impact) are the language for the payoffs.
 | People on the route's corners who stare, scatter and dive clear (never hit) | built |
 | A city bus pulling across a crossing, passengers turning to watch; NEAR MISS round its tail | built |
 | A bridge that never ends: past the real one's landing it runs on 10 km across the bay into the haze, so the fight never reaches water | built |
+| The swap under the real Barbosa overpass (taken apart from a junction, deck, ramps, abutments), the truck parked, Tej's pins, Han and Roman hooking the decoy, the drive-by | built |
+| The split as the film has it: the player pops the partner's latch, the partner goes on alone, the 180 to face the pack, the pack pulling up in a line; the fight heads back toward the city; the partner returns from the far end, Hobbs from the city | built |
 | The garage break-in (the film goes in underground; ours is at street level) | later |

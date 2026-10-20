@@ -43,7 +43,7 @@ export function buildFigure(look: FigureLook): Figure {
   const suit = new THREE.MeshStandardMaterial({ color: look.suit, roughness: 0.75 });
   const skin = new THREE.MeshStandardMaterial({ color: look.skin, roughness: 0.6 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x1b1b1d, roughness: 0.8 });
-  // Reflective tape catches the light (a little emissive so it shows in the tunnel's gloom).
+  // Reflective tape catches the light (a little emissive so it shows in the gloom under the overpass).
   const tape = new THREE.MeshStandardMaterial({ color: 0xd8dde0, roughness: 0.3, metalness: 0.5, emissive: 0x6a6e70, emissiveIntensity: 0.6 });
   const mesh = (g: THREE.BufferGeometry, m: THREE.Material, parent: THREE.Object3D) => {
     const x = new THREE.Mesh(g, m);
@@ -122,4 +122,12 @@ export function cheer(f: Figure, t: number): void {
 /** Beckoning someone on: one arm sweeping forward and back, `t` seconds in. */
 export function beckon(f: Figure, t: number): void {
   f.armR.rotation.set(-1.2 - 0.9 * (0.5 + 0.5 * Math.sin(t * 6)), 0, -0.2);
+}
+
+/** Bent forward with both hands out low, catching something (`k` 0..1, how far into it). */
+export function reach(f: Figure, k: number): void {
+  f.upper.rotation.set(0.55 * k, 0, 0);
+  f.armL.rotation.set(-1.1 * k, 0, 0.15 * k);
+  f.armR.rotation.set(-1.1 * k, 0, -0.15 * k);
+  f.group.position.y = -0.08 * k;
 }

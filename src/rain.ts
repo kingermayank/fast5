@@ -11,7 +11,7 @@ const uniforms = {
   origin: { value: new THREE.Vector3() },
   box: { value: BOX },
   fall: { value: FALL },
-  /** 0 with the rain off (in the tunnel), 1 in the open. */
+  /** 0 with the rain off (under the overpass), 1 in the open. */
   amount: { value: 1 },
   streetLightMap: STREET_LIGHT.map,
   streetLightCenter: STREET_LIGHT.center,
@@ -43,7 +43,7 @@ export class Rain {
     this.group.add(this.streaks(streaks), this.splashes(splashes));
   }
 
-  /** Keep the rain round `focus`; `inside` (the tunnel) turns it off. */
+  /** Keep the rain round `focus`; `inside` (under the overpass) turns it off. */
   update(dt: number, focus: THREE.Vector3, inside: boolean): void {
     uniforms.time.value += dt;
     uniforms.origin.value.copy(focus);

@@ -137,7 +137,8 @@ export class Finale {
     const room = (q: THREE.Vector3) => BRIDGE.hw - Math.abs(deckX(mid.clone().addScaledVector(q, 10)));
     this.side = room(first) > 1 || room(first) >= room(second) ? first : second;
     this.vaultEnd = { pos: rest.setY(1.27), q: yaw(Math.atan2(this.door.x, this.door.z)) };
-    this.partnerStop = { pos: land.clone().addScaledVector(this.along, -14).addScaledVector(this.across, this.sideToCentre() * 6), q: yaw(heading + 1.1) };
+    // The partner comes back from the far end, where the split sent them, and slides to a stop short of the wreck.
+    this.partnerStop = { pos: land.clone().addScaledVector(this.along, 14).addScaledVector(this.across, this.sideToCentre() * 6), q: yaw(heading + Math.PI - 1.1) };
   }
 
   /** Which way is the middle of the deck from the wreck (+1: left). */
@@ -180,17 +181,17 @@ export class Finale {
         ],
       },
       {
-        // Back down the bridge: the partner comes flat out and slides to a stop beside the wreck.
+        // Looking on across the bridge, the way they went: the partner comes back flat out and slides to a stop beside the wreck.
         duration: 3.2,
         update: (_t, dt) => tick(dt),
-        camera: () => ({ pos: deck(4, 3, 2.0), look: deck(-30, 3, 0.8), fov: 44 }),
+        camera: () => ({ pos: deck(-4, 3, 2.0), look: deck(30, 3, 0.8), fov: 44 }),
         lines: [[1.9, other, 'Miss me?']],
       },
       {
-        // Low up the bridge, looking back at the wreck: Hobbs's truck comes past, cruisers either side.
+        // Low on the deck toward the city, looking at the wreck: Hobbs's truck comes past, cruisers either side.
         duration: 3.8,
         update: (_t, dt) => tick(dt),
-        camera: () => ({ pos: deck(40, -4.5, 1.6), look: deck(0, 0, 1.5), fov: 40 }),
+        camera: () => ({ pos: deck(-40, -4.5, 1.6), look: deck(0, 0, 1.5), fov: 40 }),
         lines: [[1.6, 'HOBBS', 'Reyes is mine. He’s not walking away from this one.']],
       },
       {
@@ -205,10 +206,10 @@ export class Finale {
         ],
       },
       {
-        // High and wide, looking back toward the city: they drive off the way they came.
+        // High and wide, looking on across the bridge: they drive off away from the city and Hobbs.
         duration: 3.0,
         update: (_t, dt) => tick(dt),
-        camera: (k) => ({ pos: deck(8, 13, 10 + k * 3), look: deck(-25 - k * 30, 0, 0.5), fov: 50 }),
+        camera: (k) => ({ pos: deck(-8, 13, 10 + k * 3), look: deck(25 + k * 30, 0, 0.5), fov: 50 }),
         lines: [[0.5, 'MIA', 'Go. Get out of there.']],
       },
       {
@@ -300,10 +301,10 @@ export class Finale {
       suv: boss ? pose(boss.v) : { pos: this.site.clone().setY(0.7), q: yaw(0) },
       car: pose(player),
       vault: pose(vault),
-      partner: { pos: this.site.clone().addScaledVector(this.along, -150).addScaledVector(this.across, this.sideToCentre() * 6), q: yaw(Math.atan2(this.along.x, this.along.z)) },
+      partner: { pos: this.site.clone().addScaledVector(this.along, 150).addScaledVector(this.across, this.sideToCentre() * 6), q: yaw(Math.atan2(-this.along.x, -this.along.z)) },
     };
     if (boss) boss.gunner.group.visible = false;
-    // Hobbs and two cruisers wait out of sight up the bridge.
+    // Hobbs and two cruisers wait out of sight back toward the city.
     this.ctx.scene.add(this.hobbs);
     this.hobbs.visible = false;
     for (let i = 0; i < 2; i++) this.escort.push(propCar(this.ctx.scene, true));
@@ -362,17 +363,17 @@ export class Finale {
     player.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     // 3. Smoke off the pile.
     if (t > 4.2 && Math.random() < dt * 6) fx.puff(this.carEnd.pos.clone().setY(1.5), 1);
-    // 4. The partner flat out up the bridge (from 7.6 s), sliding to a stop by 10.4 s.
+    // 4. The partner flat out back across the bridge (from 7.6 s), sliding to a stop by 10.4 s.
     const pk = THREE.MathUtils.clamp((t - 7.6) / 2.8, 0, 1);
     const pStart = st.partner;
     const pPos = pStart.pos.clone().lerp(this.partnerStop.pos, 1 - (1 - pk) ** 2.2);
     const pQ = pStart.q.clone().slerp(this.partnerStop.q, ease(THREE.MathUtils.clamp((pk - 0.6) / 0.4, 0, 1)));
-    // 7. ...and away back down the bridge, toward the city, at the end (from 18.2 s).
+    // 7. ...and away across the bridge, away from the city, at the end (from 18.2 s).
     const gk = THREE.MathUtils.clamp((t - 18.2) / 3, 0, 1);
     if (gk > 0) {
-      const h = Math.atan2(-this.along.x, -this.along.z);
-      const pos = this.partnerStop.pos.clone().addScaledVector(this.along, -70 * gk * gk);
-      partner.place(pos, h + (1.1 - Math.PI) * (1 - ease(Math.min(1, gk * 3))));
+      const h = Math.atan2(this.along.x, this.along.z);
+      const pos = this.partnerStop.pos.clone().addScaledVector(this.along, 70 * gk * gk);
+      partner.place(pos, h + (Math.PI - 1.1) * (1 - ease(Math.min(1, gk * 3))));
     } else {
       partner.place(pPos, 0);
       partner.body.setRotation({ x: pQ.x, y: pQ.y, z: pQ.z, w: pQ.w }, true);
@@ -381,12 +382,12 @@ export class Finale {
     if (pk > 0.55 && pk < 0.98) for (const w of partner.rearWheels()) if (Math.random() < 0.6) fx.tireSmoke(w, 0.9);
     if (pk > 0.55) this.event('skid', () => sound.tires(0.9, false));
     if (pk >= 1) this.event('skidEnd', () => sound.tires(0, false));
-    // 5. Hobbs's truck and two cruisers up the bridge head-on (from 10.6 s), stopping by 13.4 s.
+    // 5. Hobbs's truck and two cruisers out from the city (from 10.6 s), stopping by 13.4 s.
     const hk = THREE.MathUtils.clamp((t - 10.6) / 2.8, 0, 1);
     if (hk > 0) {
-      const h = Math.atan2(-this.along.x, -this.along.z);
-      const from = 70;
-      const stopAt = 17;
+      const h = Math.atan2(this.along.x, this.along.z);
+      const from = -70;
+      const stopAt = -17;
       const a = from + (stopAt - from) * (1 - (1 - hk) ** 2);
       this.hobbs.visible = true;
       this.hobbs.position.copy(this.site).addScaledVector(this.along, a).addScaledVector(this.across, -this.sideToCentre() * 1);
@@ -396,7 +397,7 @@ export class Finale {
       this.escort.forEach((e, i) => {
         e.group.visible = true;
         const x = THREE.MathUtils.clamp(siteX + (i ? 1 : -1) * 6.5, -BRIDGE.hw + 2.2, BRIDGE.hw - 2.2);
-        e.group.position.copy(this.site).addScaledVector(this.along, a + 6 + i * 2).addScaledVector(this.across, x - siteX);
+        e.group.position.copy(this.site).addScaledVector(this.along, a - 6 - i * 2).addScaledVector(this.across, x - siteX);
         e.group.rotation.y = h + (i ? 0.25 : -0.25) * hk;
         const flash = Math.floor(t * 6) % 2 === 0;
         if (e.lightBar) {

@@ -94,7 +94,7 @@ burnout. If the crew still gets nowhere for a few seconds, it's lined back up on
    turn to throw the vault into the lobby). See [`docs/MOMENTS.md`](docs/MOMENTS.md) for all set pieces.
 2. **Chase:** get to the bridge by any road. The GPS (arrow, minimap line and gold chevrons on
    the road) shows Mia's route, which passes the set pieces, and reroutes the moment you take
-   another street; columns of light mark the bank, the tunnel and the swap point. Swing the vault into cop
+   another street; columns of light mark the bank, the swap under the overpass and the far end of the bridge. Swing the vault into cop
    cars to wreck them (handbrake, then let the vault fly wide): a swing that connects is worth
    extra and now and then gets a slow-motion replay, wrecks in quick succession are streaks worth
    more, and every wreck refills nitrous. Watch for civilian traffic. Heat rises with time and destruction, and the news follows.
@@ -106,26 +106,29 @@ burnout. If the crew still gets nowhere for a few seconds, it's lined back up on
    one touch of the vault throws the rider clear (BIKE DOWN). At one crossing a city bus pulls out
    across your path: go round its tail for a NEAR MISS. People on the corners scatter as you come
    through, café tables and parasols go flying, and bus shelters lose their glass.
-   **The swap:** past the bank, the expressway dives into a tunnel. Han drops the gate behind you,
-   and Gisele's garbage truck rolls ahead with its hopper up and its ramp down: in slow motion, line
-   the vault up with the ramp (the LINE UP meter and the line on the road). Then the cars straddle the
-   truck, the vault rides up into it, and your trailing hooks catch the decoy waiting under a tarp
-   further on (a cutscene; Enter skips it). From there you're dragging an empty safe, and the cops
-   come through the gate after it, straight past the garbage truck.
+   **The swap:** past the bank, the expressway runs under the Barbosa overpass (the real one, where
+   Avenida Barbosa crosses the Piñero expressway on a bridge). Gisele's garbage truck is parked under
+   the deck with its hopper up and its ramp down: in slow motion, line the vault up with the ramp (the
+   LINE UP meter and the line on the road). Then the cars straddle the truck, the vault rides up into
+   it, Tej pulls the pins and the hopper comes down; Han and Roman clip the dragged hooks onto the
+   decoy waiting under a tarp in front of the truck, and you pull it out into the rain (a cutscene;
+   Enter skips it). From there you're dragging an empty safe, and the cops come under the overpass
+   after it and race straight past the garbage truck.
 3. **Don't get boxed in:** if cops pin you at low speed, the BUSTED meter fills (a tip tells you
    how to break out).
-4. **Bridge:** Mia's route runs down Ponce de León, left onto the Piñero expressway, through the
-   tunnel and the toll plaza and onto the Moscoso bridge. The police have walled it off ahead with
-   two rows of cruisers, and more are coming up behind. The bridge never ends: past where the real
-   one lands it runs straight on across the bay into the haze, so the fight always has deck to
-   run on. Partway across your partner calls it: too
-   many, you have to split up. They unhook, spin round and lead the pack away, and you're left with
-   the vault stopped dead on one cable: hold **Shift** for nitrous to fill the SOLO PULL meter and get
-   it rolling (gas alone won't do it). Then the wall comes at you head-on, and Reyes's black SUVs
-   come up behind with gunmen in the sunroofs. **Space** is a flail now: it throws the vault at
+4. **Bridge:** Mia's route runs down Ponce de León, left onto the Piñero expressway, under the
+   Barbosa overpass, through the toll plaza and onto the Moscoso bridge, with every cop in the city
+   behind you. The bridge never ends: past where the real one lands it runs straight on across the
+   bay into the haze. A kilometre out it's too many to drag ten tons through, and (as in the film)
+   your character makes the call: a remote release pops the latch on your partner's cable in a spray
+   of sparks, and your partner, cut loose, goes on across the bridge alone. You throw the car round
+   through 180 degrees past the vault to face the pack, which pulls up in a line across the deck.
+   The vault's stopped dead on one cable: hold **Shift** for nitrous to fill the SOLO PULL meter and
+   get it rolling (gas alone won't do it). Then the line comes at you head-on, and Reyes's black SUVs
+   come through it with gunmen in the sunroofs. **Space** is a flail now: it throws the vault at
    whatever's nearest (Reyes first). Cruisers you hit near the rail go into the bay. Swing it into
-   Reyes's SUV (the red marker) for the last scene: Hobbs, a day's head start, and what's really in
-   that safe.
+   Reyes's SUV (the red marker) for the last scene: your partner back, Hobbs, a day's head start, and
+   what's really in that safe.
 5. **Rank:** the end screen grades the run (S, A, B or C) on style, takedowns, damage, time and
    challenges, and shows your best. The first runs coach you through the controls; every run starts
    by listing its three challenges.
@@ -157,7 +160,7 @@ Debug URL flags: `?crew=dom|brian` skips the menu and cutscene (add `&intro` to 
 `?view=chase` starts behind the car instead of overhead, `?dusk` plays it at golden hour instead of a rainy night,
 `?autopilot` follows the GPS (`?autopilot=detour` disobeys it at random intersections to test
 rerouting, `?autopilot=wander` turns at random), `?nocops` disables police, `?at=bank`, `?at=tunnel`,
-`?at=bridge` and `?at=split` start the chase short of the bank, short of the tunnel, at the foot of
+`?at=bridge` and `?at=split` start the chase short of the bank, short of the overpass (the swap), at the foot of
 the bridge, and just short of where the crew splits up (the last two with the swap done), `?at=fight` drops you into the fight on the
 bridge as the vault rolls free (the swap done, the partner gone), `?at=finale` straight to the last
 swing and the closing scene, `?bikes` makes the first police a pair of motorbikes, `?roadblock`
@@ -191,14 +194,14 @@ sent into the bay, `reyes`, `allies`, `lastScene`, `policeHeld`), the street lif
 - `src/roadmap.ts`: the map (`src/map/sanjuan.json`): street graph, "where am I on the road" queries, set-piece frames
 - `src/roads.ts`: the street network as the AI sees it (lanes along curved streets, intersections, route turns, bend speeds)
 - `src/gps.ts`: GTA-style navigation: shortest route over the street graph, live rerouting
-- `src/moments.ts`: the set pieces (The Pull, Spike Strip, Bank Job, roadblocks, the bridge finale: the split, the solo pull, the head-on fight and the flail)
-- `src/tunnel.ts`: the rolling swap in the tunnel (the line-up, the gate, the garbage truck, the decoy under its tarp, the cutscene and the drive-by)
+- `src/moments.ts`: the set pieces (The Pull, Spike Strip, Bank Job, roadblocks, the bridge finale: the split (the latch, the turn to face the pack), the solo pull, the head-on fight and the flail)
+- `src/swap.ts`: the swap under the Barbosa overpass (the line-up, the parked garbage truck, the pins, the decoy under its tarp, the cutscene and the drive-by)
 - `src/garbageTruck.ts`: the swap truck (hopper on rams, ramp, beacons; a made-up city livery)
 - `src/reyes.ts`: Reyes's SUVs on the bridge (driving alongside, the gunmen and their fire, being hit by the vault)
 - `src/finale.ts`: the last scene (the last swing, Hobbs, the head start, the empty vault, payday in the hideout)
 - `src/allies.ts`: Roman and Han's fake police cars that ram real ones mid-chase
 - `src/overboard.ts`: cars thrown over the bridge rail into the bay
-- `src/people.ts`: the little crew figures (overalls, poses: wave, beckon, cheer)
+- `src/people.ts`: the little crew figures (overalls, poses: wave, beckon, cheer, reach)
 - `src/bikes.ts`: the police motorbikes (model, rider, the rider thrown clear and sitting up)
 - `src/pedestrians.ts`: people on the route's corners who stare, scatter and dive (drawn instanced)
 - `src/bus.ts`: the city bus that pulls across a crossing on the route, passengers watching
@@ -218,7 +221,7 @@ sent into the bay, `reyes`, `allies`, `lastScene`, `policeHeld`), the street lif
 - `src/city.ts`: the city from the map: streets with Rio wave-mosaic sidewalks, lane lines, stop lines,
   turn arrows and working traffic lights; real buildings (tiled pitched roofs on the houses, balconies,
   shop awnings, rooftop tanks, penthouses, pools and masts), parks, police HQ with breakable wall, the bank,
-  props (palms, lamps, benches, bins, kiosks, parked cars), the expressway tunnel, the bridge and toll plaza,
+  props (palms, lamps, benches, bins, kiosks, parked cars), the Barbosa overpass and its ramps, the bridge and toll plaza,
   seawalls, the distant city
 - `src/architecture.ts`: building parts from footprints (pitched roofs, parapets, balconies, awnings)
 - `src/vegetation.ts`: soft rounded trees in Rio's colours, shrubs and palms

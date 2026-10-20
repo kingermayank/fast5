@@ -81,9 +81,11 @@ function shortestRoute(start: MapNode, via: MapEdge, ahead: number): { nodes: Ma
   const states = new Map<string, State>();
   const open = new Set<string>();
   const behind = MAP.other(via, start);
+  // The street we're on costs what it would anywhere else on the route (Mia's streets are cheaper).
+  const per = PLANNED.has(via) ? PLAN_DISCOUNT : (RANK_COST[via.rank] ?? 1);
   for (const [s0, c0] of [
-    [{ node: start, edge: via }, ahead],
-    [{ node: behind, edge: via }, Math.max(0, via.length - ahead) + U_TURN_COST],
+    [{ node: start, edge: via }, ahead * per],
+    [{ node: behind, edge: via }, Math.max(0, via.length - ahead) * per + U_TURN_COST],
   ] as const) {
     if (c0 >= (cost.get(key(s0)) ?? Infinity)) continue;
     cost.set(key(s0), c0);

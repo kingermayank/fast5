@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { inTunnel, MAP, type MapNode, PLAN } from './roadmap';
+import { MAP, type MapNode, nearOverpass, PLAN } from './roadmap';
 
 /*
  * People on the corners of the busy crossings along Mia's route. They stand about and
@@ -65,7 +65,7 @@ export class Pedestrians {
     };
     // Corners of the route's crossings, a few people to each.
     for (const node of PLAN) {
-      if (node.edges.length < 3 || inTunnel(node.pos, 40)) continue;
+      if (node.edges.length < 3 || nearOverpass(node.pos, 40)) continue;
       for (const c of this.corners(node)) {
         if (rand() < 0.35) continue;
         const n = 2 + Math.floor(rand() * 4);

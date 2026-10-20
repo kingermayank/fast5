@@ -6,11 +6,11 @@ import { STREET_GROUPS } from './vehicle';
 import { seeThrough } from './cutaway';
 import { RAPIER, syncMesh } from './physics';
 import { mirrorsLamps } from './streetlight';
-import { BANK, BOUNDS, BRIDGE, GOAL, inTunnel, MAP, type MapEdge, PLAN, points, RAW, TUNNEL } from './roadmap';
+import { BANK, BOUNDS, BRIDGE, GOAL, MAP, type MapEdge, onOverpass, OVERPASS, OVERPASS_CLEAR, OVERPASS_TOP, PLAN, points, rampHeight, RAW } from './roadmap';
 import { leftOf } from './roads';
 import {
-  arrowTexture, asphaltTexture, asphaltTextures, asphaltWetTexture, awningTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, helipadTexture, mosaicTexture, roofTexture, sidewalkTexture, signTexture,
-  storefrontTexture, tileTexture, waterNormalTexture,
+  arrowTexture, asphaltTexture, asphaltTextures, asphaltWetTexture, awningTexture, type FacadeStyle, facadeTextures, grassTexture, groundTexture, helipadTexture, mosaicTexture, retainingWallTexture, roofTexture,
+  sidewalkTexture, signTexture, storefrontTexture, tileTexture, waterNormalTexture,
 } from './textures';
 import { palmGeometry, palmMaterials, Trees } from './vegetation';
 
@@ -205,7 +205,7 @@ function flatPolygon(outer: THREE.Vector3[], holes: THREE.Vector3[][], y: number
   return geo;
 }
 
-/** Strip along a polyline from lateral offset `from` to `to` (left positive), at height y. UVs: across/along in meters / uvScale, or world xz. */
+/** Strip along a polyline from lateral offset `from` to `to` (left positive), `y` above its points. UVs: across/along in meters / uvScale, or world xz. */
 function ribbon(pts: THREE.Vector3[], from: number, to: number, y: number, uvScale: number, worldUV = false): THREE.BufferGeometry {
   const pos: number[] = [];
   const uv: number[] = [];
@@ -239,7 +239,7 @@ function ribbon(pts: THREE.Vector3[], from: number, to: number, y: number, uvSca
       [from, along[i]], [from, along[i + 1]], [to, along[i + 1]], [from, along[i]], [to, along[i + 1]], [to, along[i]],
     ];
     quad.forEach((p, k) => {
-      pos.push(p.x, y, p.z);
+      pos.push(p.x, p.y + y, p.z);
       if (worldUV) uv.push(p.x / uvScale, p.z / uvScale);
       else uv.push(quv[k][0] / uvScale, quv[k][1] / uvScale);
     });
@@ -367,6 +367,10 @@ export class City {
   /** Seen from above and, behind the car, from underneath. */
   private awningMat = new THREE.MeshStandardMaterial({ map: awningTexture(), roughness: 0.85, side: THREE.DoubleSide });
   private concreteMat = new THREE.MeshStandardMaterial({ color: 0xbdb5a8, roughness: 0.9 });
+  /** Lamp heads on the overpass: bright enough to bloom, like the street lamps'. */
+  private lampHeadMat = new THREE.MeshStandardMaterial({ color: 0xfff6d8, emissive: 0xffd58a, emissiveIntensity: 4.5 });
+  /** The street surfaces (buildRoads makes them), for the overpass's deck and ramps. */
+  private streetMats!: { asphalt: THREE.Material; walk: THREE.Material; curb: THREE.Material; white: THREE.Material; yellow: THREE.Material };
   /** Static geometry collected per material and chunk, merged into one mesh each at the end. */
   private batches = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[]; cast: boolean }>();
   private water!: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshPhysicalMaterial>;
@@ -399,7 +403,7 @@ export class City {
     this.buildStation();
     this.buildBank();
     this.buildBridge();
-    this.buildTunnel();
+    this.buildOverpass();
     this.buildWalls();
     this.buildLamps();
     this.buildProps();
@@ -740,7 +744,7 @@ export class City {
       for (let n = Math.min(90, Math.floor(area / 170)); n > 0 && trees.length < 3500; n--) {
         const x = box.min.x + this.rand() * (box.max.x - box.min.x);
         const z = box.min.z + this.rand() * (box.max.z - box.min.z);
-        if (pointInPoly(x, z, poly) && !MAP.onRoad(new THREE.Vector3(x, 0, z), 2)) trees.push(new THREE.Vector3(x, 0, z));
+        if (pointInPoly(x, z, poly) && !MAP.onRoad(new THREE.Vector3(x, 0, z), 2) && !onOverpass(new THREE.Vector3(x, 0, z), 4)) trees.push(new THREE.Vector3(x, 0, z));
       }
     }
     for (const p of trees) {
@@ -749,7 +753,7 @@ export class City {
       for (let k = this.rand() < 0.5 ? 1 + Math.floor(this.rand() * 2) : 0; k > 0; k--) {
         const a = this.rand() * Math.PI * 2;
         const q = p.clone().add(new THREE.Vector3(Math.cos(a), 0, Math.sin(a)).multiplyScalar(3 + this.rand() * 3));
-        if (!MAP.onRoad(q, 1.5)) this.trees.shrub(q, 0.22 + this.rand() * 0.14);
+        if (!MAP.onRoad(q, 1.5) && !onOverpass(q, 2)) this.trees.shrub(q, 0.22 + this.rand() * 0.14);
       }
     }
   }
@@ -795,6 +799,7 @@ export class City {
     const curbMat = new THREE.MeshStandardMaterial({ color: 0xcfc8bb, roughness: 0.8 });
     const white = new THREE.MeshStandardMaterial({ color: 0xe9e9e4, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
     const yellow = new THREE.MeshStandardMaterial({ color: 0xe8c94a, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+    this.streetMats = { asphalt: asphaltMat, walk: walkMat, curb: curbMat, white, yellow };
 
     /** How far from a node its streets' markings and sidewalks stop (the intersection box). */
     const clear = (n: (typeof MAP.nodes)[number], except: MapEdge) => Math.max(0, ...n.edges.filter((e) => e !== except).map((e) => e.hw)) + 1.5;
@@ -1167,7 +1172,7 @@ export class City {
           const t = MAP.tangentAt(e, s);
           const l = leftOf(t).multiplyScalar(side);
           const curb = p.clone().addScaledVector(l, e.hw + (important ? 1.2 : 0.8));
-          if (MAP.onRoad(curb, 0.5) || this.inBuilding(curb.x, curb.z, 0.8) || inTunnel(curb, 8) || this.nearLamp(curb)) continue;
+          if (MAP.onRoad(curb, 0.5) || this.inBuilding(curb.x, curb.z, 0.8) || onOverpass(curb, 3) || this.nearLamp(curb)) continue;
           const out = { along: t, out: l };
           const roll = this.rand();
           // (The lamps are in rows of their own: see buildLamps.)
@@ -1248,7 +1253,7 @@ export class City {
         const t = MAP.tangentAt(e, s);
         const l = leftOf(t).multiplyScalar(side);
         const curb = p.clone().addScaledVector(l, e.hw + (e.rank <= 4 ? 1.2 : 0.8));
-        if (MAP.onRoad(curb, 0.5) || this.inBuilding(curb.x, curb.z, 0.8) || inTunnel(curb, 8)) continue;
+        if (MAP.onRoad(curb, 0.5) || this.inBuilding(curb.x, curb.z, 0.8) || onOverpass(curb, 3)) continue;
         this.addLightPost(curb, { out: l });
         this.lampSpots.add(`${Math.round(curb.x / 4)},${Math.round(curb.z / 4)}`);
       }
@@ -1336,7 +1341,7 @@ export class City {
       return new THREE.Vector3(t.x, 0, t.z);
     });
     const clear = (p: THREE.Vector3) =>
-      !MAP.onRoad(p, 1.6) && !this.inBuilding(p.x, p.z, 1.1) && !inTunnel(p, 12) && p.distanceTo(BANK.corner) > 40 && taken.every((q) => q.distanceToSquared(p) > 2.4 * 2.4);
+      !MAP.onRoad(p, 1.6) && !this.inBuilding(p.x, p.z, 1.1) && !onOverpass(p, 6) && p.distanceTo(BANK.corner) > 40 && taken.every((q) => q.distanceToSquared(p) > 2.4 * 2.4);
     const spots: { at: THREE.Vector3; along: THREE.Vector3; colour: THREE.Color }[] = [];
     let cafes = 0;
     for (const s of this.cafeSpots) {
@@ -1724,99 +1729,204 @@ export class City {
     }
   }
 
-  /** Where the tunnel's sodium lamps light the road (for the pools groundfx.ts paints). */
-  readonly tunnelLamps: THREE.Vector3[] = [];
+  /** Where the overpass's lights are (for the pools groundfx.ts paints): the lamps on its deck and ramps, and the floodlights under it. */
+  readonly overpassLamps: THREE.Vector3[] = [];
 
   /**
-   * The tunnel on the expressway (TUNNEL in roadmap.ts), cut and covered: concrete
-   * walls along the curbs under a roof with a lawn and a few trees on it, banked up
-   * with grass on both sides, portals with name signs, and sodium lamps down the
-   * walls and the ceiling. The walls and the roof are solid, so the chase camera
-   * pulls in under it; from overhead the roof is cut away round the player.
+   * The Barbosa overpass (OVERPASS in roadmap.ts): the avenue's bridge over the
+   * expressway, a slab on six girders between two abutments, and its ramps, each an
+   * embankment between walls of precast panels running down to the ground. Four
+   * lanes with sidewalks and parapets all the way, lamp posts, the avenue's name on
+   * the deck's fascia both ways, floodlights on the abutments under it. The walls are
+   * solid; the ramps can be driven (an incline under the asphalt).
    */
-  private buildTunnel(): void {
-    const f = TUNNEL.frame;
-    const len = TUNNEL.length;
-    const yaw = f.heading;
-    const wallIn = TUNNEL.hw + 0.7;
-    const wallOut = wallIn + 1.2;
-    const roofTop = 7.4;
-    // Banks of earth either side, from the roof's edge down to the ground.
-    const bank = 15;
+  private buildOverpass(): void {
+    const { ramps, laneHalf, deckHalf, abut } = OVERPASS;
+    const mats = this.streetMats;
+    const panels = new THREE.MeshStandardMaterial({ map: retainingWallTexture(), roughness: 0.93 });
     const concrete = this.concreteMat;
-    const toWorld = new THREE.Matrix4().makeRotationY(yaw).setPosition(f.origin);
-    const mid = f.toWorld(0, len / 2);
-    for (const side of [-1, 1]) {
-      const c = f.toWorld(side * (wallIn + 0.6), len / 2);
-      this.fixedBox(c.x, 3.25, c.z, 0.6, 3.25, len / 2, concrete, yaw);
-    }
-    this.fixedBox(mid.x, 6.95, mid.z, wallOut, 0.45, len / 2, concrete, yaw);
+    const girderMat = new THREE.MeshStandardMaterial({ color: 0x8f8b83, roughness: 0.85 });
+    const walkOut = laneHalf + 2;
+    const STEP = 3;
+    const rail = 1.1;
 
-    // Portals: a deep header over the opening between two pilasters, and the name over the way in.
-    for (const z of [0, len]) {
-      const h = f.toWorld(0, z);
-      this.fixedBox(h.x, 7.4, h.z, wallOut + 0.4, 1.2, 0.6, concrete, yaw);
-      for (const side of [-1, 1]) {
-        const p = f.toWorld(side * (wallIn + 0.8), z);
-        this.fixedBox(p.x, 4.3, p.z, 0.8, 4.3, 0.8, concrete, yaw);
+    /** A line every STEP m along a polyline: where, how far along, which way, and left of that. */
+    const sample = (line: THREE.Vector3[]) => {
+      const out: { p: THREE.Vector3; s: number; t: THREE.Vector3; n: THREE.Vector3 }[] = [];
+      const cum = [0];
+      for (let i = 1; i < line.length; i++) cum.push(cum[i - 1] + line[i].distanceTo(line[i - 1]));
+      const total = cum[cum.length - 1];
+      const at = (s: number) => {
+        let i = 0;
+        while (i < line.length - 2 && cum[i + 1] < s) i++;
+        const k = (s - cum[i]) / Math.max(1e-6, cum[i + 1] - cum[i]);
+        return { p: line[i].clone().lerp(line[i + 1], THREE.MathUtils.clamp(k, 0, 1)), t: line[i + 1].clone().sub(line[i]).setY(0).normalize() };
+      };
+      for (let s = 0; ; s = Math.min(total, s + STEP)) {
+        const { p, t } = at(s);
+        out.push({ p, s, t, n: leftOf(t) });
+        if (s >= total) break;
       }
-      const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 1.7), new THREE.MeshBasicMaterial({ map: signTexture('TÚNEL', '#1f6b3a', '#ffffff') }));
-      const out = z === 0 ? -1 : 1;
-      sign.position.copy(f.toWorld(0, z + out * 0.62, 7.5));
-      sign.rotation.y = out < 0 ? yaw + Math.PI : yaw;
+      // Smooth the turns: each sample's way is the mean of its neighbours'.
+      for (let i = 1; i < out.length - 1; i++) {
+        out[i].t = out[i + 1].p.clone().sub(out[i - 1].p).setY(0).normalize();
+        out[i].n = leftOf(out[i].t);
+      }
+      return out;
+    };
+    type Sample = ReturnType<typeof sample>[number];
+    /** A strip over the samples between offsets `from` and `to` (left positive), `y(sample)` up. */
+    const strip = (ss: Sample[], from: number, to: number, y: (q: Sample) => number, mat: THREE.Material, uv = 4, world = false, cast = false) =>
+      this.batch(ribbon(ss.map((q) => q.p.clone().setY(y(q))), from, to, 0, uv, world), mat, cast);
+    /**
+     * An upright face along the samples at offset `x`, from `lo` to `hi` (m up), facing
+     * `side` (+1 left), mapped in meters / `uv` along and up.
+     */
+    const face = (ss: Sample[], x: number, lo: (q: Sample) => number, hi: (q: Sample) => number, side: number, mat: THREE.Material, uv = 6) => {
+      const pos: number[] = [];
+      const tex: number[] = [];
+      for (let i = 0; i < ss.length - 1; i++) {
+        const [a, b] = [ss[i], ss[i + 1]];
+        const pa = a.p.clone().addScaledVector(a.n, x);
+        const pb = b.p.clone().addScaledVector(b.n, x);
+        const quad = [
+          [pa, lo(a), a.s], [pb, lo(b), b.s], [pb, hi(b), b.s],
+          [pa, lo(a), a.s], [pb, hi(b), b.s], [pa, hi(a), a.s],
+        ] as const;
+        // Wound to face the way asked: flip if the first triangle faces the other way.
+        const ab = pb.clone().sub(pa);
+        const facing = new THREE.Vector3(ab.z, 0, -ab.x).dot(a.n) * side;
+        const order = facing >= 0 ? [0, 2, 1, 3, 5, 4] : [0, 1, 2, 3, 4, 5];
+        for (const k of order) {
+          const [p, y, s] = quad[k];
+          pos.push(p.x, y, p.z);
+          tex.push(s / uv, y / uv);
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(tex, 2));
+      geo.computeVertexNormals();
+      this.batch(geo, mat);
+    };
+    /** A fixed box collider centred at `c`, `half` its half-extents, turned to yaw `h` and pitch `pitch` (nose down positive). */
+    const solid = (c: THREE.Vector3, half: THREE.Vector3, h: number, pitch = 0) => {
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, h, 0, 'YXZ'));
+      this.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z).setTranslation(c.x, c.y, c.z).setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }).setFriction(0.6),
+        this.ground,
+      );
+    };
+    /** A lamp post on the parapet at `q`, on side `side`, its arm out over the lanes. */
+    const post = (q: Sample, side: number) => {
+      const base = q.p.clone().addScaledVector(q.n, side * (walkOut + 0.2)).setY(rampHeight(q.s) + rail);
+      const steel = new THREE.Color(0x4a4f55);
+      this.batch(tint(new THREE.CylinderGeometry(0.08, 0.13, 7.4, 7).toNonIndexed().translate(base.x, base.y + 3.7, base.z), steel), this.balconyMat);
+      const reach = 2.4;
+      const arm = new THREE.CylinderGeometry(0.06, 0.07, reach, 5).toNonIndexed();
+      arm.applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), q.n.clone().multiplyScalar(-side))));
+      arm.translate(...base.clone().addScaledVector(q.n, -side * reach / 2).setY(base.y + 7.3).toArray());
+      this.batch(tint(arm, steel), this.balconyMat);
+      const head = base.clone().addScaledVector(q.n, -side * reach).setY(base.y + 7.15);
+      this.batch(new THREE.BoxGeometry(0.5, 0.16, 0.9).translate(head.x, head.y, head.z), this.lampHeadMat);
+      this.overpassLamps.push(head);
+    };
+
+    // The deck's girders and slab, between the abutments on either side of the crossing.
+    const ends = ramps.map((line) => sample(line).find((q) => q.s >= abut)!);
+    const axis = ends[1].p.clone().sub(ends[0].p).setY(0);
+    const span = axis.length();
+    axis.normalize();
+    const yaw = Math.atan2(axis.x, axis.z);
+    const across = leftOf(axis);
+    const mid = ends[0].p.clone().lerp(ends[1].p, 0.5);
+    const slabLo = OVERPASS_CLEAR + 1;
+    for (let k = 0; k < 6; k++) {
+      const c = mid.clone().addScaledVector(across, (k - 2.5) * 3.5);
+      const g = new THREE.BoxGeometry(0.45, slabLo - OVERPASS_CLEAR, span + 1.2).translate(0, (slabLo + OVERPASS_CLEAR) / 2, 0);
+      g.applyMatrix4(new THREE.Matrix4().makeRotationY(yaw).setPosition(c.x, 0, c.z));
+      this.batch(g, girderMat);
+      // A bottom flange.
+      const fl = new THREE.BoxGeometry(0.75, 0.12, span + 1.2).translate(0, OVERPASS_CLEAR + 0.06, 0);
+      fl.applyMatrix4(new THREE.Matrix4().makeRotationY(yaw).setPosition(c.x, 0, c.z));
+      this.batch(fl, girderMat);
+    }
+    const slab = new THREE.BoxGeometry(deckHalf * 2 - 0.2, OVERPASS_TOP - slabLo, span + 1.2).translate(0, (OVERPASS_TOP + slabLo) / 2, 0);
+    slab.applyMatrix4(new THREE.Matrix4().makeRotationY(yaw).setPosition(mid.x, 0, mid.z));
+    this.batch(slab, concrete);
+    solid(mid.clone().setY(OVERPASS_TOP - 0.3), new THREE.Vector3(deckHalf - 0.2, 0.3, span / 2 + 1), yaw);
+    // The deck's fascia and parapets either side, over the expressway.
+    for (const side of [1, -1]) {
+      const c = mid.clone().addScaledVector(across, side * (deckHalf - 0.2));
+      solid(c.clone().setY(OVERPASS_TOP + rail / 2), new THREE.Vector3(0.2, rail / 2, span / 2 + 1), yaw);
+      // The avenue's name on the fascia, to the traffic coming at it on the expressway.
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(10, 1.15), new THREE.MeshBasicMaterial({ map: signTexture('AV. BARBOSA  ·  PR-27', '#1f6b3a', '#ffffff') }));
+      sign.position.copy(mid).addScaledVector(across, side * (deckHalf + 0.05)).setY(OVERPASS_CLEAR + 0.75);
+      sign.lookAt(sign.position.clone().addScaledVector(across, side));
       this.group.add(sign);
     }
 
-    // The lawn on the roof and the grass banks, in the frame's local space (x across, z along).
-    const lawn = seeThrough(new THREE.MeshStandardMaterial({ map: grassTexture(), roughness: 1 }));
-    /** A flat polygon facing `facing` (corners wound either way), mapped from above, 8 m per texture repeat. */
-    const face = (corners: number[][], facing: THREE.Vector3, mat: THREE.Material) => {
-      const [a, b, c] = corners.map((p) => new THREE.Vector3(...p));
-      const pts = b.sub(a).cross(c.sub(a)).dot(facing) < 0 ? [corners[0], ...corners.slice(1).reverse()] : corners;
-      const tris = pts.slice(1, -1).flatMap((p, i) => [pts[0], p, pts[i + 2]]);
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(tris.flat(), 3));
-      geo.setAttribute('uv', new THREE.Float32BufferAttribute(tris.flatMap((p) => [(p[0] + p[1]) / 8, p[2] / 8]), 2));
-      geo.computeVertexNormals();
-      this.batch(geo.applyMatrix4(toWorld), mat);
-    };
-    const up = new THREE.Vector3(0, 1, 0);
-    face([[-wallOut, roofTop + 0.02, 0], [wallOut, roofTop + 0.02, 0], [wallOut, roofTop + 0.02, len], [-wallOut, roofTop + 0.02, len]], up, lawn);
-    for (const side of [-1, 1]) {
-      const top = side * wallOut;
-      const foot = side * (wallOut + bank);
-      face([[top, roofTop, 0], [foot, 0.03, 0], [foot, 0.03, len], [top, roofTop, len]], up, lawn);
-      // The banks' ends: concrete retaining walls beside the portals.
-      for (const z of [0, len]) face([[top, 0, z], [top, roofTop + 1.2, z], [foot, 0, z]], new THREE.Vector3(0, 0, z === 0 ? -1 : 1), concrete);
-    }
-
-    // Sodium lamps: strips high on both walls, and two rows down the ceiling over the lanes.
-    const sodium = new THREE.MeshStandardMaterial({ color: 0x3a2410, emissive: 0xff9440, emissiveIntensity: 3.5 });
-    for (let z = 4; z < len - 2; z += 7.5) {
-      for (const side of [-1, 1]) {
-        const strip = new THREE.BoxGeometry(0.16, 0.22, 1.4).translate(side * (wallIn - 0.08), 5.6, z);
-        this.batch(strip.applyMatrix4(toWorld), sodium);
+    for (const line of ramps) {
+      const ss = sample(line);
+      const h = (q: Sample) => rampHeight(q.s);
+      const deck = ss.filter((q) => q.s <= abut + STEP);
+      const bank = ss.filter((q) => q.s >= abut - 0.01);
+      // The road: asphalt, the double yellow line, white edge and lane lines; sidewalks with a curb.
+      strip(ss, -laneHalf, laneHalf, (q) => h(q) + 0.05, mats.asphalt, 16, true);
+      for (const o of [-0.2, 0.2]) strip(ss, o - 0.07, o + 0.07, (q) => h(q) + 0.06, mats.yellow);
+      for (const side of [1, -1]) {
+        strip(ss, side * (laneHalf - 0.6) - 0.09, side * (laneHalf - 0.6) + 0.09, (q) => h(q) + 0.06, mats.white);
+        // Dashed lane line down the middle of each side.
+        for (let k = 0; k + 1 < ss.length; k += 3) strip(ss.slice(k, k + 2), side * laneHalf * 0.47 - 0.075, side * laneHalf * 0.47 + 0.075, (q) => h(q) + 0.06, mats.white);
+        const [a, b] = side > 0 ? [laneHalf, walkOut] : [-walkOut, -laneHalf];
+        strip(ss, a, b, (q) => h(q) + 0.15, mats.walk);
+        face(ss, side * laneHalf, (q) => h(q) + 0.04, (q) => h(q) + 0.15, side, mats.curb, 1);
+        // The parapet: inside face, cap, and outside (the fascia over the expressway, the panel wall down the embankment).
+        face(ss, side * walkOut, (q) => h(q) + 0.15, (q) => h(q) + rail, side, concrete, 2);
+        const [c0, c1] = side > 0 ? [walkOut, deckHalf] : [-deckHalf, -walkOut];
+        strip(ss, c0, c1, (q) => h(q) + rail, concrete, 2, false, true);
+        face(deck, side * deckHalf, () => OVERPASS_CLEAR + 0.1, (q) => h(q) + rail, -side, concrete, 2);
+        face(bank, side * deckHalf, () => 0, (q) => h(q) + rail, -side, panels);
       }
-    }
-    for (let z = 6; z < len - 4; z += 10) {
-      for (const x of [-0.45, 0.45]) {
-        const lamp = new THREE.BoxGeometry(0.4, 0.12, 2.2).translate(x * TUNNEL.hw, 6.44, z);
-        this.batch(lamp.applyMatrix4(toWorld), sodium);
-        this.tunnelLamps.push(f.toWorld(x * TUNNEL.hw, z));
+      // The abutment: the embankment's end, facing the expressway, under the girders' ends.
+      const e = ends[ramps.indexOf(line)];
+      const out = e.t.clone();
+      const ab = new THREE.BoxGeometry(deckHalf * 2, OVERPASS_CLEAR, 1.4).translate(0, OVERPASS_CLEAR / 2, 0.7);
+      ab.applyMatrix4(new THREE.Matrix4().makeRotationY(Math.atan2(out.x, out.z)).setPosition(e.p.x, 0, e.p.z));
+      // Panels on its faces, one repeat per 6 m.
+      const uvs = ab.attributes.uv as THREE.BufferAttribute;
+      for (let i = 0; i < uvs.count; i++) uvs.setXY(i, (uvs.getX(i) * deckHalf * 2) / 6, (uvs.getY(i) * OVERPASS_CLEAR) / 6);
+      this.batch(ab, panels);
+      // A seat for the girders along its top.
+      const seat = new THREE.BoxGeometry(deckHalf * 2, 0.35, 2.0).translate(0, OVERPASS_CLEAR - 0.17, 0.5);
+      seat.applyMatrix4(new THREE.Matrix4().makeRotationY(Math.atan2(out.x, out.z)).setPosition(e.p.x, 0, e.p.z));
+      this.batch(seat, concrete);
+      solid(e.p.clone().addScaledVector(out, 0.7).setY(OVERPASS_TOP / 2), new THREE.Vector3(deckHalf, OVERPASS_TOP / 2, 0.7), Math.atan2(out.x, out.z));
+      // Floodlights on its face, over the lanes, lighting the road under the deck.
+      for (const x of [-5, 5]) {
+        const lamp = e.p.clone().addScaledVector(across, x).addScaledVector(out, -0.12).setY(OVERPASS_CLEAR - 0.9);
+        this.batch(new THREE.BoxGeometry(0.9, 0.35, 0.3).translate(lamp.x, lamp.y, lamp.z), this.lampHeadMat);
+        this.overpassLamps.push(e.p.clone().addScaledVector(out, -OVERPASS.hw * 0.45).addScaledVector(across, x));
       }
-    }
-
-    // A small park on the roof, and shrubs down the banks.
-    for (let n = 0; n < 7; n++) {
-      const p = f.toWorld((this.rand() - 0.5) * 2 * (TUNNEL.hw - 2), 14 + this.rand() * (len - 28));
-      this.trees.tree(p, 0.8 + this.rand() * 0.45, roofTop);
-    }
-    for (const side of [-1, 1]) {
-      for (let n = 0; n < 6; n++) {
-        const d = 2 + this.rand() * (bank - 5);
-        const p = f.toWorld(side * (wallOut + d), 8 + this.rand() * (len - 16));
-        this.trees.shrub(p, 0.25 + this.rand() * 0.15, roofTop * (1 - d / bank));
+      // The embankment, solid: an incline under the asphalt, its walls (the parapets on top).
+      for (let i = 0; i + 1 < bank.length; i++) {
+        const [a, b] = [bank[i], bank[i + 1]];
+        const len = a.p.distanceTo(b.p);
+        if (len < 0.5) continue;
+        const dir = b.p.clone().sub(a.p).setY(0).normalize();
+        const hy = Math.atan2(dir.x, dir.z);
+        const [ha, hb] = [h(a), h(b)];
+        const pitch = Math.atan2(ha - hb, len);
+        const c = a.p.clone().lerp(b.p, 0.5);
+        solid(c.clone().setY((ha + hb) / 2 + 0.15 - 0.5), new THREE.Vector3(deckHalf - 0.4, 0.5, len / 2 + 0.25), hy, pitch);
+        for (const side of [1, -1]) {
+          const w = c.clone().addScaledVector(leftOf(dir), side * (deckHalf - 0.2));
+          const top = Math.max(ha, hb) + rail;
+          solid(w.setY(top / 2), new THREE.Vector3(0.2, top / 2, len / 2 + 0.2), hy);
+        }
       }
+      // Lamp posts down the ramp, alternating sides.
+      for (let k = 0, s = 9; s < ss[ss.length - 1].s - 6; s += 30, k++) post(ss.reduce((best, q) => (Math.abs(q.s - s) < Math.abs(best.s - s) ? q : best)), k % 2 ? 1 : -1);
     }
   }
 
