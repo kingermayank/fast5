@@ -41,6 +41,8 @@ export class Cutscene {
     videoUrl?: string,
   ) {
     hud.cinematic(true);
+    // The scene takes over the sound: nothing left over from the chase talks across it.
+    voice.stop();
     if (videoUrl) this.playVideo(videoUrl);
     else this.next();
   }
@@ -61,8 +63,14 @@ export class Cutscene {
       const key = `${this.index}:${at}`;
       if (this.time >= at && !this.spoken.has(key)) {
         this.spoken.add(key);
-        this.hud.subtitle(who, text);
-        this.voice.speak(who, text);
+        // Lines wait their turn rather than talk over each other, and each subtitle comes up as its line is said.
+        this.voice.speak(who, text, {
+          channel: who === 'MIA' ? 'radio' : 'clean',
+          maxWait: 6,
+          onStart: () => {
+            if (!this.done) this.hud.subtitle(who, text);
+          },
+        });
       }
     }
     this.shake = Math.max(0, this.shake - dt * 2.5);
@@ -76,7 +84,7 @@ export class Cutscene {
 
   skip(): void {
     if (this.done) return;
-    this.end();
+    this.end(true);
   }
 
   private next(): void {
@@ -92,9 +100,11 @@ export class Cutscene {
     shot.start?.();
   }
 
-  private end(): void {
+  /** Over: skipped (`cut`, the voice stops dead) or played out (the line being said finishes). */
+  private end(cut = false): void {
     this.done = true;
-    this.voice.stop();
+    if (cut) this.voice.stop();
+    else this.voice.settle();
     this.video?.remove();
     this.video = null;
     this.hud.titleCard('');

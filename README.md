@@ -148,8 +148,12 @@ burnout. If the crew still gets nowhere for a few seconds, it's lined back up on
 and reverses, A or RB is the handbrake, B, X or LB fire nitrous, Y cycles the camera, View/Back
 resets the convoy, Start skips and retries. It rumbles on hits.
 
-Sound and voiceover start after your first key press (browser rule). Voices use your
-browser's built-in text-to-speech.
+Sound and voiceover start after your first key press (browser rule). The dialogue is recorded in
+original voices designed for each character with ElevenLabs (not the film cast's voices), clean for
+people on screen and through a radio filter for calls; the police radio chatters in Portuguese under
+the chase (stock voices from the ElevenLabs library). A line that has no recording yet falls back to
+the browser's text-to-speech. `tools/voice/script.json` is the script; `node tools/voice/build.mjs plan`
+lists the takes and `build <dir>` turns recordings into `public/voice/` and its `lines.json`.
 
 Models are credited in [`assets-src/README.md`](assets-src/README.md) (CC BY and CC BY-NC-SA, via
 Sketchfab). `?procedural` runs with the old code-built cars instead. Map data © OpenStreetMap
@@ -188,7 +192,8 @@ sent into the bay, `reyes`, `allies`, `lastScene`, `policeHeld`), the street lif
 - `src/cutaway.ts`: dissolves buildings that would hide the player from the overhead camera
 - `src/groundfx.ts`: the city's lights for the street light map (lamp pools, headlights, strobes, the searchlight), headlight beams in the rain, contact shadows and the route on the road
 - `src/breach.ts`: the opening set piece (armored truck, station cops, cutscene shots)
-- `src/cutscene.ts`, `src/voice.ts`, `src/videos.ts`: cutscene player, voiceover, optional video cutscenes
+- `src/cutscene.ts`, `src/voice.ts`, `src/videos.ts`: cutscene player, voiceover (recorded lines, queued, over the radio or clean), optional video cutscenes
+- `src/policeradio.ts`: the police band under the chase, in Portuguese
 - `src/partner.ts`: the partner as a wingman: holds a place beside you (in from walls, single file where it's tight or a spike strip is in its lane), catches up along your trail, and is put back if wedged
 - `src/rig.ts`: keeps the inside of the rig clear: a car caught between the hero cars and the vault is thrown out of the side
 - `src/roadmap.ts`: the map (`src/map/sanjuan.json`): street graph, "where am I on the road" queries, set-piece frames

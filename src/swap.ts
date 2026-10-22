@@ -64,8 +64,7 @@ const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(b - a), Math.cos
 const rampLift = (z: number) => THREE.MathUtils.clamp((z - RAMP_FOOT) / (BODY_BACK - RAMP_FOOT), 0, 1) * FLOOR;
 
 function say(ctx: MomentContext, who: string, line: string): void {
-  ctx.hud.radio(who, line);
-  ctx.voice.speak(who, line);
+  ctx.voice.speak(who, line, { channel: 'radio', onStart: () => ctx.hud.radio(who, line) });
 }
 
 /** A tarp: a box a size up from what it covers, its sides pushed in and out a little like cloth (origin at its foot). */

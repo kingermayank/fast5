@@ -40,8 +40,7 @@ interface Ally {
 }
 
 function say(ctx: MomentContext, who: string, line: string): void {
-  ctx.hud.radio(who, line);
-  ctx.voice.speak(who, line);
+  ctx.voice.speak(who, line, { channel: 'radio', onStart: () => ctx.hud.radio(who, line) });
 }
 
 export class Allies {

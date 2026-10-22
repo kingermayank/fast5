@@ -42,6 +42,7 @@ import { Cable, CABLE_TOW_LENGTH, Vault } from './vault';
 import { Vehicle, type VehicleSpec } from './vehicle';
 import { CUTSCENE_VIDEOS } from './videos';
 import { Voice } from './voice';
+import { PoliceRadio } from './policeradio';
 
 declare const __BUILD__: string;
 document.getElementById('build')!.textContent = `San Juan map · build ${__BUILD__}`;
@@ -128,7 +129,8 @@ async function start(): Promise<void> {
   const rain = NIGHT ? new Rain() : null;
   if (rain) scene.add(rain.group);
   const sound = new Sound();
-  const voice = new Voice();
+  const voice = new Voice(sound);
+  const policeRadio = new PoliceRadio(voice);
 
   const vault = new Vault(world, VAULT_START, VAULT_START_HEADING);
   scene.add(vault.mesh);
@@ -758,7 +760,7 @@ async function start(): Promise<void> {
     enter('breach');
     breach.shooting = true;
     hud.showHud(true);
-    hud.radio('MIA', 'Floor it! Pull that vault out of there!');
+    say('MIA', 'Floor it! Pull that vault out of there!');
     pull?.start();
   }
 
@@ -846,6 +848,13 @@ async function start(): Promise<void> {
 
       gps.update(dt, player.position, travelDir());
       calloutTurn();
+      // The police band: they lose the vault under the overpass and pick the decoy up coming out; they call for help.
+      if (swap?.done) {
+        policeRadio.call('lost', 1.5);
+        policeRadio.call('found', 9);
+      }
+      if (police.wreckedCount >= 6) policeRadio.call('wrecks');
+      policeRadio.update(dt);
 
       // No getting boxed in during the fight on the bridge: it's head-on, and it's the finale.
       const pinned = !bridge?.fighting && police.closeTo(player.position, 9) >= 2 && Math.abs(player.forwardSpeed) < 4;
@@ -863,7 +872,7 @@ async function start(): Promise<void> {
         run.stats.finished = true;
         coach.stop();
         director.slowmo(0.35, 1.6);
-        hud.radio('MIA', swap?.done ? 'That’s far enough. Leave it for them. It’s empty anyway.' : 'You made it. Kill the engines.');
+        say('MIA', swap?.done ? 'That’s far enough. Leave it for them. It’s empty anyway.' : 'You made it. Kill the engines.');
         setTimeout(() => hud.news(swap?.done ? NEWS.empty : NEWS.finish), 1400);
       }
     }
@@ -914,6 +923,7 @@ async function start(): Promise<void> {
     chopper.launch(player.position.addScaledVector(up, 240).setY(75), vault.position);
     establishPending = true;
     coach.start(run.previousRuns < 2, run.challenges.map((c) => c.text));
+    policeRadio.call('start', 0.5);
   }
 
   let lastHeat = 1;
@@ -986,9 +996,9 @@ async function start(): Promise<void> {
     return [vault.body, player.body, partner.body].some((b) => b.translation().y < -1.5);
   }
 
+  /** A call on the crew's radio: its text shows as it's said. */
   function say(who: string, line: string): void {
-    hud.radio(who, line);
-    voice.speak(who, line);
+    voice.speak(who, line, { channel: 'radio', onStart: () => hud.radio(who, line) });
   }
 
   /** Direction the player is really going: their velocity when driving forward, else where they point. */
@@ -1020,6 +1030,7 @@ async function start(): Promise<void> {
     if (!bridgeCalled && gps.nodes[0] === BRIDGE_FOOT_POS && p.distanceTo(BRIDGE_FOOT_POS) < 110) {
       bridgeCalled = true;
       say('MIA', swap?.done ? 'Bridge ahead. Drag that decoy across, and make it look good.' : 'Bridge ahead. Get to the yellow gantry at the far end.');
+      policeRadio.call('bridge', 1);
       return;
     }
     const turn = gps.nextTurn(p, travelDir());
@@ -1192,6 +1203,7 @@ async function start(): Promise<void> {
     const width = Math.max(8, fix.edge.hw * 2 - 1.5);
     roadblock.set(fix.point, dir, width, THREE.MathUtils.clamp(Math.round(width / 3.6), 3, 6));
     say('MIA', 'Roadblock dead ahead! Don’t stop, smash right through it!');
+    policeRadio.call('roadblock', 0.3, 6);
   }
 
   /**

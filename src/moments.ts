@@ -59,8 +59,7 @@ export interface MomentContext {
 const v3 = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
 function say(ctx: MomentContext, who: string, line: string): void {
-  ctx.hud.radio(who, line);
-  ctx.voice.speak(who, line);
+  ctx.voice.speak(who, line, { channel: 'radio', onStart: () => ctx.hud.radio(who, line) });
 }
 
 // ---------------------------------------------------------------- The Pull

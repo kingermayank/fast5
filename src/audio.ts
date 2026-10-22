@@ -12,6 +12,7 @@ export class Sound {
   private scrape?: { gain: GainNode; filter: BiquadFilterNode };
   private screech?: { gain: GainNode; filter: BiquadFilterNode };
   private nosHiss?: GainNode;
+  private voiceBus?: GainNode;
 
   constructor() {
     const unlock = () => this.start();
@@ -38,6 +39,14 @@ export class Sound {
     this.master.gain.value = 0.6;
     const comp = ctx.createDynamicsCompressor();
     this.master.connect(comp).connect(ctx.destination);
+    // Dialogue has its own way out, levelled on its own, so ducking the mix under it leaves it alone.
+    this.voiceBus = ctx.createGain();
+    const level = ctx.createDynamicsCompressor();
+    level.threshold.value = -22;
+    level.ratio.value = 3;
+    level.attack.value = 0.005;
+    level.release.value = 0.25;
+    this.voiceBus.connect(level).connect(ctx.destination);
 
     this.noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const data = this.noise.getChannelData(0);
@@ -243,6 +252,17 @@ export class Sound {
     o.connect(g).connect(this.master);
     o.start(t);
     o.stop(t + duration + 0.05);
+  }
+
+  /** Where recorded dialogue plays (nothing until sound has started). */
+  voiceOut(): { ctx: AudioContext; bus: AudioNode } | null {
+    return this.ready && this.voiceBus ? { ctx: this.ctx!, bus: this.voiceBus } : null;
+  }
+
+  /** Pull the engines, sirens and effects down under a line of dialogue, and back up after it. */
+  duck(on: boolean): void {
+    if (!this.ready) return;
+    this.master.gain.setTargetAtTime(on ? 0.3 : 0.6, this.ctx!.currentTime, on ? 0.06 : 0.4);
   }
 
   /** Silence the continuous layers (cutscenes, menus). */
